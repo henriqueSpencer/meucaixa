@@ -6,3 +6,6 @@ dados.js
 .DS_Store
 node_modules/
 *.log
+
+# ferramenta que lê dados pessoais (base.bak)
+gerar_dados.py
