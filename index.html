@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meu Caixa — finanças pessoais</title>
+  <link rel="stylesheet" href="styles.css?v=8">
+</head>
+<body>
+  <div class="fin-root">
+    <!-- ===== sidebar ===== -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="13" r="1.2" fill="currentColor" stroke="none"/></svg>
+        </span>
+        <div>
+          <div class="brand-name">Meu Caixa</div>
+          <div class="brand-tag">finanças pessoais</div>
+        </div>
+      </div>
+
+      <button class="cta-side" data-action="open-modal">
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Nova transação
+      </button>
+
+      <nav class="nav">
+        <button class="nav-i" data-tab="dashboard">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          <span>Visão geral</span>
+        </button>
+        <button class="nav-i" data-tab="contas">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="13" r="1.1" fill="currentColor" stroke="none"/></svg>
+          <span>Contas</span>
+        </button>
+        <button class="nav-i" data-tab="transacoes">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 8 16 13"/><line x1="21" y1="8" x2="4" y2="8"/><polyline points="8 11 3 16 8 21"/><line x1="3" y1="16" x2="20" y2="16"/></svg>
+          <span>Transações</span>
+        </button>
+        <button class="nav-i" data-tab="conciliacao">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/></svg>
+          <span>Conciliação</span>
+          <span class="nav-badge" id="nav-badge">0</span>
+        </button>
+        <button class="nav-i" data-tab="categorias">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="5" height="5" rx="1"/><path d="M11 6.5h9"/><path d="M11 12h9"/><path d="M11 17.5h9"/><path d="M7 8v10h4"/><path d="M7 13.5h4"/></svg>
+          <span>Categorias</span>
+        </button>
+      </nav>
+
+      <div class="side-foot">
+        <div class="side-net">
+          <span>Patrimônio líquido</span>
+          <strong id="side-net-val">R$ 0,00</strong>
+        </div>
+        <div class="side-user">
+          <span class="avatar">H</span>
+          <div>
+            <div class="u-name">Henrique</div>
+            <div class="u-sub">conta pessoal</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== conteúdo ===== -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="pg-title">Visão geral</h1>
+          <p id="pg-sub">Como está seu dinheiro em Julho de 2026</p>
+        </div>
+        <div class="top-right">
+          <span class="pill-demo">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z"/></svg>
+            dados de exemplo
+          </span>
+          <span class="month">
+            julho 2026
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </span>
+          <button class="cta" data-action="open-modal">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nova transação
+          </button>
+        </div>
+      </header>
+
+      <div class="content" id="view"></div>
+    </main>
+  </div>
+
+  <!-- pontos de montagem de modais -->
+  <div id="modal-root"></div>
+  <div id="drill-root"></div>
+
+  <script src="dados.js?v=1"></script>
+  <script src="app.js?v=9"></script>
+</body>
+</html>

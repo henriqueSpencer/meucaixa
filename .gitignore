@@ -1,0 +1,8 @@
+# dados financeiros pessoais — NÃO versionar
+base.bak
+dados.js
+
+# sistema / temporários
+.DS_Store
+node_modules/
+*.log
