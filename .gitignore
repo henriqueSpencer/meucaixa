@@ -9,3 +9,6 @@ node_modules/
 
 # ferramenta que lê dados pessoais (base.bak)
 gerar_dados.py
+
+# prints do Orçamento Fácil (contêm dados financeiros reais)
+imagens/

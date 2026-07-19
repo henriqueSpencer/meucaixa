@@ -15,14 +15,14 @@
 
 /* ---------- 1. tokens ---------- */
 const C = {
-  receita: "#10B981",
-  despesa: "#F43F5E",
-  transfer: "#3B82F6",
-  reembolso: "#8B5CF6",
-  patrimonio: "#F59E0B",
-  brand: "#0D9488",
+  receita: "#2E9E6B",   // pinho — entra
+  despesa: "#C24A38",   // oxblood — sai
+  transfer: "#7C89A0",  // ardósia — neutro
+  reembolso: "#9070B4", // violeta discreto
+  patrimonio: "#B0863A",// latão
+  brand: "#A8823C",     // latão (acento único)
 };
-const donutPalette = ["#0D9488", "#3B82F6", "#8B5CF6", "#F59E0B", "#EF4444", "#14B8A6", "#6366F1", "#EC4899"];
+const donutPalette = ["#A8823C", "#2E9E6B", "#7C89A0", "#C24A38", "#9070B4", "#5E7D6A", "#B9A24B", "#8A6D4F"];
 
 /* dados reais do Orçamento Fácil (dados.js) — cai nos mocks se ausente */
 const OF = (typeof window !== "undefined" && window.OF_DATA) ? window.OF_DATA : null;
@@ -124,17 +124,15 @@ function txValorConta(t, nome) {
   return t.valor;
 }
 // quebra de categorias de um mês/tipo (mock: distribui o total do mês pelas proporções conhecidas)
-function drillCats(mesLabel, tipo) {
-  const m = monthly.find((x) => x.mes === mesLabel);
-  if (!m) return [];
-  if (tipo === "despesa") {
-    const soma = despesaPorCat.reduce((s, d) => s + d.valor, 0);
-    return despesaPorCat.map((d) => ({ nome: d.nome, valor: Math.round((d.valor / soma) * m.despesa) }));
-  }
-  const base = catTree.receita.filter((c) => c.total > 0);
-  const soma = base.reduce((s, c) => s + c.total, 0);
-  return base.map((c) => ({ nome: c.nome, valor: Math.round((c.total / soma) * m.receita) }))
-    .sort((a, b) => b.valor - a.valor);
+// categorias reais de um mês (ym "YYYY-MM") por tipo — receita pura / despesa líquida de reembolso
+function drillCats(ym, tipo) { return byCat(tipo, ym); }
+// resumo de TODOS os meses com dados (mais recente primeiro)
+function allMonthsSummary() {
+  return txMonths().slice().reverse().map((ym) => ({
+    ym, label: monthLabel(ym + "-01"),
+    receita: byCat("receita", ym).reduce((s, d) => s + d.valor, 0),
+    despesa: byCat("despesa", ym).reduce((s, d) => s + d.valor, 0),
+  }));
 }
 
 const TIPOS = {
@@ -155,9 +153,11 @@ const PAGE = {
 /* ---------- 3. helpers ---------- */
 const fmt = (n) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtShort = (n) => "R$ " + Math.abs(n).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+const fmtNum = (n) => Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const TODAY_ISO = "2026-07-18"; // "hoje" do protótipo (dados mock são de Jul/2026)
 const parseValor = (s) => parseFloat(String(s || "").replace(/\./g, "").replace(",", ".")) || 0;
 const dataBR = (iso) => { const [, m, d] = (iso || TODAY_ISO).split("-"); return `${d}/${m}`; };
+const isoPlusDays = (iso, n) => { const d = new Date((iso || TODAY_ISO) + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
 
 const ICON = {
   "layout": '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
@@ -200,16 +200,38 @@ const ICON = {
   "archive": '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/>',
   "arrow-left": '<line x1="20" y1="12" x2="5" y2="12"/><polyline points="11 6 5 12 11 18"/>',
   "list": '<line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>',
+  "cart": '<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.3 11.4a1 1 0 0 0 1 .8h9.2a1 1 0 0 0 1-.8L20 7H6"/>',
+  "coffee": '<path d="M4 8h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 9h2a2 2 0 0 1 0 4h-2"/><path d="M7 3v2M11 3v2"/>',
+  "fuel": '<rect x="4" y="4" width="9" height="16" rx="1"/><path d="M4 11h9"/><path d="M13 8l3 2v6a2 2 0 0 0 4 0V9l-3-3"/>',
+  "map-pin": '<path d="M12 21s7-6.5 7-11a7 7 0 1 0-14 0c0 4.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  "dumbbell": '<path d="M6.5 6.5v11M3.5 8.5v7M17.5 6.5v11M20.5 8.5v7M6.5 12h11"/>',
+  "gift": '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8"/><path d="M12 8v13"/><path d="M12 8S9.5 8 8.5 6.5A1.8 1.8 0 0 1 12 5.5 1.8 1.8 0 0 1 15.5 6.5C14.5 8 12 8 12 8z"/>',
+  "paw": '<circle cx="7" cy="9" r="1.5"/><circle cx="12" cy="7" r="1.5"/><circle cx="17" cy="9" r="1.5"/><path d="M12 12c-2.8 0-5 1.9-5 3.8A2.2 2.2 0 0 0 9.2 18h5.6a2.2 2.2 0 0 0 2.2-2.2C17 13.9 14.8 12 12 12z"/>',
+  "phone": '<rect x="7" y="2" width="10" height="20" rx="2.5"/><line x1="11" y1="18" x2="13" y2="18"/>',
+  "shirt": '<path d="M8 3 4 6l2 3 2-1v10h8V8l2 1 2-3-4-3-3 2a2 2 0 0 1-4 0z"/>',
+  "smile": '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8"/><line x1="9" y1="9.5" x2="9.01" y2="9.5"/><line x1="15" y1="9.5" x2="15.01" y2="9.5"/>',
+  "calendar": '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="8" y1="2.5" x2="8" y2="6.5"/><line x1="16" y1="2.5" x2="16" y2="6.5"/>',
 };
 
-/* categoria → ícone (grade de seleção do modal) */
+/* nome da categoria → ícone (default por reconhecimento) */
 const CAT_ICON = {
-  "Moradia": "home", "Alimentação": "utensils", "Transporte": "car",
-  "Impostos & Contabilidade": "receipt", "Saúde": "heart", "Lazer": "play-circle",
-  "Educação": "book", "Pessoal": "user",
-  "Trabalho": "briefcase", "Rendimentos": "coins", "Reembolsos": "undo", "Vendas": "tag",
+  // categorias reais do Orçamento Fácil
+  "LAZER": "smile", "Compras": "cart", "Casa": "home", "Custo de Vida": "receipt", "Investimento": "invest",
+  "Trabalho": "briefcase", "Rendimentos financeiros": "trending-up", "Outro (Receitas)": "coins",
+  "Outros": "tag",
+  // nomes do mock / genéricos (compatibilidade)
+  "Moradia": "home", "Alimentação": "utensils", "Transporte": "car", "Impostos & Contabilidade": "receipt",
+  "Saúde": "heart", "Lazer": "smile", "Educação": "book", "Pessoal": "user",
+  "Rendimentos": "coins", "Reembolsos": "undo", "Vendas": "tag",
 };
-const catIcon = (nome) => CAT_ICON[nome] || "wallet";
+const catIcon = (nome) => CAT_ICON[nome] || "tag";
+// ícones disponíveis para escolher (categorias e contas) — todos existem no ICON
+const ICON_CHOICES = ["home", "cart", "utensils", "coffee", "car", "fuel", "map-pin", "heart", "dumbbell", "play-circle", "smile", "book", "gift", "user", "paw", "phone", "shirt", "briefcase", "receipt", "credit-card", "landmark", "banknote", "invest", "coins", "trending-up", "tag", "building", "wallet"];
+const catIconOf = (node) => (node && node.icon) || catIcon(node ? node.nome : "");
+const acctIconOf = (a) => (a && a.icon) || (a && a.grupo === "pat" ? "car" : ACCT_ICON[a && a.tipo]) || "wallet";
+function iconPicker(attr, selected) {
+  return `<div class="icon-grid">${ICON_CHOICES.map((k) => `<button class="icon-pick${selected === k ? " on" : ""}" ${attr}="${k}" type="button">${ic(k, 18)}</button>`).join("")}</div>`;
+}
 function ic(name, size = 16) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[name] || ""}</svg>`;
 }
@@ -222,7 +244,7 @@ function badgeHTML(tipo, small) {
 function moneyHTML(tipo, valor, big) {
   const positivo = tipo === "receita" || tipo === "reembolso";
   const neutro = tipo === "transferencia";
-  const cor = neutro ? "#64748B" : positivo ? C.receita : C.despesa;
+  const cor = neutro ? "var(--sub)" : positivo ? "var(--pos)" : "var(--neg)";
   const sinal = neutro ? "" : positivo ? "+" : "−";
   return `<span class="num" style="color:${cor};font-weight:600;font-size:${big ? 15 : 14}px">${sinal} ${fmt(Math.abs(valor))}</span>`;
 }
@@ -292,18 +314,179 @@ function areaChartSVG(s) {
 function blkReceitaDespesa() {
   return `<div class="card dash-clickable" data-drill="open"><div class="card-head"><h3>Receitas × Despesas</h3><span class="card-sub drill-hint">detalhar ${ic("arrow-right", 12)}</span></div><div class="chart" style="height:260px">${barChartSVG(monthly)}</div><div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span></div></div>`;
 }
-function blkCategorias() {
-  return `<div class="card"><div class="card-head"><h3>Despesas por categoria</h3><span class="card-sub">${REF_LABEL} · ${fmt(despesasMes)}</span></div><div class="donut-wrap"><div style="width:190px;height:190px;position:relative">${donutSVG(despesaPorCat)}<div class="donut-center"><span>total</span><strong class="num">${fmtShort(despesasMes)}</strong></div></div><ul class="cat-legend">${despesaPorCat.slice(0, 6).map((d, i) => `<li><i style="background:${donutPalette[i % donutPalette.length]}"></i><span>${d.nome}</span><b class="num">${fmtShort(d.valor)}</b></li>`).join("")}</ul></div></div>`;
+/* meses e despesas por categoria a partir das transações reais */
+function txMonths() {
+  const set = new Set();
+  state.tx.forEach((t) => { const k = (t.iso || "").slice(0, 7); if (k) set.add(k); });
+  return [...set].sort();
+}
+function byCat(tipo, ym) {
+  const map = {};
+  state.tx.forEach((t) => {
+    if ((t.iso || "").slice(0, 7) !== ym) return;
+    if (tipo === "despesa") {
+      if (t.tipo === "despesa") map[t.cat] = (map[t.cat] || 0) + Math.abs(t.valor);
+      else if (t.tipo === "reembolso") map[t.cat] = (map[t.cat] || 0) - Math.abs(t.valor); // reembolso reduz a despesa
+    } else if (t.tipo === tipo) {
+      map[t.cat] = (map[t.cat] || 0) + Math.abs(t.valor);
+    }
+  });
+  return Object.entries(map).filter(([, v]) => v > 0.005).map(([nome, valor]) => ({ nome, valor })).sort((a, b) => b.valor - a.valor);
+}
+function defaultMonth(tipo) {
+  const months = txMonths();
+  if (OF && OF.refMonthYM && months.includes(OF.refMonthYM)) return OF.refMonthYM; // mesmo mês do resumo
+  for (let i = months.length - 1; i >= 0; i--) if (state.tx.some((t) => t.tipo === tipo && (t.iso || "").slice(0, 7) === months[i])) return months[i];
+  return months[months.length - 1] || null;
+}
+const ymLabel = (ym) => monthLabel(ym + "-01");
+const catColor = (i) => donutPalette[i % donutPalette.length];
+const MES3 = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const mesAbbrev = (ym) => (ym ? `${MES3[+ym.slice(5, 7) - 1]}/${ym.slice(2, 4)}` : "");
+// série de patrimônio líquido mês a mês, reconstruída dos fluxos (receita−despesa) a partir do saldo atual
+function netWorthSeries() {
+  const months = txMonths();
+  if (!months.length) return (patrimonioSerie || []).map((d) => ({ ym: null, mes: d.mes, valor: d.valor }));
+  const flow = {};
+  state.tx.forEach((t) => { if (t.tipo === "transferencia") return; const k = (t.iso || "").slice(0, 7); if (!k) return; flow[k] = (flow[k] || 0) + (t.tipo === "despesa" ? -Math.abs(t.valor) : Math.abs(t.valor)); });
+  const val = new Array(months.length);
+  val[months.length - 1] = netWorth();
+  for (let i = months.length - 2; i >= 0; i--) val[i] = val[i + 1] - (flow[months[i + 1]] || 0);
+  return months.map((ym, i) => ({ ym, mes: mesAbbrev(ym), valor: Math.round(val[i] * 100) / 100 }));
+}
+function pcIdxAt(pc, clientX) {
+  const r = pc.getBoundingClientRect(), n = pc.querySelectorAll(".pc-dot").length;
+  if (!r.width || !n) return 0;
+  const f = (clientX - r.left) / r.width;
+  return isFinite(f) ? Math.round(Math.min(1, Math.max(0, f)) * (n - 1)) : 0;
+}
+function pcDrawBand(pc, a, b) {
+  const dots = pc.querySelectorAll(".pc-dot"), n = dots.length; if (!n) return;
+  a = Math.max(0, Math.min(n - 1, a)); b = Math.max(0, Math.min(n - 1, b));
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  const xa = parseFloat(dots[lo].dataset.x), xb = parseFloat(dots[hi].dataset.x);
+  const band = pc.querySelector(".pc-band");
+  if (band) { band.hidden = false; band.style.left = xa + "%"; band.style.width = (xb - xa) + "%"; }
+  const va = parseFloat(dots[lo].dataset.val), vb = parseFloat(dots[hi].dataset.val);
+  const dR = vb - va, pct = va ? (dR / va) * 100 : 0;
+  const tip = pc.querySelector(".pc-tip");
+  if (tip) {
+    tip.hidden = false; tip.style.left = ((xa + xb) / 2) + "%"; tip.style.top = "6%";
+    tip.innerHTML = `<b>${dots[lo].dataset.mes} → ${dots[hi].dataset.mes}</b><span class="num pc-d ${dR >= 0 ? "up" : "down"}">${dR >= 0 ? "+" : "−"} ${fmtNum(dR)}</span><span class="num pc-d ${dR >= 0 ? "up" : "down"}">${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%</span>`;
+  }
+  dots.forEach((d, i) => d.classList.toggle("sel", i === lo || i === hi));
+}
+
+function catDonut(tipo, data, activeCat) {
+  const cx = 100, cy = 100, r = 66, sw = 26, circ = 2 * Math.PI * r;
+  const total = data.reduce((s, d) => s + d.valor, 0) || 1;
+  let off = 0, segs = "";
+  data.forEach((d, i) => {
+    const len = (d.valor / total) * circ, dash = Math.max(len - 1.5, 0.4), on = activeCat === d.nome;
+    segs += `<circle class="cat-slice${on ? " on" : ""}" data-donut-slice="${tipo}|${d.nome}" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${catColor(i)}" stroke-width="${on ? sw + 7 : sw}" stroke-dasharray="${dash} ${circ - dash}" stroke-dashoffset="${-off}"><title>${d.nome}: ${fmt(d.valor)}</title></circle>`;
+    off += len;
+  });
+  return `<svg viewBox="0 0 200 200" width="100%" height="100%"><g transform="rotate(-90 100 100)">${segs}</g></svg>`;
+}
+function bySub(tipo, cat, ym) {
+  const map = {};
+  state.tx.forEach((t) => {
+    if (t.cat !== cat || (t.iso || "").slice(0, 7) !== ym) return;
+    const k = t.sub || "Sem subcategoria";
+    if (tipo === "despesa") {
+      if (t.tipo === "despesa") map[k] = (map[k] || 0) + Math.abs(t.valor);
+      else if (t.tipo === "reembolso") map[k] = (map[k] || 0) - Math.abs(t.valor);
+    } else if (t.tipo === tipo) {
+      map[k] = (map[k] || 0) + Math.abs(t.valor);
+    }
+  });
+  return Object.entries(map).filter(([, v]) => v > 0.005).map(([nome, valor]) => ({ nome, valor })).sort((a, b) => b.valor - a.valor);
+}
+function catDonutBlock(tipo) {
+  const st = state.donut[tipo];
+  if (!st.month) st.month = defaultMonth(tipo);
+  const ym = st.month, months = txMonths(), idx = months.indexOf(ym), drill = st.drill;
+  const data = drill ? bySub(tipo, drill, ym) : (ym ? byCat(tipo, ym) : []);
+  const total = data.reduce((s, d) => s + d.valor, 0);
+  const active = st.active && data.some((d) => d.nome === st.active) ? st.active : null;
+  const ao = active ? data.find((d) => d.nome === active) : null;
+  const totColor = tipo === "despesa" ? "var(--neg)" : "var(--pos)";
+  const titleTxt = tipo === "despesa" ? "Despesas por categoria" : "Ganhos por categoria";
+  const semTxt = tipo === "despesa" ? "despesas" : "ganhos";
+  const center = ao
+    ? `<div class="donut-center"><span class="dc-nm">${active}</span><strong class="num">${fmtShort(ao.valor)}</strong><span class="dc-pct">${(ao.valor / total * 100).toFixed(1)}%</span></div>`
+    : `<div class="donut-center"><span>total</span><strong class="num">${fmtShort(total)}</strong></div>`;
+  const legend = data.map((d, i) => `<li class="cat-leg${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${d.nome}"><i style="background:${catColor(i)}"></i><span>${d.nome}</span><b class="lg-pct">${(d.valor / total * 100).toFixed(0)}%</b><b class="num lg-val">${fmtShort(d.valor)}</b></li>`).join("");
+  const head = drill
+    ? `<div class="cd-head-l"><button class="cd-back" data-donut-back="${tipo}" aria-label="Voltar">${ic("arrow-left", 16)}</button><div><h3>${drill}</h3><span class="card-sub">subcategorias</span></div></div>`
+    : `<h3>${titleTxt}</h3>`;
+  let actions;
+  if (active) {
+    actions = drill
+      ? `<button class="cd-see" data-donut-tx="${tipo}|${drill}|${active}">${ic("list", 13)} Ver lançamentos</button>`
+      : `<div class="cd-actions"><button class="cd-see" data-donut-tx="${tipo}|${active}">${ic("list", 13)} Ver lançamentos</button><button class="cd-see alt" data-donut-drill="${tipo}|${active}">Ver subcategorias ${ic("arrow-right", 13)}</button></div>`;
+  } else actions = `<span class="cd-hint">Toque numa fatia pra ${drill ? "ver os lançamentos" : "detalhar"}</span>`;
+  return `<div class="card cat-donut-card">
+    <div class="card-head">${head}
+      <div class="cd-nav"><button class="cd-arrow" data-donut-month="${tipo}|prev" ${idx <= 0 ? "disabled" : ""} aria-label="Mês anterior">${ic("arrow-left", 15)}</button><span class="cd-month">${ym ? ymLabel(ym) : "—"}</span><button class="cd-arrow" data-donut-month="${tipo}|next" ${idx >= months.length - 1 ? "disabled" : ""} aria-label="Próximo mês">${ic("arrow-right", 15)}</button></div>
+    </div>
+    ${data.length ? `<div class="donut-wrap"><div class="donut-box">${catDonut(tipo, data, active)}${center}</div><ul class="cat-legend cd-legend">${legend}</ul></div>
+    <div class="cd-foot"><span class="cd-total">Total <b class="num" style="color:${totColor}">${fmt(total)}</b></span>${actions}</div>`
+      : `<div class="empty-mini">Sem ${semTxt} ${drill ? `em ${drill}` : "neste mês"}.</div>`}
+  </div>`;
 }
 function blkPatrimonio() {
-  return `<div class="card"><div class="card-head"><h3>Evolução do patrimônio</h3><span class="card-sub">líquido, últimos 6 meses</span></div><div class="chart" style="height:200px">${areaChartSVG(patrimonioSerie)}</div></div>`;
+  const full = netWorthSeries(), N = full.length;
+  if (!N) return `<div class="card"><div class="card-head"><h3>Evolução do patrimônio</h3></div><div class="empty-mini">Sem histórico.</div></div>`;
+  const opts = [6, 12, 24].filter((x) => x < N);
+  const valid = [...opts.map(String), "all"];
+  const range = valid.includes(state.pcRange) ? state.pcRange : (N > 12 ? "12" : "all");
+  const nShow = range === "all" ? N : Math.min(+range, N);
+  const s = full.slice(-nShow), n = s.length;
+  const vals = s.map((d) => d.valor), dMin = Math.min(...vals), dMax = Math.max(...vals);
+  const pad = (dMax - dMin) * 0.35 || Math.abs(dMax) * 0.1 || 1, yMin = dMin - pad, yMax = dMax + pad;
+  const xP = (i) => (n === 1 ? 50 : (i / (n - 1)) * 100);
+  const yP = (v) => 100 - ((v - yMin) / (yMax - yMin)) * 100;
+  const line = "M" + s.map((d, i) => `${xP(i).toFixed(2)} ${yP(d.valor).toFixed(2)}`).join(" L ");
+  const area = `${line} L 100 100 L 0 100 Z`;
+  const grid = [0, 33, 66, 100].map((g) => `<line x1="0" y1="${g}" x2="100" y2="${g}" stroke="var(--hair)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join("");
+  const dots = s.map((d, i) => `<button class="pc-dot" data-pt="${i}" data-mes="${d.mes}" data-val="${d.valor}" data-delta="${i > 0 ? (d.valor - s[i - 1].valor).toFixed(2) : 0}" data-x="${xP(i).toFixed(2)}" style="left:${xP(i)}%;top:${yP(d.valor)}%" aria-label="${d.mes}: ${fmt(d.valor)}"></button>`).join("");
+  const step = Math.max(1, Math.ceil(n / 7));
+  const xls = s.map((d, i) => (i % step === 0 || i === n - 1) ? `<span class="pc-xl" style="left:${xP(i)}%">${d.mes}</span>` : "").join("");
+  const first = s[0].valor, last = s[n - 1].valor, delta = last - first, pct = first ? (delta / first) * 100 : 0;
+  const sel = state.pcSel && state.pcSel.a < n && state.pcSel.b < n && state.pcSel.a !== state.pcSel.b ? state.pcSel : null;
+  let band = `<div class="pc-band" hidden></div>`, selbar = "";
+  if (sel) {
+    const a = Math.min(sel.a, sel.b), b = Math.max(sel.a, sel.b), xa = xP(a), xb = xP(b);
+    band = `<div class="pc-band" style="left:${xa}%;width:${xb - xa}%"></div>`;
+    const dR = s[b].valor - s[a].valor, p2 = s[a].valor ? (dR / s[a].valor) * 100 : 0;
+    selbar = `<div class="pc-selbar"><span class="ps-range">${s[a].mes} → ${s[b].mes}</span><span class="ps-delta num ${dR >= 0 ? "up" : "down"}">${dR >= 0 ? "▲ +" : "▼ −"}${fmtNum(dR)} · ${p2 >= 0 ? "+" : ""}${p2.toFixed(1)}%</span><button class="ps-clear" data-pcsel-clear aria-label="Limpar seleção">${ic("x", 14)}</button></div>`;
+  }
+  const chips = [...opts.map((x) => ({ k: String(x), lb: x + "M" })), { k: "all", lb: "Tudo" }].map((r) => `<button class="pc-range${range === r.k ? " on" : ""}" data-pcrange="${r.k}">${r.lb}</button>`).join("");
+  return `<div class="card">
+    <div class="card-head">
+      <div><h3>Evolução do patrimônio</h3><span class="card-sub">líquido · ${n} ${n === 1 ? "mês" : "meses"}</span></div>
+      <div class="pc-summary"><span class="pc-cur num">${fmtShort(last)}</span><span class="pc-delta num ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${fmtShort(delta)} · ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%</span></div>
+    </div>
+    <div class="pc-ranges"><div class="pc-chips">${chips}</div><span class="pc-draghint">arraste no gráfico pra medir um período</span></div>
+    <div class="pchart">
+      <svg class="pc-svg" viewBox="0 0 100 100" preserveAspectRatio="none"><defs><linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--brand)" stop-opacity="0.20"/><stop offset="100%" stop-color="var(--brand)" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${area}" fill="url(#pcg)"/><path d="${line}" fill="none" stroke="var(--brand)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>
+      ${band}
+      <div class="pc-guide" hidden></div>
+      ${dots}
+      <div class="pc-tip" hidden></div>
+    </div>
+    <div class="pc-xls">${xls}</div>
+    ${selbar}
+  </div>`;
 }
 function blkUltimas() {
-  return `<div class="card"><div class="card-head"><h3>Últimas transações</h3><button class="link" data-tab="transacoes">ver todas ${ic("arrow-right", 13)}</button></div><div class="mini-list">${state.tx.slice(0, 5).map((t) => `<div class="mini-row"><div class="mini-l">${badgeHTML(t.tipo, true)}<div><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.tipo === "transferencia" ? `${t.origem} → ${t.destino}` : `${t.cat} · ${t.sub}`}</div></div></div>${moneyHTML(t.tipo, t.valor)}</div>`).join("")}</div></div>`;
+  return `<div class="card"><div class="card-head"><h3>Últimas transações</h3><button class="link" data-tab="transacoes">ver todas ${ic("arrow-right", 13)}</button></div><div class="mini-list">${state.tx.slice(0, 5).map((t) => `<div class="mini-row click" data-tx-open="${t.id}"><div class="mini-l">${badgeHTML(t.tipo, true)}<div><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.tipo === "transferencia" ? `${t.origem} → ${t.destino}` : `${t.cat}${t.sub ? " · " + t.sub : ""}`}</div></div></div>${moneyHTML(t.tipo, t.valor)}</div>`).join("")}</div></div>`;
 }
 const DASH_BLOCKS = {
   receitaDespesa: { title: "Receitas × Despesas", sub: "gráfico de barras", icon: "trending-up", cor: C.brand, render: blkReceitaDespesa },
-  categorias: { title: "Despesas por categoria", sub: "rosca", icon: "folder-tree", cor: C.despesa, render: blkCategorias },
+  categorias: { title: "Despesas por categoria", sub: "rosca", icon: "trending-down", cor: C.despesa, render: () => catDonutBlock("despesa") },
+  ganhos: { title: "Ganhos por categoria", sub: "rosca", icon: "trending-up", cor: C.receita, render: () => catDonutBlock("receita") },
   patrimonio: { title: "Evolução do patrimônio", sub: "área", icon: "building", cor: C.patrimonio, render: blkPatrimonio },
   ultimas: { title: "Últimas transações", sub: "lista", icon: "list", cor: C.transfer, render: blkUltimas },
 };
@@ -326,6 +509,22 @@ function dashEditor() {
   return `<div class="dash-editor">${rows}</div>`;
 }
 
+function statementBand() {
+  const res = receitasMes - despesasMes;
+  const cap = REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1);
+  return `<div class="statement">
+    <div class="stmt-top"><span class="stmt-eyebrow">Extrato</span><span class="stmt-period">${cap}</span></div>
+    <div class="stmt-main">
+      <div class="stmt-net"><span class="stmt-lbl">Patrimônio líquido</span><span class="stmt-big num">${fmt(netWorth())}</span></div>
+      <div class="stmt-ledger">
+        <div class="stmt-row"><span class="sl-k">Receitas do mês</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(receitasMes)}</span></div>
+        <div class="stmt-row"><span class="sl-k">Despesas do mês</span><span class="sl-op">−</span><span class="sl-v num" style="color:var(--neg)">${fmtNum(despesasMes)}</span></div>
+        <div class="stmt-row total"><span class="sl-k">Resultado</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(res)}</span></div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function viewDashboard() {
   const edit = state.dashEdit;
   return `
@@ -333,12 +532,7 @@ function viewDashboard() {
     <button class="ghost dash-personalize ${edit ? "on" : ""}" data-dash-edit>${ic(edit ? "check" : "sliders", 15)} ${edit ? "Concluir" : "Personalizar página"}</button>
     ${edit ? `<span class="dash-hint">Arraste os blocos ou use as setas para mudar a ordem.</span>` : ""}
   </div>
-  <div class="kpi-row">
-    ${kpi("Patrimônio líquido", netWorth(), "", true, "building", C.brand)}
-    ${kpi(`Receitas · ${REF_LABEL}`, receitasMes, "", true, "trending-up", C.receita)}
-    ${kpi(`Despesas · ${REF_LABEL}`, despesasMes, "", true, "trending-down", C.despesa)}
-    ${kpi(`Resultado · ${REF_LABEL}`, receitasMes - despesasMes, receitasMes - despesasMes >= 0 ? "sobrou este mês" : "faltou este mês", receitasMes - despesasMes >= 0, "coins", C.transfer)}
-  </div>
+  ${statementBand()}
   ${edit ? dashEditor() : `<div class="dash-grid">${state.dashOrder.map((k) => DASH_BLOCKS[k].render()).join("")}</div>`}`;
 }
 
@@ -348,7 +542,7 @@ function acctMenuHTML(a) {
   if (state.acctMenu !== a.id) return "";
   return `<div class="acct-menu">
     <button data-acct-open="${a.nome}">${ic("list", 14)} Ver lançamentos</button>
-    <button data-acct-edit="${a.id}">${ic("pencil", 14)} Editar nome</button>
+    <button data-acct-edit="${a.id}">${ic("pencil", 14)} Editar</button>
     <button data-acct-move="${a.id}:up">${ic("chevron-up", 14)} Mover pra cima</button>
     <button data-acct-move="${a.id}:down">${ic("chevron-down", 14)} Mover pra baixo</button>
     <button class="danger" data-acct-archive="${a.id}">${ic("archive", 14)} Arquivar</button>
@@ -362,31 +556,48 @@ function acctCard(a) {
   const editing = state.acctEdit === a.id;
   if (a.grupo === "pat") {
     const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="alloc-lines"><div><span>Valor alocado</span><b class="num">${fmt(a.alocado)}</b></div><div><span>Custos lançados</span><b class="num" style="color:${C.despesa}">${fmt(a.custo)}</b></div></div><div class="alloc-val"><span>Valor atual</span><strong class="num" style="color:${C.patrimonio}">${fmt(a.saldo)}</strong></div>`;
-    return `<div class="card acct alloc-card"><div class="acct-top"><span class="acct-ic pat">${ic("car", 18)}</span><div class="acct-top-r"><span class="acct-chip patrimonio">patrimônio</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
+    return `<div class="card acct alloc-card"><div class="acct-top"><span class="acct-ic pat">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip patrimonio">patrimônio</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
   }
   const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="acct-saldo num" style="color:${a.saldo < 0 ? C.despesa : "var(--ink)"}">${fmt(a.saldo)}</div>`;
-  return `<div class="card acct"><div class="acct-top"><span class="acct-ic">${ic(ACCT_ICON[a.tipo], 18)}</span><div class="acct-top-r"><span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
+  return `<div class="card acct"><div class="acct-top"><span class="acct-ic">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
+}
+const MES_NOMES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+function monthLabel(ym) { const m = +ym.slice(5, 7), y = ym.slice(0, 4); const nm = MES_NOMES[m - 1] || "—"; return `${nm.charAt(0).toUpperCase()}${nm.slice(1)} ${y}`; }
+function txCatIcon(t) {
+  if (t.tipo === "transferencia") return "transfer";
+  const node = catTree[t.tipo === "receita" ? "receita" : "despesa"].find((c) => c.nome === t.cat);
+  return node ? catIconOf(node) : catIcon(t.cat);
+}
+function acctTxRow(t, nome) {
+  const v = txValorConta(t, nome);
+  const contraparte = t.tipo === "transferencia" ? (t.origem === nome ? `→ ${t.destino}` : `← ${t.origem}`) : `${t.cat}${t.sub ? ` · ${t.sub}` : ""}`;
+  const tcor = t.tipo === "transferencia" ? C.transfer : (t.tipo === "despesa" ? C.despesa : C.receita);
+  return `<div class="mini-row click txr" data-tx-open="${t.id}"><span class="tx-ic" style="background:${tcor}1A;color:${tcor}">${ic(txCatIcon(t), 16)}</span><div class="tx-mid"><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data} · ${contraparte}</div></div><span class="num" style="color:${v < 0 ? "var(--ink)" : "var(--pos)"};font-weight:600">${v < 0 ? "−" : "+"} ${fmtNum(Math.abs(v))}</span></div>`;
 }
 function viewAcctDetail(nome) {
   const a = accounts.find((x) => x.nome === nome);
   const txs = acctTx(nome).slice().sort((x, y) => (y.iso || y.data).localeCompare(x.iso || x.data));
   let entradas = 0, saidas = 0;
-  const rows = txs.map((t) => {
-    const v = txValorConta(t, nome);
-    if (v >= 0) entradas += v; else saidas += -v;
-    const contraparte = t.tipo === "transferencia" ? (t.origem === nome ? `→ ${t.destino}` : `← ${t.origem}`) : `${t.cat} · ${t.sub}`;
-    return `<div class="mini-row"><div class="mini-l">${badgeHTML(t.tipo, true)}<div><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data} · ${contraparte}</div></div></div><span class="num" style="color:${v < 0 ? "var(--ink)" : C.receita};font-weight:600">${v < 0 ? "−" : "+"} ${fmt(Math.abs(v))}</span></div>`;
-  }).join("") || `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`;
-  const iconName = a ? (a.grupo === "pat" ? "car" : ACCT_ICON[a.tipo]) : "wallet";
+  txs.forEach((t) => { const v = txValorConta(t, nome); if (v >= 0) entradas += v; else saidas += -v; });
+  // agrupa por mês (mais recente primeiro), com subtotal do mês
+  const groups = {};
+  txs.forEach((t) => { const k = (t.iso || "0000-00").slice(0, 7); (groups[k] = groups[k] || []).push(t); });
+  const keys = Object.keys(groups).sort((x, y) => y.localeCompare(x));
+  const body = txs.length ? keys.map((k) => {
+    const list = groups[k], net = list.reduce((s, t) => s + txValorConta(t, nome), 0);
+    const lbl = k === "0000-00" ? "Sem data" : monthLabel(k + "-01");
+    return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span></div>${list.map((t) => acctTxRow(t, nome)).join("")}`;
+  }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`;
+  const iconName = acctIconOf(a);
   return `
   <button class="back-btn" data-acct-back>${ic("arrow-left", 16)} Contas</button>
-  <div class="card acct-detail-head"><div class="adh-l"><span class="acct-ic big">${ic(iconName, 22)}</span><div><div class="adh-name">${nome}</div><div class="acct-sub">${a ? a.sub : ""}</div></div></div><div class="adh-saldo num" style="color:${a && a.saldo < 0 ? C.despesa : "var(--ink)"}">${a ? fmt(a.saldo) : ""}</div></div>
+  <div class="card acct-detail-head"><div class="adh-l"><span class="acct-ic big">${ic(iconName, 22)}</span><div><div class="adh-name">${nome}</div><div class="acct-sub">${a ? a.sub : ""}</div></div></div><div class="adh-saldo num" style="color:${a && a.saldo < 0 ? "var(--neg)" : "var(--ink)"}">${a ? fmt(a.saldo) : ""}</div></div>
   <div class="adh-stats">
-    <div class="card adh-stat"><span>Entradas</span><b class="num" style="color:${C.receita}">${fmt(entradas)}</b></div>
-    <div class="card adh-stat"><span>Saídas</span><b class="num" style="color:${C.despesa}">${fmt(saidas)}</b></div>
+    <div class="card adh-stat"><span>Entradas</span><b class="num" style="color:var(--pos)">${fmt(entradas)}</b></div>
+    <div class="card adh-stat"><span>Saídas</span><b class="num" style="color:var(--neg)">${fmt(saidas)}</b></div>
     <div class="card adh-stat"><span>Lançamentos</span><b class="num">${txs.length}</b></div>
   </div>
-  <div class="card table-card" style="padding:6px 18px"><div class="card-head" style="padding:12px 0 4px"><h3>Lançamentos</h3></div><div class="mini-list">${rows}</div></div>`;
+  <div class="card table-card" style="padding:6px 18px"><div class="card-head" style="padding:12px 2px 4px"><h3>Lançamentos</h3></div><div class="mini-list">${body}</div></div>`;
 }
 function viewContas() {
   if (state.acctDetail) return viewAcctDetail(state.acctDetail);
@@ -396,12 +607,12 @@ function viewContas() {
   const archived = accounts.filter((a) => a.arquivada);
   const archBlock = archived.length ? `
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:var(--subtle)">Arquivadas</span><p>Ocultas do dia a dia e fora do patrimônio. Reative quando quiser.</p></div></div>
-  <div class="archived-list">${archived.map((a) => `<div class="arch-row"><span class="acct-ic small">${ic(a.grupo === "pat" ? "car" : ACCT_ICON[a.tipo], 16)}</span><div class="arch-info"><div class="arch-name">${a.nome}</div><div class="acct-sub">${a.sub}</div></div><span class="num arch-saldo">${fmt(a.saldo)}</span><button class="mini-btn" data-acct-archive="${a.id}">${ic("archive", 13)} Desarquivar</button></div>`).join("")}</div>` : "";
+  <div class="archived-list">${archived.map((a) => `<div class="arch-row"><span class="acct-ic small">${ic(acctIconOf(a), 16)}</span><div class="arch-info"><div class="arch-name">${a.nome}</div><div class="acct-sub">${a.sub}</div></div><span class="num arch-saldo">${fmt(a.saldo)}</span><button class="mini-btn" data-acct-archive="${a.id}">${ic("archive", 13)} Desarquivar</button></div>`).join("")}</div>` : "";
   return `
   <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar o nome, reordenar ou arquivar.</p></div></div>
   <div class="acct-grid">${fin.map(acctCard).join("")}</div>
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:${C.patrimonio}">Alocações de patrimônio</span><p>Comprar um bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio.</p></div></div>
-  <div class="acct-grid">${pat.map(acctCard).join("")}<button class="card acct add-acct">${ic("plus", 22)}<span>Nova conta ou alocação</span></button></div>
+  <div class="acct-grid">${pat.map(acctCard).join("")}<button class="card acct add-acct" data-add-acct>${ic("plus", 22)}<span>Nova conta ou alocação</span></button></div>
   ${archBlock}`;
 }
 
@@ -416,7 +627,7 @@ function viewTransacoes() {
       : `<span>${t.cat}${t.sub ? ` <span class="dot">·</span> <span class="muted2">${t.sub}</span>` : ""}</span>`;
     const conta = t.tipo === "transferencia" ? (t.nota || "—") : t.conta;
     const status = t.status === "conciliado" ? `<span class="status conciliado">${ic("check", 11)} conciliado</span>` : `<span class="status pendente">pendente</span>`;
-    return `<tr><td class="num muted">${t.data}</td><td><div class="td-desc">${t.desc}</div>${badgeHTML(t.tipo, true)}</td><td class="muted">${cat}</td><td class="muted">${conta}</td><td class="r">${moneyHTML(t.tipo, t.valor)}</td><td class="c">${status}</td></tr>`;
+    return `<tr class="tx-tr" data-tx-open="${t.id}"><td class="num muted">${t.data}</td><td><div class="td-desc">${t.desc}</div>${badgeHTML(t.tipo, true)}</td><td class="muted">${cat}</td><td class="muted">${conta}</td><td class="r">${moneyHTML(t.tipo, t.valor)}</td><td class="c">${status}</td></tr>`;
   }).join("");
   const capNote = filtered.length > CAP ? `<p class="foot-note">Mostrando os <b>${CAP}</b> lançamentos mais recentes de <b>${filtered.length}</b>.</p>` : "";
   const filters = chips.map((f) => {
@@ -431,36 +642,104 @@ function viewTransacoes() {
   <p class="foot-note"><span style="color:${C.transfer}">${ic("transfer", 13)}</span> Transferências aparecem na lista, mas <b>não somam em receitas nem despesas</b> — só movem saldo entre contas.</p>`;
 }
 
+function reconEffect(r) {
+  if (r.sug.tipo === "transferencia") { if (r.sug.destino === state.reconAccount) return Math.abs(r.valor); if (r.sug.origem === state.reconAccount) return -Math.abs(r.valor); return 0; }
+  return r.valor; // já assinado (despesa negativa, receita positiva)
+}
 function viewConciliacao() {
   if (!state.imported) {
-    return `<div class="import-zone card"><span class="import-ic">${ic("upload", 26)}</span><h3>Importe seu extrato</h3><p>Arraste um arquivo OFX, CSV ou PDF do banco. O Meu Caixa lê as transações e já sugere a categoria, a conta e possíveis correspondências com o que você lançou.</p><button class="cta big" data-action="import">${ic("sparkles", 16)} Usar extrato de exemplo</button><span class="import-formats">Nubank · Caixa · Itaú · Bradesco · e outros</span></div>`;
+    const opts = accounts.filter((a) => !a.arquivada).map((a) => `<option>${a.nome}</option>`).join("");
+    const types = ["OFX", "CSV", "PDF", "Excel", "QIF"];
+    return `<div class="import-zone card">
+      <span class="import-ic">${ic("upload", 26)}</span>
+      <h3>Importar extrato</h3>
+      <p>Escolha a conta e o formato do arquivo. O MeuCaixa lê as transações e já sugere categoria, conta e correspondências com o que você lançou.</p>
+      <div class="import-form">
+        <label class="fld"><span class="fld-label">Conta</span><select data-imp-acct>${opts}</select></label>
+        <div class="fld"><span class="fld-label">Formato do arquivo</span><div class="imp-types">${types.map((t, i) => `<button class="imp-type${i === 0 ? " on" : ""}" data-imp-type="${t}">${t}</button>`).join("")}</div></div>
+      </div>
+      <button class="cta big" data-action="import">${ic("sparkles", 16)} Importar (extrato de exemplo)</button>
+      <span class="import-formats">Nubank · Caixa · Itaú · Bradesco · Inter · e outros</span>
+    </div>`;
   }
   const conc = state.recon.filter((r) => r.status === "conciliado").length;
   const totalR = state.recon.filter((r) => r.status !== "ignorado").length;
   const ign = state.recon.filter((r) => r.status === "ignorado").length;
-  const bar = `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div></div><button class="ghost" data-action="reimport">Reimportar</button></div>`;
+  const acct = accounts.find((a) => a.nome === state.reconAccount);
+  const saldoAtual = acct ? acct.saldo : 0;
+  const pend = state.recon.filter((r) => r.status === "pendente");
+  const projPend = pend.reduce((s, r) => s + reconEffect(r), 0);
+  const projConc = state.recon.filter((r) => r.status === "conciliado").reduce((s, r) => s + reconEffect(r), 0);
+  const saldoFuturo = saldoAtual + projPend; // se aceitar todos os pendentes
+  const head = `<div class="card recon-head">
+    <div class="rh-l"><span class="acct-ic">${ic(acct ? acctIconOf(acct) : "wallet", 18)}</span><div><div class="rh-label">Conciliando</div><div class="rh-acct">${state.reconAccount || "—"}</div></div></div>
+    <div class="rh-bals">
+      <div class="rh-bal"><span>Saldo atual</span><b class="num">${fmt(saldoAtual)}</b></div>
+      <div class="rh-bal"><span>Já conciliado</span><b class="num" style="color:${projConc >= 0 ? "var(--pos)" : "var(--neg)"}">${projConc >= 0 ? "+" : "−"} ${fmtNum(projConc)}</b></div>
+      <div class="rh-bal accent"><span>Saldo se aceitar tudo (${pend.length})</span><b class="num" style="color:${saldoFuturo >= saldoAtual ? "var(--pos)" : "var(--neg)"}">${fmt(saldoFuturo)}</b></div>
+    </div>
+  </div>`;
+  const bar = head + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div></div><button class="ghost" data-action="reimport">Reimportar</button></div>`;
   const list = state.recon.map((r) => {
     const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
     const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
     const sug = !isEdit
       ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat} <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span> <span class="dot">·</span> ${r.sug.conta}</span>`}</div>`
-      : `<div class="edit-body"><select>${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><select>${(r.sug.tipo === "receita" ? catTree.receita : catTree.despesa).map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select>${accounts.map((a) => `<option ${a.nome === (r.sug.conta || r.sug.destino) ? "selected" : ""}>${a.nome}</option>`).join("")}</select></div>`;
+      : `<div class="edit-body"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><select data-recon-field="cat">${(r.sug.tipo === "receita" ? catTree.receita : catTree.despesa).map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select></div>`;
     const match = r.match && !isEdit ? `<div class="recon-match">${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b></div>` : "";
     const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
     const actions = done ? `<span class="conc-tag">${ic("check", 14)} Conciliado</span>`
       : skip ? `<span class="skip-tag">Ignorado</span>`
         : `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} ${isEdit ? "Salvar" : "Aceitar"}</button><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} ${isEdit ? "Cancelar" : "Editar"}</button><button class="act skip-btn" data-recon-ignore="${r.id}">${ic("x", 13)}</button>`;
-    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? C.despesa : C.receita}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
+    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
   }).join("");
   return bar + `<div class="recon-list">${list}</div>`;
 }
 
+function catDetailRow(t, hideSub) {
+  const sign = t.tipo === "despesa" ? "−" : "+";
+  const tcor = t.tipo === "despesa" ? C.despesa : t.tipo === "reembolso" ? C.reembolso : C.receita;
+  const meta = `${t.data} · ${t.conta || "—"}${!hideSub && t.sub ? " · " + t.sub : ""}${t.tipo === "reembolso" ? " · reembolso" : ""}`;
+  return `<div class="mini-row click txr" data-tx-open="${t.id}"><span class="tx-ic" style="background:${tcor}1A;color:${tcor}">${ic(txCatIcon(t), 16)}</span><div class="tx-mid"><div class="mini-desc">${t.desc}</div><div class="mini-meta">${meta}</div></div><span class="num" style="color:${t.tipo === "despesa" ? "var(--ink)" : "var(--pos)"};font-weight:600">${sign} ${fmtNum(Math.abs(t.valor))}</span></div>`;
+}
+function openCatDetail(tipo, cat, sub) { state.tab = "categorias"; state.catDetail = { tipo, cat, sub: sub || null }; state.pop = null; renderPop(); renderView(); }
+function viewCatDetail() {
+  const { tipo, cat, sub } = state.catDetail;
+  const node = catTree[tipo].find((c) => c.nome === cat);
+  const isRec = tipo === "receita", cor = isRec ? "var(--pos)" : "var(--neg)", accHex = isRec ? C.receita : C.despesa;
+  const contrib = (t) => (t.tipo === "reembolso" ? -Math.abs(t.valor) : Math.abs(t.valor));
+  const txs = state.tx.filter((t) => {
+    if (t.cat !== cat) return false;
+    if (sub && (t.sub || "Sem subcategoria") !== sub) return false;
+    return tipo === "despesa" ? (t.tipo === "despesa" || t.tipo === "reembolso") : t.tipo === "receita";
+  }).sort((a, b) => (b.iso || "").localeCompare(a.iso || ""));
+  const total = txs.reduce((s, t) => s + contrib(t), 0);
+  const groups = {}; txs.forEach((t) => { const k = (t.iso || "0000-00").slice(0, 7); (groups[k] = groups[k] || []).push(t); });
+  const keys = Object.keys(groups).sort((x, y) => y.localeCompare(x));
+  const nMonths = keys.filter((k) => k !== "0000-00").length || 1;
+  const body = txs.length ? keys.map((k) => {
+    const list = groups[k], net = list.reduce((s, t) => s + contrib(t), 0);
+    const lbl = k === "0000-00" ? "Sem data" : monthLabel(k + "-01");
+    return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${cor}">${isRec ? "+" : "−"} ${fmtNum(net)}</span></div>${list.map((t) => catDetailRow(t, !!sub)).join("")}`;
+  }).join("") : `<div class="empty-mini">Nenhum lançamento nesta ${sub ? "subcategoria" : "categoria"}.</div>`;
+  return `
+  <button class="back-btn" data-cat-detail-back>${ic("arrow-left", 16)} Categorias</button>
+  <div class="card acct-detail-head"><div class="adh-l"><span class="acct-ic big" style="background:${accHex}1A;color:${accHex}">${ic(catIconOf(node), 22)}</span><div><div class="adh-name">${cat}${sub ? ` · ${sub}` : ""}</div><div class="acct-sub">${isRec ? "ganhos" : "despesas"}${sub ? " · subcategoria" : ""}</div></div></div><div class="adh-saldo num" style="color:${cor}">${fmt(total)}</div></div>
+  <div class="adh-stats">
+    <div class="card adh-stat"><span>Total</span><b class="num" style="color:${cor}">${fmt(total)}</b></div>
+    <div class="card adh-stat"><span>Lançamentos</span><b class="num">${txs.length}</b></div>
+    <div class="card adh-stat"><span>Média/mês</span><b class="num">${fmt(total / nMonths)}</b></div>
+  </div>
+  <div class="detail-actions"><button class="mini-btn" data-cat-detail-edit>${ic("pencil", 14)} ${sub ? "Renomear" : "Renomear / ícone"}</button><button class="mini-btn danger" data-cat-detail-del>${ic("archive", 14)} Excluir</button></div>
+  <div class="card table-card" style="padding:6px 18px"><div class="card-head" style="padding:12px 2px 4px"><h3>Lançamentos</h3></div><div class="mini-list">${body}</div></div>`;
+}
 function viewCategorias() {
+  if (state.catDetail) return viewCatDetail();
   const cols = [["receita", "Receitas"], ["despesa", "Despesas"]].map(([tipo, titulo]) => {
     const cor = tipo === "receita" ? C.receita : C.despesa;
     const maxT = Math.max(...catTree[tipo].map((c) => c.total), 1);
-    const nodes = catTree[tipo].map((c) => `<div class="cat-node"><div class="cat-node-head"><span class="cn-name">${c.nome}</span><span class="cn-total num" style="color:${c.total ? cor : "var(--line-strong)"}">${c.total ? fmtShort(c.total) : "—"}</span></div><div class="cn-bar"><span style="width:${(c.total / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<span class="sub-pill">${s}</span>`).join("")}<button class="sub-add">${ic("plus", 11)} subcategoria</button></div></div>`).join("");
-    return `<div class="card cat-col"><div class="cat-col-head" style="border-color:${cor}33"><span class="cat-dot" style="background:${cor}"></span><h3>${titulo}</h3><span class="cat-count">${catTree[tipo].length} categorias</span></div><div class="cat-tree">${nodes}</div><button class="cat-add" style="color:${cor}">${ic("plus", 14)} Nova categoria de ${tipo === "receita" ? "receita" : "despesa"}</button></div>`;
+    const nodes = catTree[tipo].map((c) => `<div class="cat-node"><div class="cat-node-head cn-click" data-cat-detail="${tipo}|${c.nome}"><span class="cn-ic">${ic(catIconOf(c), 15)}</span><span class="cn-name">${c.nome}</span><span class="cn-actions"><button class="cn-btn" data-cat-edit="${tipo}|${c.nome}" title="Editar">${ic("pencil", 13)}</button><button class="cn-btn" data-cat-del="${tipo}|${c.nome}" title="Excluir">${ic("archive", 13)}</button></span><span class="cn-total num" style="color:${c.total ? cor : "var(--line-strong)"}">${c.total ? fmtShort(c.total) : "—"}</span></div><div class="cn-bar"><span style="width:${(c.total / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<button class="sub-pill" data-cat-detail="${tipo}|${c.nome}|${s}" title="Ver lançamentos">${s}</button>`).join("")}<button class="sub-add" data-add-sub="${tipo}|${c.nome}">${ic("plus", 11)} subcategoria</button></div></div>`).join("");
+    return `<div class="card cat-col"><div class="cat-col-head" style="border-color:${cor}33"><span class="cat-dot" style="background:${cor}"></span><h3>${titulo}</h3><span class="cat-count">${catTree[tipo].length} categorias</span></div><div class="cat-tree">${nodes}</div><button class="cat-add" style="color:${cor}" data-add-cat="${tipo}">${ic("plus", 14)} Nova categoria de ${tipo === "receita" ? "receita" : "despesa"}</button></div>`;
   }).join("");
   return `<div class="cat-cols">${cols}</div>`;
 }
@@ -475,18 +754,21 @@ function renderDrill() {
   let title = "", back = "", body = "";
   if (d.stage === "months") {
     title = "Escolha um mês";
-    body = `<div class="drill-months">${monthly.map((m) => `<button class="drill-month" data-drill-month="${m.mes}"><span class="dm-mes">${m.mes}</span><span class="dm-vals"><b style="color:${C.receita}">+ ${fmtShort(m.receita)}</b><b style="color:${C.despesa}">− ${fmtShort(m.despesa)}</b></span><span class="dm-net num">${fmt(m.receita - m.despesa)}</span>${ic("arrow-right", 15)}</button>`).join("")}</div>`;
+    body = `<div class="drill-months">${allMonthsSummary().map((m) => `<button class="drill-month" data-drill-month="${m.ym}"><span class="dm-mes">${m.label}</span><span class="dm-vals"><b style="color:${C.receita}">+ ${fmtShort(m.receita)}</b><b style="color:${C.despesa}">− ${fmtShort(m.despesa)}</b></span><span class="dm-net num">${fmt(m.receita - m.despesa)}</span>${ic("arrow-right", 15)}</button>`).join("")}</div>`;
   } else if (d.stage === "split") {
-    const m = monthly.find((x) => x.mes === d.month);
-    title = `${d.month} — receitas × despesas`;
+    const lbl = monthLabel(d.month + "-01");
+    const receita = byCat("receita", d.month).reduce((s, x) => s + x.valor, 0);
+    const despesa = byCat("despesa", d.month).reduce((s, x) => s + x.valor, 0);
+    title = `${lbl} — receitas × despesas`;
     back = `<button class="drill-back" data-drill-back="months">${ic("arrow-left", 15)} meses</button>`;
-    const data = [{ nome: "Receitas", valor: m.receita }, { nome: "Despesas", valor: m.despesa }];
-    body = `<div class="drill-pie"><div class="pie-box">${donutSVG(data, [C.receita, C.despesa])}<div class="donut-center"><span>saldo</span><strong class="num">${fmtShort(m.receita - m.despesa)}</strong></div></div><ul class="cat-legend"><li><i style="background:${C.receita}"></i><span>Receitas</span><b class="num">${fmtShort(m.receita)}</b></li><li><i style="background:${C.despesa}"></i><span>Despesas</span><b class="num">${fmtShort(m.despesa)}</b></li></ul></div><div class="drill-ask"><p>Quer afunilar em quê?</p><div class="drill-ask-btns"><button class="ask-btn" style="--c:${C.receita}" data-drill-type="receita">${ic("trending-up", 15)} Ver receitas</button><button class="ask-btn" style="--c:${C.despesa}" data-drill-type="despesa">${ic("trending-down", 15)} Ver despesas</button></div></div>`;
+    const data = [{ nome: "Receitas", valor: receita }, { nome: "Despesas", valor: despesa }];
+    body = `<div class="drill-pie"><div class="pie-box">${donutSVG(data, [C.receita, C.despesa])}<div class="donut-center"><span>saldo</span><strong class="num">${fmtShort(receita - despesa)}</strong></div></div><ul class="cat-legend"><li><i style="background:${C.receita}"></i><span>Receitas</span><b class="num">${fmtShort(receita)}</b></li><li><i style="background:${C.despesa}"></i><span>Despesas</span><b class="num">${fmtShort(despesa)}</b></li></ul></div><div class="drill-ask"><p>Quer afunilar em quê?</p><div class="drill-ask-btns"><button class="ask-btn" style="--c:${C.receita}" data-drill-type="receita">${ic("trending-up", 15)} Ver receitas</button><button class="ask-btn" style="--c:${C.despesa}" data-drill-type="despesa">${ic("trending-down", 15)} Ver despesas</button></div></div>`;
   } else {
+    const lbl = monthLabel(d.month + "-01");
     const cats = drillCats(d.month, d.type);
     const total = cats.reduce((s, c) => s + c.valor, 0);
-    title = `${d.month} — ${d.type === "receita" ? "receitas" : "despesas"} por categoria`;
-    back = `<button class="drill-back" data-drill-back="split">${ic("arrow-left", 15)} ${d.month}</button>`;
+    title = `${lbl} — ${d.type === "receita" ? "receitas" : "despesas"} por categoria`;
+    back = `<button class="drill-back" data-drill-back="split">${ic("arrow-left", 15)} ${lbl}</button>`;
     body = `<div class="drill-pie"><div class="pie-box">${donutSVG(cats)}<div class="donut-center"><span>total</span><strong class="num">${fmtShort(total)}</strong></div></div><ul class="cat-legend">${cats.map((c, i) => `<li><i style="background:${donutPalette[i % donutPalette.length]}"></i><span>${c.nome}</span><b class="num">${fmtShort(c.valor)}</b></li>`).join("")}</ul></div>`;
   }
   el.innerHTML = `<div class="overlay" id="drill-overlay"><div class="modal drill-modal"><div class="modal-head"><div class="drill-head-l">${back}<h3>${title}</h3></div><button class="x" data-drill-close>${ic("x", 18)}</button></div><div class="drill-body">${body}</div></div></div>`;
@@ -518,26 +800,26 @@ function modalHTML() {
   let catBlock = "";
   if (showCat) {
     const tiles = catList.map((c) =>
-      `<button class="cat-tile ${f.cat === c.nome ? "on" : ""}" data-modal-cat="${c.nome}">${ic(catIcon(c.nome), 20)}<span>${c.nome}</span></button>`
+      `<button class="cat-tile ${f.cat === c.nome ? "on" : ""}" data-modal-cat="${c.nome}">${ic(catIconOf(c), 20)}<span>${c.nome}</span></button>`
     ).join("");
     const selObj = catList.find((c) => c.nome === f.cat);
     const subs = selObj ? `<div class="sub-wrap"><div class="fld-label">Subcategoria</div><div class="sub-row">${selObj.subs.map((s) => `<button class="sub-pick ${f.sub === s ? "on" : ""}" data-modal-sub="${s}">${s}</button>`).join("")}</div></div>` : "";
     const lbl = `Categoria${tipo === "reembolso" ? ' <span class="lbl-hint">· de qual despesa voltou</span>' : ""}`;
     catBlock = `<div class="cat-pick-wrap"><div class="fld-label">${lbl}</div><div class="cat-grid">${tiles}</div>${subs}</div>`;
   } else {
-    const opts = (sel) => accounts.map((a) => `<option ${a.nome === sel ? "selected" : ""}>${a.nome}</option>`).join("");
-    catBlock = `<div class="cat-pick-wrap"><div class="transfer-fields"><label class="fld"><span class="fld-label">De</span><select data-field="origem">${opts(f.origem)}</select></label><span class="tf-arrow">${ic("arrow-right", 18)}</span><label class="fld"><span class="fld-label">Para</span><select data-field="destino">${opts(f.destino)}</select></label></div></div>`;
+    catBlock = `<div class="cat-pick-wrap"><div class="transfer-fields"><label class="fld"><span class="fld-label">De</span><select data-field="origem">${acctOptions(f.origem)}</select></label><span class="tf-arrow">${ic("arrow-right", 18)}</span><label class="fld"><span class="fld-label">Para</span><select data-field="destino">${acctOptions(f.destino)}</select></label></div></div>`;
   }
 
   const contaField = showCat
-    ? `<label class="fld"><span class="fld-label">${tipo === "despesa" ? "Conta de origem" : "Conta destino"}</span><select data-field="conta">${accounts.map((a) => `<option ${a.nome === f.conta ? "selected" : ""}>${a.nome}</option>`).join("")}</select></label>`
+    ? `<label class="fld"><span class="fld-label">${tipo === "despesa" ? "Conta de origem" : "Conta destino"}</span><select data-field="conta">${acctOptions(f.conta)}</select></label>`
     : "";
 
   const note = { receita: "Entra como receita e soma no resultado do mês.", despesa: "Sai como despesa e reduz o resultado do mês.", transferencia: "Move saldo entre contas. Não conta como receita nem despesa.", reembolso: "Reduz a despesa da categoria escolhida — dinheiro que voltou." }[tipo];
   const canSave = parseValor(f.valor) > 0 && (baseTipo === "transferencia" || !!f.cat);
 
+  const editing = !!state.editTx;
   return `<div class="overlay" id="overlay"><div class="modal modal-tx" style="--acc:${t.cor}">
-    <div class="modal-head"><h3>Nova transação</h3><button class="x" data-action="close-modal">${ic("x", 18)}</button></div>
+    <div class="modal-head"><h3>${editing ? "Editar lançamento" : "Nova transação"}</h3><button class="x" data-action="close-modal">${ic("x", 18)}</button></div>
     <div class="tx-body">
       <div class="type-seg3">${seg}</div>
       ${reembToggle}
@@ -545,12 +827,12 @@ function modalHTML() {
       ${catBlock}
       <div class="form2">
         <label class="fld"><span class="fld-label">Descrição</span><input data-field="desc" value="${f.desc || ""}" placeholder="Ex.: Mercado, cliente X, aporte…"></label>
-        <div class="fld-row">${contaField}<label class="fld"><span class="fld-label">Data</span><input type="date" data-field="data" value="${f.data || TODAY_ISO}"></label></div>
+        <div class="fld-row">${contaField}<label class="fld"><span class="fld-label">Data</span><div class="date-wrap">${ic("calendar", 16)}<input type="date" data-field="data" value="${f.data || TODAY_ISO}"></div><div class="date-quick"><button class="date-chip ${(f.data || TODAY_ISO) === TODAY_ISO ? "on" : ""}" data-date-set="0" type="button">Hoje</button><button class="date-chip ${f.data === isoPlusDays(TODAY_ISO, -1) ? "on" : ""}" data-date-set="-1" type="button">Ontem</button></div></label></div>
       </div>
       <div class="tx-note" style="background:${t.cor}12;color:${t.cor}"><span class="tx-note-ic">${ic("circle-alert", 14)}</span><span>${note}</span></div>
     </div>
     <div class="modal-foot-tx">
-      <button class="save-tx" data-action="save-tx" style="background:${t.cor}" ${canSave ? "" : "disabled"}>${ic("check", 16)} Salvar ${t.label.toLowerCase()}</button>
+      <button class="save-tx" data-action="save-tx" style="background:${t.cor}" ${canSave ? "" : "disabled"}>${ic("check", 16)} ${editing ? "Salvar alterações" : `Salvar ${t.label.toLowerCase()}`}</button>
     </div>
   </div></div>`;
 }
@@ -560,7 +842,7 @@ const state = {
   tab: "dashboard",
   tx: initialTx.slice(),
   recon: initialRecon.map((r) => ({ ...r })),
-  imported: false,
+  imported: false, reconAccount: null,
   filter: "todas",
   modal: false,
   modalTipo: "despesa",
@@ -568,14 +850,48 @@ const state = {
   form: { desc: "", valor: "", cat: "", sub: "", conta: "Conta Corrente", data: TODAY_ISO, origem: "Conta Corrente", destino: "Investimentos" },
   // contas
   acctDetail: null, acctMenu: null, acctEdit: null,
+  // detalhe de categoria/subcategoria (todos os lançamentos)
+  catDetail: null,
   // dashboard
-  dashEdit: false, dashOrder: ["receitaDespesa", "categorias", "patrimonio", "ultimas"], dragKey: null,
-  // drill-down
-  drill: null,
+  dashEdit: false, dashOrder: ["receitaDespesa", "categorias", "ganhos", "patrimonio", "ultimas"], dragKey: null,
+  // drill-down + pop-ups
+  drill: null, pop: null, editTx: null,
+  // donuts de categoria (despesas e ganhos), cada um com mês/seleção/drill próprios
+  donut: { despesa: { month: null, active: null, drill: null }, receita: { month: null, active: null, drill: null } },
+  // gráfico de patrimônio (período + seleção por arrasto)
+  pcRange: null, pcSel: null,
 };
-const freshForm = () => ({ desc: "", valor: "", cat: "", sub: "", conta: "Conta Corrente", data: TODAY_ISO, origem: "Conta Corrente", destino: "Investimentos", reembolso: false });
+let pcDrag = null;
+const freshForm = () => {
+  const ativas = accounts.filter((a) => !a.arquivada);
+  const c0 = ativas[0] ? ativas[0].nome : "Conta Corrente", c1 = ativas[1] ? ativas[1].nome : c0;
+  return { desc: "", valor: "", cat: "", sub: "", conta: c0, data: TODAY_ISO, origem: c0, destino: c1, reembolso: false };
+};
+// opções de conta: só as ativas + a atual (mesmo arquivada) pra não perder a seleção ao editar
+function acctOptions(selected) {
+  return accounts.filter((a) => !a.arquivada || a.nome === selected).map((a) => `<option ${a.nome === selected ? "selected" : ""}>${a.nome}</option>`).join("");
+}
 
 let elView, elTitle, elSub, elBadge, elModal;
+
+/* ---------- persistência local (edições sobrevivem ao reload) ---------- */
+const PKEY = "meucaixa_state_v1";
+const dataSig = () => (OF ? OF.netWorth + "|" + (OF.tx ? OF.tx.length : 0) : "mock");
+let _saveT = null;
+function saveState() {
+  try { localStorage.setItem(PKEY, JSON.stringify({ sig: dataSig(), accounts, catTree, tx: state.tx, dashOrder: state.dashOrder })); } catch (e) { /* quota/off */ }
+}
+function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
+function loadState() {
+  try {
+    const s = JSON.parse(localStorage.getItem(PKEY) || "null");
+    if (!s || s.sig !== dataSig()) return; // base mudou (novo import) → começa do zero
+    if (Array.isArray(s.accounts)) { accounts.length = 0; s.accounts.forEach((a) => accounts.push(a)); }
+    if (s.catTree) { ["receita", "despesa"].forEach((k) => { if (Array.isArray(s.catTree[k])) { catTree[k].length = 0; s.catTree[k].forEach((c) => catTree[k].push(c)); } }); }
+    if (Array.isArray(s.tx)) state.tx = s.tx;
+    if (Array.isArray(s.dashOrder)) state.dashOrder = s.dashOrder;
+  } catch (e) { /* corrompido → ignora */ }
+}
 
 function renderView() {
   document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
@@ -585,14 +901,28 @@ function renderView() {
   const pend = state.recon.filter((r) => r.status === "pendente").length;
   if (elBadge) { elBadge.textContent = pend; elBadge.style.display = pend ? "grid" : "none"; }
   elView.innerHTML = VIEWS[state.tab]();
+  scheduleSave();
 }
 function renderModal() {
   elModal.innerHTML = state.modal ? modalHTML() : "";
 }
 
 /* handlers */
-function openModal() { state.modal = true; state.modalTipo = "despesa"; state.form = freshForm(); state.acctMenu = null; renderModal(); }
-function closeModal() { state.modal = false; renderModal(); }
+function openModal() { state.modal = true; state.editTx = null; state.modalTipo = "despesa"; state.form = freshForm(); state.acctMenu = null; renderModal(); }
+function openEditTx(id) {
+  const t = state.tx.find((x) => x.id === +id); if (!t) return;
+  state.editTx = t.id;
+  state.modalTipo = t.tipo === "reembolso" ? "receita" : t.tipo;
+  state.form = {
+    desc: t.desc || "", valor: fmtNum(Math.abs(t.valor)),
+    cat: t.cat || "", sub: t.sub || "", conta: t.conta || "Conta Corrente",
+    data: t.iso || TODAY_ISO, origem: t.origem || "Conta Corrente", destino: t.destino || "Investimentos",
+    reembolso: t.tipo === "reembolso",
+  };
+  state.pop = null; state.modal = true;
+  renderPop(); renderModal();
+}
+function closeModal() { state.modal = false; state.editTx = null; renderModal(); }
 function setTipo(k) { state.modalTipo = k; state.form.cat = ""; state.form.sub = ""; state.form.reembolso = false; renderModal(); }
 function toggleReemb() { state.form.reembolso = !state.form.reembolso; state.form.cat = ""; state.form.sub = ""; renderModal(); }
 function pickCat(nome) {
@@ -613,7 +943,9 @@ function saveTx() {
   const tipo = state.modalTipo === "receita" && state.form.reembolso ? "reembolso" : state.modalTipo;
   if (v <= 0) return;
   if (tipo !== "transferencia" && !state.form.cat) return;
-  const base = { id: Date.now(), data: dataBR(state.form.data), desc: state.form.desc || TIPOS[tipo].label, tipo, status: "pendente" };
+  const iso = state.form.data || TODAY_ISO;
+  const orig = state.editTx ? state.tx.find((t) => t.id === state.editTx) : null;
+  const base = { id: state.editTx || Date.now(), data: dataBR(iso), iso, desc: state.form.desc || TIPOS[tipo].label, tipo, status: orig ? orig.status : "pendente" };
   let tx;
   if (tipo === "transferencia") {
     tx = { ...base, origem: state.form.origem || "Conta Corrente", destino: state.form.destino || "Investimentos", valor: v };
@@ -622,7 +954,8 @@ function saveTx() {
     const catObj = list.find((c) => c.nome === state.form.cat) || list[0];
     tx = { ...base, cat: catObj.nome, sub: state.form.sub || catObj.subs[0], conta: state.form.conta || "Conta Corrente", valor: tipo === "despesa" ? -Math.abs(v) : Math.abs(v) };
   }
-  state.tx = [tx, ...state.tx];
+  state.tx = state.editTx ? state.tx.map((t) => (t.id === state.editTx ? tx : t)) : [tx, ...state.tx];
+  state.editTx = null;
   state.modal = false;
   renderModal();
   renderView();
@@ -632,8 +965,17 @@ function refreshSideNet() { const el = document.getElementById("side-net-val"); 
 function openAcct(nome) { state.acctDetail = nome; state.acctMenu = null; renderView(); }
 function backAcct() { state.acctDetail = null; renderView(); }
 function toggleAcctMenu(id) { state.acctMenu = state.acctMenu === id ? null : id; renderView(); }
-function startEditAcct(id) { state.acctEdit = id; state.acctMenu = null; renderView(); }
+function startEditAcct(id) { const a = acctById(id); if (!a) return; state.acctMenu = null; state.pop = { kind: "acctEdit", id, curName: a.nome, editIcon: acctIconOf(a) }; renderPop(); }
 function cancelEditAcct() { state.acctEdit = null; renderView(); }
+function saveAcctEditForm(id) {
+  const a = acctById(id), inp = document.querySelector('[data-ae="nome"]');
+  if (a) {
+    a.icon = state.pop.editIcon;
+    const nv = inp ? inp.value.trim() : "";
+    if (nv && nv !== a.nome) { const old = a.nome; a.nome = nv; state.tx.forEach((t) => { if (t.conta === old) t.conta = nv; if (t.origem === old) t.origem = nv; if (t.destino === old) t.destino = nv; }); if (state.acctDetail === old) state.acctDetail = nv; }
+  }
+  closePop(); renderView();
+}
 function saveAcctName(id) {
   const inp = document.querySelector(`[data-acct-input="${id}"]`), a = acctById(id);
   if (a && inp) {
@@ -680,7 +1022,182 @@ function drillBack(to) {
   renderDrill();
 }
 
-function reconAccept(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "conciliado" } : r)); state.editing = null; renderView(); }
+/* ---------- pop-ups (lançamento, nova conta, nova categoria) ---------- */
+function renderPop() {
+  const el = document.getElementById("pop-root");
+  if (!el) return;
+  if (!state.pop) { el.innerHTML = ""; return; }
+  const p = state.pop;
+  let title = "", body = "", foot = "";
+  if (p.kind === "tx") {
+    const t = state.tx.find((x) => x.id === p.id);
+    if (!t) { state.pop = null; el.innerHTML = ""; return; }
+    title = "Lançamento";
+    const linha = (k, v) => `<div class="pop-line"><span>${k}</span><span>${v}</span></div>`;
+    body = `<div class="pop-tx-top">${badgeHTML(t.tipo)}<div class="pop-tx-val">${moneyHTML(t.tipo, t.valor, true)}</div></div>
+      ${linha("Descrição", t.desc || "—")}
+      ${t.tipo === "transferencia" ? linha("De → Para", `${t.origem} → ${t.destino}`) : linha("Categoria", `${t.cat}${t.sub ? " · " + t.sub : ""}`)}
+      ${t.tipo !== "transferencia" ? linha("Conta", t.conta || "—") : ""}
+      ${linha("Data", t.iso ? t.iso.split("-").reverse().join("/") : t.data)}
+      ${linha("Status", t.status)}`;
+    foot = `<button class="pop-danger" data-tx-del="${t.id}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-tx-edit="${t.id}">${ic("pencil", 15)} Editar</button>`;
+  } else if (p.kind === "acctForm") {
+    title = "Nova conta";
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-af="nome" placeholder="Ex.: Conta corrente" autocomplete="off"></label>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-af="tipo"><option value="banco">Conta / banco</option><option value="invest">Investimento</option><option value="cartao">Cartão de crédito</option><option value="dinheiro">Dinheiro</option><option value="patrimonio">Patrimônio (bem)</option></select></label><label class="fld"><span class="fld-label">Saldo inicial</span><input data-af="saldo" inputmode="decimal" placeholder="0,00" autocomplete="off"></label></div>`;
+    foot = `<button class="mini-btn primary" data-acct-form-save>Adicionar conta</button><button class="mini-btn" data-pop-close>Cancelar</button>`;
+  } else if (p.kind === "catForm") {
+    title = p.parent ? "Nova subcategoria" : `Nova categoria de ${p.tipo === "receita" ? "receita" : "despesa"}`;
+    body = `${p.parent ? `<p class="pop-hint">Dentro de <b>${p.parent}</b></p>` : ""}<label class="fld"><span class="fld-label">Nome</span><input data-cf="nome" placeholder="${p.parent ? "Ex.: Mercado" : "Ex.: Educação"}" autocomplete="off"></label>`;
+    foot = `<button class="mini-btn primary" data-cat-form-save>Adicionar</button><button class="mini-btn" data-pop-close>Cancelar</button>`;
+  } else if (p.kind === "catTx") {
+    const tipo = p.tipo || "despesa", sinal = tipo === "despesa" ? "−" : "+", cor = tipo === "despesa" ? "var(--neg)" : "var(--pos)";
+    const list = state.tx.filter((t) => t.tipo === tipo && t.cat === p.cat && (!p.sub || (t.sub || "Sem subcategoria") === p.sub) && (t.iso || "").slice(0, 7) === p.ym).sort((a, b) => (b.iso || "").localeCompare(a.iso || ""));
+    const total = list.reduce((s, t) => s + Math.abs(t.valor), 0);
+    title = p.sub ? `${p.cat} · ${p.sub}` : p.cat;
+    body = `<div class="pop-cat-head"><span>${ymLabel(p.ym)} · ${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><b class="num" style="color:${cor}">${fmt(total)}</b></div>
+      <div class="pop-cat-list">${list.map((t) => `<div class="mini-row click" data-tx-open="${t.id}"><div class="mini-l"><div><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data}${t.sub ? " · " + t.sub : ""}${t.conta ? " · " + t.conta : ""}</div></div></div><span class="num" style="color:${cor};font-weight:600">${sinal} ${fmtNum(Math.abs(t.valor))}</span></div>`).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
+    foot = `<button class="mini-btn" data-cat-detail="${tipo}|${p.cat}${p.sub ? "|" + p.sub : ""}">${ic("list", 14)} Ver todos os meses</button>`;
+  } else if (p.kind === "catEdit") {
+    title = "Editar categoria";
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-ce="nome" value="${p.curName != null ? p.curName : p.nome}" autocomplete="off"></label>
+      <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ce-icon", p.editIcon)}</div>`;
+    foot = `<button class="pop-danger" data-cat-del="${p.tipo}|${p.nome}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-cat-rename-save>Salvar</button>`;
+  } else if (p.kind === "catDelete") {
+    const others = catTree[p.tipo].filter((c) => c.nome !== p.nome);
+    title = "Excluir categoria";
+    body = others.length
+      ? `<p class="pop-hint">Todos os lançamentos de <b>${p.nome}</b> serão transferidos para outra categoria (transbordo).</p><label class="fld"><span class="fld-label">Transferir tudo para</span><select data-cd="target">${others.map((c) => `<option>${c.nome}</option>`).join("")}</select></label>`
+      : `<p class="pop-hint">Crie outra categoria de ${p.tipo} antes — os lançamentos precisam de um destino.</p>`;
+    foot = others.length
+      ? `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-cat-del-confirm="${p.tipo}|${p.nome}">Excluir e transferir</button>`
+      : `<button class="mini-btn" data-pop-close>Entendi</button>`;
+  } else if (p.kind === "subEdit") {
+    title = "Editar subcategoria";
+    body = `<p class="pop-hint">Dentro de <b>${p.parent}</b></p><label class="fld"><span class="fld-label">Nome</span><input data-se="nome" value="${p.sub}" autocomplete="off"></label>`;
+    foot = `<button class="pop-danger" data-sub-del-ask="${p.tipo}|${p.parent}|${p.sub}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-sub-rename-save>Salvar</button>`;
+  } else if (p.kind === "subDelete") {
+    const node = catTree[p.tipo].find((c) => c.nome === p.parent);
+    const others = node ? node.subs.filter((s) => s !== p.sub) : [];
+    title = "Excluir subcategoria";
+    body = `<p class="pop-hint">Os lançamentos de <b>${p.sub}</b> (em ${p.parent}) vão para:</p><label class="fld"><span class="fld-label">Transferir para</span><select data-sd="target"><option value="">Sem subcategoria</option>${others.map((s) => `<option>${s}</option>`).join("")}</select></label>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-sub-del-confirm="${p.tipo}|${p.parent}|${p.sub}">Excluir e transferir</button>`;
+  } else if (p.kind === "acctEdit") {
+    const a = acctById(p.id);
+    title = "Editar conta";
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${p.curName != null ? p.curName : (a ? a.nome : "")}" autocomplete="off"></label>
+      <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ae-icon", p.editIcon)}</div>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-acct-edit-save="${p.id}">Salvar</button>`;
+  }
+  el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
+  const first = el.querySelector("input"); if (first) first.focus();
+}
+function closePop() { state.pop = null; renderPop(); }
+function openTxPop(id) { state.pop = { kind: "tx", id: +id }; renderPop(); }
+function delTx(id) { state.tx = state.tx.filter((t) => t.id !== +id); closePop(); renderView(); }
+function openAcctForm() { state.pop = { kind: "acctForm" }; renderPop(); }
+function saveAcctForm() {
+  const g = (s) => document.querySelector(`[data-af="${s}"]`);
+  const nome = g("nome").value.trim(); if (!nome) { g("nome").focus(); return; }
+  const tipo = g("tipo").value, saldo = parseValor(g("saldo").value);
+  const grupo = tipo === "patrimonio" ? "pat" : "fin";
+  const sub = { invest: "Investimento", cartao: "Cartão", patrimonio: "Patrimônio", dinheiro: "Dinheiro", banco: "Conta" }[tipo];
+  const o = { id: "u" + Date.now(), nome, sub, tipo, saldo, grupo, arquivada: false };
+  if (grupo === "pat") { o.alocado = saldo; o.custo = 0; }
+  accounts.push(o); refreshSideNet(); closePop(); renderView();
+}
+function openCatForm(tipo, parent) { state.pop = { kind: "catForm", tipo, parent: parent || null }; renderPop(); }
+function saveCatForm() {
+  const p = state.pop, inp = document.querySelector('[data-cf="nome"]'), nome = inp ? inp.value.trim() : "";
+  if (!nome) { if (inp) inp.focus(); return; }
+  if (p.parent) { const node = catTree[p.tipo].find((c) => c.nome === p.parent); if (node && !node.subs.includes(nome)) node.subs.push(nome); }
+  else if (!catTree[p.tipo].some((c) => c.nome === nome)) catTree[p.tipo].push({ nome, subs: [], total: 0 });
+  closePop(); renderView();
+}
+/* donut de categorias: navegação, seleção, lançamentos */
+function openDonutTx(arg) { const [tipo, cat, sub] = arg.split("|"); state.pop = { kind: "catTx", tipo, cat, sub: sub || null, ym: state.donut[tipo].month }; renderPop(); }
+function donutMonthNav(tipo, dir) {
+  const st = state.donut[tipo], months = txMonths(), i = months.indexOf(st.month), j = dir === "prev" ? i - 1 : i + 1;
+  if (j < 0 || j >= months.length) return;
+  st.month = months[j]; st.active = null; renderView();
+}
+function donutSelect(tipo, nome) { const st = state.donut[tipo]; st.active = st.active === nome ? null : nome; renderView(); }
+function donutDrill(tipo, cat) { const st = state.donut[tipo]; st.drill = cat; st.active = null; renderView(); }
+function donutBack(tipo) { const st = state.donut[tipo]; st.drill = null; st.active = null; renderView(); }
+function resetDonuts() { state.donut.despesa.active = state.donut.despesa.drill = null; state.donut.receita.active = state.donut.receita.drill = null; }
+/* editar / excluir categorias e subcategorias (com transbordo) */
+function openCatEdit(tipo, nome) { const node = catTree[tipo].find((c) => c.nome === nome); state.pop = { kind: "catEdit", tipo, nome, curName: nome, editIcon: catIconOf(node) }; renderPop(); }
+function saveCatRename() {
+  const p = state.pop, inp = document.querySelector('[data-ce="nome"]'), nv = inp ? inp.value.trim() : (p.curName || "");
+  const node = catTree[p.tipo].find((c) => c.nome === p.nome);
+  if (node) {
+    node.icon = p.editIcon;
+    if (nv && nv !== p.nome && !catTree[p.tipo].some((c) => c.nome === nv)) {
+      const old = node.nome; node.nome = nv;
+      state.tx.forEach((t) => { if (t.cat === old) t.cat = nv; });
+      if (state.catDetail && state.catDetail.cat === old) state.catDetail.cat = nv;
+    }
+    resetDonuts();
+  }
+  closePop(); renderView();
+}
+function openCatDelete(tipo, nome) { state.pop = { kind: "catDelete", tipo, nome }; renderPop(); }
+function confirmCatDelete(tipo, nome) {
+  const sel = document.querySelector('[data-cd="target"]'), tgt = sel ? sel.value : null;
+  if (!tgt) return;
+  const arr = catTree[tipo], node = arr.find((c) => c.nome === nome), tnode = arr.find((c) => c.nome === tgt);
+  state.tx.forEach((t) => { if (t.cat === nome) { t.cat = tgt; t.sub = ""; } });
+  if (tnode && node) tnode.total = (tnode.total || 0) + (node.total || 0);
+  catTree[tipo] = arr.filter((c) => c.nome !== nome);
+  if (state.catDetail && state.catDetail.cat === nome) state.catDetail = null;
+  resetDonuts();
+  closePop(); renderView();
+}
+function openSubEdit(tipo, parent, sub) { state.pop = { kind: "subEdit", tipo, parent, sub }; renderPop(); }
+function saveSubRename() {
+  const p = state.pop, inp = document.querySelector('[data-se="nome"]'), nv = inp ? inp.value.trim() : "";
+  if (!nv) { if (inp) inp.focus(); return; }
+  const node = catTree[p.tipo].find((c) => c.nome === p.parent);
+  if (node) { const i = node.subs.indexOf(p.sub); if (i >= 0 && nv !== p.sub && !node.subs.includes(nv)) { node.subs[i] = nv; state.tx.forEach((t) => { if (t.cat === p.parent && t.sub === p.sub) t.sub = nv; }); if (state.catDetail && state.catDetail.cat === p.parent && state.catDetail.sub === p.sub) state.catDetail.sub = nv; } }
+  closePop(); renderView();
+}
+function openSubDelete(tipo, parent, sub) { state.pop = { kind: "subDelete", tipo, parent, sub }; renderPop(); }
+function confirmSubDelete(tipo, parent, sub) {
+  const sel = document.querySelector('[data-sd="target"]'), tgt = sel ? sel.value : "";
+  const node = catTree[tipo].find((c) => c.nome === parent);
+  if (node) { node.subs = node.subs.filter((s) => s !== sub); state.tx.forEach((t) => { if (t.cat === parent && t.sub === sub) t.sub = tgt; }); }
+  if (state.catDetail && state.catDetail.cat === parent && state.catDetail.sub === sub) state.catDetail = null;
+  closePop(); renderView();
+}
+/* ---------- hover do gráfico de patrimônio ---------- */
+function pcShow(pc, i) {
+  if (!pc) return;
+  const dot = pc.querySelector(`[data-pt="${i}"]`); if (!dot) return;
+  pc.querySelectorAll(".pc-dot.on").forEach((d) => d.classList.remove("on")); dot.classList.add("on");
+  const guide = pc.querySelector(".pc-guide"), tip = pc.querySelector(".pc-tip");
+  const val = parseFloat(dot.dataset.val), delta = parseFloat(dot.dataset.delta);
+  if (guide) { guide.hidden = false; guide.style.left = dot.style.left; }
+  if (tip) {
+    tip.hidden = false; tip.style.left = dot.style.left; tip.style.top = dot.style.top;
+    tip.innerHTML = `<b>${dot.dataset.mes}</b><span class="num">${fmt(val)}</span>${delta ? `<span class="num pc-d ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "+" : "−"} ${fmtNum(delta)}</span>` : ""}`;
+  }
+}
+function pcHide(pc) { if (!pc) return; pc.querySelectorAll(".pc-dot.on").forEach((d) => d.classList.remove("on")); const g = pc.querySelector(".pc-guide"), t = pc.querySelector(".pc-tip"); if (g) g.hidden = true; if (t) t.hidden = true; }
+
+function reconAccept(id) {
+  const r0 = state.recon.find((r) => r.id === id);
+  let patch = {};
+  if (state.editing === id && r0) {
+    const scope = document.querySelector(`[data-recon-id="${id}"]`);
+    if (scope) {
+      const val = (f) => { const el = scope.querySelector(`[data-recon-field="${f}"]`); return el ? el.value : null; };
+      const tipoKey = Object.keys(TIPOS).find((k) => TIPOS[k].label === val("tipo")) || r0.sug.tipo;
+      patch = { sug: { ...r0.sug, tipo: tipoKey, cat: val("cat") || r0.sug.cat, conta: val("conta") || r0.sug.conta } };
+    }
+  }
+  state.recon = state.recon.map((r) => (r.id === id ? { ...r, ...patch, status: "conciliado" } : r));
+  state.editing = null; renderView();
+}
 function reconIgnore(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "ignorado" } : r)); state.editing = null; renderView(); }
 function reconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
 
@@ -688,16 +1205,76 @@ const ACTIONS = {
   "open-modal": openModal,
   "close-modal": closeModal,
   "save-tx": saveTx,
-  "import": () => { state.imported = true; renderView(); },
-  "reimport": () => { state.recon = initialRecon.map((r) => ({ ...r })); state.imported = false; state.editing = null; renderView(); },
+  "import": () => {
+    const sel = document.querySelector("[data-imp-acct]");
+    state.reconAccount = sel ? sel.value : (accounts.find((a) => !a.arquivada) || {}).nome;
+    state.recon = initialRecon.map((r) => { const c = { ...r, status: "pendente" }; if (c.sug && c.sug.tipo !== "transferencia") c.sug = { ...c.sug, conta: state.reconAccount }; return c; });
+    state.imported = true; state.editing = null; renderView();
+  },
+  "reimport": () => { state.imported = false; state.reconAccount = null; state.editing = null; renderView(); },
 };
 
 function wire() {
   document.addEventListener("click", (e) => {
     if (e.target.id === "overlay") { closeModal(); return; }
     if (e.target.id === "drill-overlay") { closeDrill(); return; }
+    if (e.target.id === "pop-overlay") { closePop(); return; }
+    if (e.target.closest("[data-pop-close]")) { closePop(); return; }
+    const txo = e.target.closest("[data-tx-open]");
+    if (txo) { openTxPop(txo.dataset.txOpen); return; }
+    const txd = e.target.closest("[data-tx-del]");
+    if (txd) { delTx(txd.dataset.txDel); return; }
+    const txe = e.target.closest("[data-tx-edit]");
+    if (txe) { openEditTx(txe.dataset.txEdit); return; }
+    if (e.target.closest("[data-add-acct]")) { openAcctForm(); return; }
+    if (e.target.closest("[data-acct-form-save]")) { saveAcctForm(); return; }
+    const adc = e.target.closest("[data-add-cat]");
+    if (adc) { openCatForm(adc.dataset.addCat); return; }
+    const ads = e.target.closest("[data-add-sub]");
+    if (ads) { const [tipo, parent] = ads.dataset.addSub.split("|"); openCatForm(tipo, parent); return; }
+    if (e.target.closest("[data-cat-form-save]")) { saveCatForm(); return; }
+    const pr = e.target.closest("[data-pcrange]");
+    if (pr) { state.pcRange = pr.dataset.pcrange; state.pcSel = null; renderView(); return; }
+    if (e.target.closest("[data-pcsel-clear]")) { state.pcSel = null; renderView(); return; }
+    const dm = e.target.closest("[data-donut-month]");
+    if (dm) { const [tp, dir] = dm.dataset.donutMonth.split("|"); donutMonthNav(tp, dir); return; }
+    const ddr = e.target.closest("[data-donut-drill]");
+    if (ddr) { const [tp, cat] = ddr.dataset.donutDrill.split("|"); donutDrill(tp, cat); return; }
+    const dbk = e.target.closest("[data-donut-back]");
+    if (dbk) { donutBack(dbk.dataset.donutBack); return; }
+    const dtx = e.target.closest("[data-donut-tx]");
+    if (dtx) { openDonutTx(dtx.dataset.donutTx); return; }
+    const dsl = e.target.closest("[data-donut-slice]");
+    if (dsl) { const [tp, nome] = dsl.dataset.donutSlice.split("|"); donutSelect(tp, nome); return; }
+    const cei = e.target.closest("[data-ce-icon]");
+    if (cei) { const inp = document.querySelector('[data-ce="nome"]'); if (inp) state.pop.curName = inp.value; state.pop.editIcon = cei.dataset.ceIcon; renderPop(); return; }
+    const aei = e.target.closest("[data-ae-icon]");
+    if (aei) { const inp = document.querySelector('[data-ae="nome"]'); if (inp) state.pop.curName = inp.value; state.pop.editIcon = aei.dataset.aeIcon; renderPop(); return; }
+    const aes = e.target.closest("[data-acct-edit-save]");
+    if (aes) { saveAcctEditForm(aes.dataset.acctEditSave); return; }
+    const it = e.target.closest("[data-imp-type]");
+    if (it) { it.parentElement.querySelectorAll(".imp-type").forEach((x) => x.classList.remove("on")); it.classList.add("on"); return; }
+    const cdet = e.target.closest("[data-cat-detail]");
+    if (cdet) { const [tp, ct, sb] = cdet.dataset.catDetail.split("|"); openCatDetail(tp, ct, sb); return; }
+    if (e.target.closest("[data-cat-detail-back]")) { state.catDetail = null; renderView(); return; }
+    if (e.target.closest("[data-cat-detail-edit]")) { const d = state.catDetail; d.sub ? openSubEdit(d.tipo, d.cat, d.sub) : openCatEdit(d.tipo, d.cat); return; }
+    if (e.target.closest("[data-cat-detail-del]")) { const d = state.catDetail; d.sub ? openSubDelete(d.tipo, d.cat, d.sub) : openCatDelete(d.tipo, d.cat); return; }
+    const cedit = e.target.closest("[data-cat-edit]");
+    if (cedit) { const [tp, nm] = cedit.dataset.catEdit.split("|"); openCatEdit(tp, nm); return; }
+    const cdel = e.target.closest("[data-cat-del]");
+    if (cdel) { const [tp, nm] = cdel.dataset.catDel.split("|"); openCatDelete(tp, nm); return; }
+    if (e.target.closest("[data-cat-rename-save]")) { saveCatRename(); return; }
+    const cdc = e.target.closest("[data-cat-del-confirm]");
+    if (cdc) { const [tp, nm] = cdc.dataset.catDelConfirm.split("|"); confirmCatDelete(tp, nm); return; }
+    const sedit = e.target.closest("[data-sub-edit]");
+    if (sedit) { const [tp, pa, su] = sedit.dataset.subEdit.split("|"); openSubEdit(tp, pa, su); return; }
+    if (e.target.closest("[data-sub-rename-save]")) { saveSubRename(); return; }
+    const sdela = e.target.closest("[data-sub-del-ask]");
+    if (sdela) { const [tp, pa, su] = sdela.dataset.subDelAsk.split("|"); openSubDelete(tp, pa, su); return; }
+    const sdelc = e.target.closest("[data-sub-del-confirm]");
+    if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; renderView(); return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); return; }
     const filt = e.target.closest("[data-filter]");
     if (filt) { state.filter = filt.dataset.filter; renderView(); return; }
     // drill-down
@@ -736,6 +1313,8 @@ function wire() {
     if (mc) { pickCat(mc.dataset.modalCat); return; }
     const ms = e.target.closest("[data-modal-sub]");
     if (ms) { pickSub(ms.dataset.modalSub); return; }
+    const dset = e.target.closest("[data-date-set]");
+    if (dset) { state.form.data = isoPlusDays(TODAY_ISO, +dset.dataset.dateSet); renderModal(); return; }
     const acc = e.target.closest("[data-recon-accept]");
     if (acc) { reconAccept(acc.dataset.reconAccept); return; }
     const edt = e.target.closest("[data-recon-edit]");
@@ -757,9 +1336,48 @@ function wire() {
   });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if (state.modal) closeModal();
+    if (state.pop) closePop();
+    else if (state.modal) closeModal();
     else if (state.drill) closeDrill();
     else if (state.acctMenu || state.acctEdit) { state.acctMenu = null; state.acctEdit = null; renderView(); }
+  });
+  // gráfico de patrimônio: hover (tooltip) + arrastar (mede o período)
+  document.addEventListener("mousedown", (e) => {
+    const pc = e.target.closest(".pchart"); if (!pc) return;
+    e.preventDefault(); pcDrag = { pc, start: pcIdxAt(pc, e.clientX) };
+    pcDrawBand(pc, pcDrag.start, pcDrag.start);
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (pcDrag) { pcDrawBand(pcDrag.pc, pcDrag.start, pcIdxAt(pcDrag.pc, e.clientX)); return; }
+    const pc = e.target.closest(".pchart"); if (!pc) return;
+    pcShow(pc, pcIdxAt(pc, e.clientX));
+  });
+  document.addEventListener("mouseup", (e) => {
+    if (!pcDrag) return;
+    const start = pcDrag.start, end = pcIdxAt(pcDrag.pc, e.clientX); pcDrag = null;
+    state.pcSel = start !== end ? { a: start, b: end } : null;
+    renderView();
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (pcDrag) return;
+    const pc = e.target.closest(".pchart");
+    if (pc && !(e.relatedTarget && pc.contains(e.relatedTarget))) pcHide(pc);
+  });
+  document.addEventListener("touchstart", (e) => {
+    const pc = e.target.closest(".pchart"); if (!pc) return;
+    const t = e.touches[0]; pcDrag = { pc, start: pcIdxAt(pc, t.clientX) };
+    pcDrawBand(pc, pcDrag.start, pcDrag.start);
+  }, { passive: true });
+  document.addEventListener("touchmove", (e) => {
+    if (!pcDrag) return; const t = e.touches[0];
+    pcDrawBand(pcDrag.pc, pcDrag.start, pcIdxAt(pcDrag.pc, t.clientX)); e.preventDefault();
+  }, { passive: false });
+  document.addEventListener("touchend", (e) => {
+    if (!pcDrag) return;
+    const t = (e.changedTouches && e.changedTouches[0]) || { clientX: 0 };
+    const start = pcDrag.start, end = pcIdxAt(pcDrag.pc, t.clientX); pcDrag = null;
+    state.pcSel = start !== end ? { a: start, b: end } : null;
+    renderView();
   });
   // arrastar-e-soltar dos blocos do dashboard
   document.addEventListener("dragstart", (e) => {
@@ -791,6 +1409,7 @@ function wire() {
 }
 
 function init() {
+  loadState(); // restaura edições salvas (arquivar, renomear, ícones, lançamentos, ordem)
   elView = document.getElementById("view");
   elTitle = document.getElementById("pg-title");
   elSub = document.getElementById("pg-sub");
@@ -810,5 +1429,6 @@ function init() {
   wire();
   renderView();
   renderModal();
+  renderPop();
 }
 document.addEventListener("DOMContentLoaded", init);

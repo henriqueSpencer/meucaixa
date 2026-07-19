@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Meu Caixa — finanças pessoais</title>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=23">
 </head>
 <body>
   <div class="fin-root">
@@ -76,10 +76,10 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z"/></svg>
             dados de exemplo
           </span>
-          <span class="month">
+          <button class="month" data-drill="open" title="Detalhar por mês">
             julho 2026
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-          </span>
+          </button>
           <button class="cta" data-action="open-modal">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Nova transação
@@ -89,13 +89,14 @@
 
       <div class="content" id="view"></div>
     </main>
+
+    <!-- pontos de montagem de modais (DENTRO de .fin-root p/ herdar os tokens de cor) -->
+    <div id="modal-root"></div>
+    <div id="drill-root"></div>
+    <div id="pop-root"></div>
   </div>
 
-  <!-- pontos de montagem de modais -->
-  <div id="modal-root"></div>
-  <div id="drill-root"></div>
-
-  <script src="dados.js?v=1"></script>
-  <script src="app.js?v=9"></script>
+  <script src="dados.js?v=2"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>
