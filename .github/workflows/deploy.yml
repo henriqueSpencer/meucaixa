@@ -1,0 +1,23 @@
+name: Deploy no Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Na CI o checkout só contém os arquivos versionados (dados.js/base.bak são gitignored
+    # e nunca foram commitados), então publicar a pasta é seguro — não expõe dado financeiro.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publicar
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: b7345f757a0fc365da5dcdea7a033db5
+          command: pages deploy . --project-name=meucaixa --branch=main --commit-dirty=true
