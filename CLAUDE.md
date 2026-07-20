@@ -45,9 +45,9 @@ Cloudflare Pages, projeto `meucaixa` (**direct-upload via wrangler**; o token OA
 DIST=$(mktemp -d); git archive HEAD | tar -x -C "$DIST"
 npx --yes wrangler@latest pages deploy "$DIST" --project-name=meucaixa --branch=main --commit-dirty=true
 ```
-`.assetsignore` enxuga o site. **Auto-deploy no push** via `.github/workflows/deploy.yml` (existe no
-disco, ainda não commitado): falta a conta `henriqueSpencer` ganhar escopo `workflow`
-(`gh auth switch -u henriqueSpencer && gh auth refresh -s workflow`) + secret `CLOUDFLARE_API_TOKEN`.
+`.assetsignore` enxuga o site. **Auto-deploy no push** via `.github/workflows/deploy.yml` (já commitado,
+usa `cloudflare/wrangler-action`, accountId `b7345f757a0fc365da5dcdea7a033db5`): só falta o repo ter o
+secret **`CLOUDFLARE_API_TOKEN`** (token do template *Cloudflare Pages — Edit*) para os runs passarem.
 
 ## Dados reais (seed já feito)
 Vieram do `base.bak` (export SQLite do **Orçamento Fácil**). `gerar_dados.py` → `dados.js`
