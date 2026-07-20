@@ -49,6 +49,27 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .avatar{width:32px;height:32px;border-radius:9px;background:#2C2C1F;color:#E3C77E;display:grid;place-items:center;font-weight:700;font-size:13px}
 .u-name{font-size:13px;color:#E6E3D8;font-weight:600}
 .u-sub{font-size:11px;color:#7A7B6E}
+.side-signout{margin-left:auto;color:#7A7B6E;padding:6px;border-radius:8px;display:grid;place-items:center}
+.side-signout:hover{color:#E6E3D8;background:#2C2C1F}
+
+/* ---- tela de login (magic-link) ---- */
+.auth-overlay{position:fixed;inset:0;z-index:120;display:grid;place-items:center;padding:24px;background:var(--bg);overflow:auto}
+.auth-card{width:100%;max-width:380px;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:34px 30px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.18)}
+.auth-brand,.auth-ic{width:60px;height:60px;border-radius:16px;display:grid;place-items:center;margin:0 auto 16px}
+.auth-brand{background:rgba(168,130,60,.14);color:var(--brand)}
+.auth-ic{background:rgba(46,158,107,.14);color:#1E6B4F}
+.auth-ic.err{background:rgba(194,74,56,.14);color:var(--neg)}
+.auth-card h2{font-size:20px;margin-bottom:8px;color:var(--ink)}
+.auth-card p{font-size:13.5px;color:var(--sub);line-height:1.5;margin-bottom:18px}
+.auth-card form{display:flex;flex-direction:column;gap:10px}
+.auth-card input{width:100%;font-size:14px;padding:12px 14px;border:1px solid var(--border);border-radius:11px;background:var(--card-2);color:var(--ink);font-family:inherit;text-align:center}
+.auth-card input:focus{outline:none;border-color:var(--brand)}
+.auth-btn{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:14px;font-weight:600;color:#fff;background:var(--brand);padding:12px;border-radius:11px;transition:.15s}
+.auth-btn:hover{filter:brightness(1.06)}
+.auth-btn[disabled]{opacity:.6;cursor:default}
+.auth-btn.ghost{background:transparent;border:1px solid var(--border);color:var(--sub)}
+.auth-msg{margin-top:12px;font-size:12.5px}
+.auth-msg.err,.auth-card p .err{color:var(--neg)}
 
 /* main */
 .main{flex:1;min-width:0;display:flex;flex-direction:column}

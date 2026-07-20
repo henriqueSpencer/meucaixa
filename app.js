@@ -902,23 +902,25 @@ function acctOptions(selected) {
 let elView, elTitle, elSub, elBadge, elModal;
 
 /* ---------- persistência local (edições sobrevivem ao reload) ---------- */
-const PKEY = "meucaixa_state_v1";
-const dataSig = () => (OF ? OF.netWorth + "|" + (OF.tx ? OF.tx.length : 0) : "mock");
+/* modelo em memória ⇄ snapshot persistido (IndexedDB) + sync (Supabase), tudo via window.Store */
+const cloneCat = (c) => Object.assign({}, c, { subs: (c.subs || []).slice() });
+function currentModel() {
+  return {
+    accounts: accounts.map((a) => Object.assign({}, a)),
+    catTree: { receita: catTree.receita.map(cloneCat), despesa: catTree.despesa.map(cloneCat) },
+    tx: state.tx.slice(), dashOrder: state.dashOrder.slice(), prefs: {},
+  };
+}
+function applyModel(m) {
+  if (!m) return;
+  if (Array.isArray(m.accounts)) { accounts.length = 0; m.accounts.forEach((a) => accounts.push(a)); }
+  if (m.catTree) { ["receita", "despesa"].forEach((k) => { if (Array.isArray(m.catTree[k])) { catTree[k].length = 0; m.catTree[k].forEach((c) => catTree[k].push(c)); } }); }
+  if (Array.isArray(m.tx)) state.tx = m.tx;
+  if (Array.isArray(m.dashOrder) && m.dashOrder.length) state.dashOrder = m.dashOrder;
+}
 let _saveT = null;
-function saveState() {
-  try { localStorage.setItem(PKEY, JSON.stringify({ sig: dataSig(), accounts, catTree, tx: state.tx, dashOrder: state.dashOrder })); } catch (e) { /* quota/off */ }
-}
+function saveState() { if (window.Store && Store.isAuthed()) Store.saveSnapshot(currentModel()); }
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
-function loadState() {
-  try {
-    const s = JSON.parse(localStorage.getItem(PKEY) || "null");
-    if (!s || s.sig !== dataSig()) return; // base mudou (novo import) → começa do zero
-    if (Array.isArray(s.accounts)) { accounts.length = 0; s.accounts.forEach((a) => accounts.push(a)); }
-    if (s.catTree) { ["receita", "despesa"].forEach((k) => { if (Array.isArray(s.catTree[k])) { catTree[k].length = 0; s.catTree[k].forEach((c) => catTree[k].push(c)); } }); }
-    if (Array.isArray(s.tx)) state.tx = s.tx;
-    if (Array.isArray(s.dashOrder)) state.dashOrder = s.dashOrder;
-  } catch (e) { /* corrompido → ignora */ }
-}
 
 function renderView() {
   document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
@@ -1670,27 +1672,95 @@ function wire() {
   });
 }
 
-function init() {
-  loadState(); // restaura edições salvas (arquivar, renomear, ícones, lançamentos, ordem)
+let _wired = false, _booted = false;
+async function init() {
   elView = document.getElementById("view");
   elTitle = document.getElementById("pg-title");
   elSub = document.getElementById("pg-sub");
   elBadge = document.getElementById("nav-badge");
   elModal = document.getElementById("modal-root");
+  // listeners de autenticação (a tela de login existe antes do wire() do app)
+  document.addEventListener("submit", (e) => {
+    if (e.target.closest("[data-auth-form]")) { e.preventDefault(); const inp = document.querySelector("[data-auth-email]"); const email = inp ? inp.value.trim() : ""; if (email) submitLogin(email); }
+  });
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-auth-back]")) { _authState = { view: "signin", email: _authState.email, msg: "" }; renderAuth(); return; }
+    if (e.target.closest("[data-signout]")) { if (window.Store) Store.signOut().then(() => location.reload()).catch(() => location.reload()); return; }
+  });
+  if (!window.Store) { renderAuthError("Falha ao carregar o módulo de dados."); return; }
+  try { await Store.init(); } catch (e) { renderAuthError("Sem conexão com o servidor. Tente recarregar."); return; }
+  Store.onAuth((authed) => { if (authed) boot(); else showLogin(); });
+  if (Store.isAuthed()) boot(); else showLogin();
+}
+
+// carrega os dados (do IndexedDB; puxa/semeia se preciso) e sobe o app
+async function boot() {
+  if (_booted) return; _booted = true;
+  hideAuth();
+  const seedModel = currentModel(); // estado inicial = OF_DATA (local) ou mock; usado só p/ 1º seed
+  let model = await Store.loadSnapshot();
+  if (!model) {
+    try { await Store.sync(); } catch (e) { /* offline: segue com o que tiver */ }
+    model = await Store.loadSnapshot();
+  }
+  if (!model) {
+    // 1ª vez neste usuário: se há dados reais locais (OF) e o servidor está vazio, semeia
+    let remoteEmpty = true;
+    try { remoteEmpty = await Store.isRemoteEmpty(); } catch (e) { remoteEmpty = false; }
+    if (OF && remoteEmpty) { await Store.seed(seedModel); model = seedModel; }
+    else model = { accounts: [], catTree: { receita: [], despesa: [] }, tx: [], dashOrder: state.dashOrder.slice() };
+  }
+  applyModel(model);
+  refreshDataLabels();
+  if (!_wired) { wire(); _wired = true; }
+  renderView(); renderModal(); renderPop();
+  // pull em segundo plano: se outro aparelho mudou, atualiza a tela
+  Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); renderView(); } }).catch(() => {});
+}
+
+function refreshDataLabels() {
   const netEl = document.getElementById("side-net-val");
   if (netEl) netEl.textContent = fmt(netWorth());
   if (OF) {
-    // reflete o mês de referência e a origem real dos dados nos rótulos estáticos
     const cap = REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1);
     PAGE.dashboard[1] = `Como está seu dinheiro em ${cap}`;
     const monthEl = document.querySelector(".month");
     if (monthEl && monthEl.childNodes[0]) monthEl.childNodes[0].textContent = REF_LABEL + " ";
-    const demo = document.querySelector(".pill-demo");
-    if (demo) { const t = demo.childNodes[demo.childNodes.length - 1]; if (t) t.textContent = " dados do Orçamento Fácil"; }
   }
-  wire();
-  renderView();
-  renderModal();
-  renderPop();
+  const demo = document.querySelector(".pill-demo");
+  if (demo) demo.style.display = "none"; // não é mais "dados de exemplo" — vem do banco
+}
+
+/* ---------- tela de login (magic-link) ---------- */
+let _authState = { view: "signin", email: "", msg: "" };
+function showLogin() { _booted = false; _authState = { view: "signin", email: "", msg: "" }; renderAuth(); }
+function hideAuth() { const g = document.getElementById("auth-gate"); if (g) g.innerHTML = ""; }
+function renderAuthError(msg) { _authState = { view: "error", email: "", msg }; renderAuth(); }
+function renderAuth() {
+  const g = document.getElementById("auth-gate"); if (!g) return;
+  const s = _authState;
+  let inner;
+  if (s.view === "sent") {
+    inner = `<div class="auth-ic">${ic("check", 26)}</div><h2>Verifique seu e-mail</h2>
+      <p>Enviamos um link de acesso para <b>${s.email}</b>. Abra no mesmo aparelho para entrar.</p>
+      <button class="auth-btn ghost" data-auth-back>Usar outro e-mail</button>`;
+  } else if (s.view === "error") {
+    inner = `<div class="auth-ic err">${ic("circle-alert", 26)}</div><h2>Ops</h2><p>${s.msg}</p>
+      <button class="auth-btn" onclick="location.reload()">Recarregar</button>`;
+  } else {
+    inner = `<div class="auth-brand">${ic("wallet", 30)}</div><h2>Meu Caixa</h2>
+      <p>Entre com seu e-mail — enviamos um link de acesso, sem senha.</p>
+      <form data-auth-form><input type="email" data-auth-email value="${s.email || ""}" placeholder="voce@email.com" autocomplete="email" required>
+      <button class="auth-btn" type="submit"${s.view === "sending" ? " disabled" : ""}>${s.view === "sending" ? "Enviando…" : "Enviar link de acesso"}</button></form>
+      ${s.msg ? `<p class="auth-msg err">${s.msg}</p>` : ""}`;
+  }
+  g.innerHTML = `<div class="auth-overlay"><div class="auth-card">${inner}</div></div>`;
+  const inp = g.querySelector("[data-auth-email]"); if (inp) inp.focus();
+}
+async function submitLogin(email) {
+  _authState = { view: "sending", email, msg: "" }; renderAuth();
+  try { const { error } = await Store.signIn(email); if (error) throw error; _authState = { view: "sent", email, msg: "" }; }
+  catch (e) { _authState = { view: "signin", email, msg: "Não consegui enviar. Confira o e-mail e tente de novo." }; }
+  renderAuth();
 }
 document.addEventListener("DOMContentLoaded", init);

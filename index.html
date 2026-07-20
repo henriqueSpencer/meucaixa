@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Meu Caixa — finanças pessoais</title>
-  <link rel="stylesheet" href="styles.css?v=36">
+  <link rel="stylesheet" href="styles.css?v=37">
 </head>
 <body>
   <div class="fin-root">
@@ -60,6 +60,9 @@
             <div class="u-name">Henrique</div>
             <div class="u-sub">conta pessoal</div>
           </div>
+          <button class="side-signout" data-signout title="Sair">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          </button>
         </div>
       </div>
     </aside>
@@ -94,9 +97,12 @@
     <div id="modal-root"></div>
     <div id="drill-root"></div>
     <div id="pop-root"></div>
+    <div id="auth-gate"></div>
   </div>
 
+  <script src="vendor/supabase.js"></script>
   <script src="dados.js?v=2"></script>
-  <script src="app.js?v=36"></script>
+  <script src="store.js?v=1"></script>
+  <script src="app.js?v=37"></script>
 </body>
 </html>
