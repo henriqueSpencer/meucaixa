@@ -100,13 +100,13 @@ const initialTx = OF ? OF.tx : [
 ];
 
 const initialRecon = [
-  { id: "r1", raw: "PAG*IFOOD 88 SAOPAULO", valor: -54.3, sug: { tipo: "despesa", cat: "Alimentação", sub: "Delivery", conta: "Cartão de Crédito" }, conf: 96, match: null, status: "pendente" },
-  { id: "r2", raw: "POSTO SHELL BR NATAL RN", valor: -220, sug: { tipo: "despesa", cat: "Transporte", sub: "Combustível", conta: "Cartão de Crédito" }, conf: 98, match: "Posto Shell · 12/07 · pendente", status: "pendente" },
-  { id: "r3", raw: "TED RECEBIDA JOAO S CLIENTE", valor: 2500, sug: { tipo: "receita", cat: "Trabalho", sub: "Freelance", conta: "Conta Corrente" }, conf: 71, match: null, status: "pendente" },
-  { id: "r4", raw: "NORDESTAO SUPERM NATAL", valor: -388.7, sug: { tipo: "despesa", cat: "Alimentação", sub: "Supermercado", conta: "Cartão de Crédito" }, conf: 94, match: null, status: "pendente" },
-  { id: "r5", raw: "NETFLIX.COM ASSINATURA", valor: -44.9, sug: { tipo: "despesa", cat: "Lazer", sub: "Streaming", conta: "Cartão de Crédito" }, conf: 99, match: null, status: "pendente" },
-  { id: "r6", raw: "SAQUE 24HORAS TERMINAL", valor: -200, sug: { tipo: "transferencia", origem: "Conta Corrente", destino: "Carteira" }, conf: 64, match: null, status: "pendente" },
-  { id: "r7", raw: "PIX ENVIADO APLICACAO", valor: -1000, sug: { tipo: "transferencia", origem: "Conta Corrente", destino: "Investimentos" }, conf: 87, match: null, status: "pendente" },
+  { id: "r1", raw: "PAG*IFOOD 88 SAOPAULO", valor: -54.3, iso: "2026-06-14", sug: { tipo: "despesa", cat: "Alimentação", sub: "Delivery", conta: "Cartão de Crédito" }, conf: 96, match: null, status: "pendente" },
+  { id: "r2", raw: "POSTO SHELL BR NATAL RN", valor: -220, iso: "2026-06-12", sug: { tipo: "despesa", cat: "Transporte", sub: "Combustível", conta: "Cartão de Crédito" }, conf: 98, match: "Posto Shell · 12/07 · pendente", status: "pendente" },
+  { id: "r3", raw: "TED RECEBIDA JOAO S CLIENTE", valor: 2500, iso: "2026-06-11", sug: { tipo: "receita", cat: "Trabalho", sub: "Freelance", conta: "Conta Corrente" }, conf: 71, match: null, status: "pendente" },
+  { id: "r4", raw: "NORDESTAO SUPERM NATAL", valor: -388.7, iso: "2026-06-10", sug: { tipo: "despesa", cat: "Alimentação", sub: "Supermercado", conta: "Cartão de Crédito" }, conf: 94, match: null, status: "pendente" },
+  { id: "r5", raw: "NETFLIX.COM ASSINATURA", valor: -44.9, iso: "2026-06-09", sug: { tipo: "despesa", cat: "Lazer", sub: "Streaming", conta: "Cartão de Crédito" }, conf: 99, match: null, status: "pendente" },
+  { id: "r6", raw: "SAQUE 24HORAS TERMINAL", valor: -200, iso: "2026-06-08", sug: { tipo: "transferencia", origem: "Conta Corrente", destino: "Carteira" }, conf: 64, match: null, status: "pendente" },
+  { id: "r7", raw: "PIX ENVIADO APLICACAO", valor: -1000, iso: "2026-06-05", sug: { tipo: "transferencia", origem: "Conta Corrente", destino: "Investimentos" }, conf: 87, match: null, status: "pendente" },
 ];
 
 accounts.forEach((a, i) => { if (a.arquivada === undefined) a.arquivada = false; a.ordem = i; });
@@ -648,17 +648,24 @@ function reconEffect(r) {
 }
 function viewConciliacao() {
   if (!state.imported) {
-    const opts = accounts.filter((a) => !a.arquivada).map((a) => `<option>${a.nome}</option>`).join("");
-    const types = ["OFX", "CSV", "PDF", "Excel", "QIF"];
-    return `<div class="import-zone card">
-      <span class="import-ic">${ic("upload", 26)}</span>
+    if (!state.reconAccount) state.reconAccount = (accounts.find((a) => !a.arquivada) || {}).nome;
+    const opts = accounts.filter((a) => !a.arquivada).map((a) => `<option ${a.nome === state.reconAccount ? "selected" : ""}>${a.nome}</option>`).join("");
+    const files = state.reconFiles;
+    const totalN = files.reduce((s, f) => s + (Array.isArray(f.parsed) ? f.parsed.length : 0), 0);
+    const fileSub = (f) => f.parsed === null ? "lendo…" : f.parsed === "unsupported" ? "sem leitura automática deste formato" : `${f.parsed.length} lançamento${f.parsed.length === 1 ? "" : "s"}`;
+    const list = files.length
+      ? `<div class="imp-file-list">${files.map((f, i) => `<div class="imp-file-row"><span class="imp-file-ic">${ic("receipt", 18)}</span><div class="imp-drop-txt"><b>${f.name}</b><span>${fileSub(f)}</span></div><button class="imp-file-x" data-imp-clear="${i}" title="Remover">${ic("x", 15)}</button></div>`).join("")}</div>`
+      : "";
+    const doneBanner = state.reconDone ? `<div class="recon-done-banner card">${ic("check", 16)} Conciliação salva — <b>${state.reconDone.criados}</b> ${state.reconDone.criados === 1 ? "novo lançamento criado" : "novos lançamentos criados"}${state.reconDone.conciliados > state.reconDone.criados ? ` · ${state.reconDone.conciliados - state.reconDone.criados} já existentes conciliados` : ""}.<button class="rdb-x" data-recon-done-x title="Fechar">${ic("x", 14)}</button></div>` : "";
+    const drop = `<div class="import-drop" data-imp-drop><input type="file" data-imp-file accept=".ofx,.csv,.pdf,.xls,.xlsx,.qif,.txt" multiple hidden><span class="imp-file-ic">${ic("upload", 22)}</span><div class="imp-drop-txt"><b>${files.length ? "Adicionar outro arquivo" : "Arraste o(s) arquivo(s) aqui"}</b><span>${files.length ? "arraste ou clique para incluir mais" : "ou clique para escolher (pode ser mais de um)"}</span></div></div>`;
+    return `${doneBanner}<div class="import-zone card">
       <h3>Importar extrato</h3>
-      <p>Escolha a conta e o formato do arquivo. O MeuCaixa lê as transações e já sugere categoria, conta e correspondências com o que você lançou.</p>
+      <p>Escolha a conta e envie um ou mais arquivos do banco (OFX · CSV · PDF · Excel · QIF). O MeuCaixa lê as transações e já sugere categoria, conta e correspondências com o que você lançou.</p>
       <div class="import-form">
         <label class="fld"><span class="fld-label">Conta</span><select data-imp-acct>${opts}</select></label>
-        <div class="fld"><span class="fld-label">Formato do arquivo</span><div class="imp-types">${types.map((t, i) => `<button class="imp-type${i === 0 ? " on" : ""}" data-imp-type="${t}">${t}</button>`).join("")}</div></div>
+        <div class="fld"><span class="fld-label">Arquivos${files.length ? ` (${files.length})` : ""}</span>${list}${drop}</div>
       </div>
-      <button class="cta big" data-action="import">${ic("sparkles", 16)} Importar (extrato de exemplo)</button>
+      <button class="cta big" data-action="import">${ic("sparkles", 16)} ${totalN > 0 ? `Importar ${totalN} lançamentos${files.length > 1 ? ` de ${files.length} arquivos` : ""}` : "Importar (extrato de exemplo)"}</button>
       <span class="import-formats">Nubank · Caixa · Itaú · Bradesco · Inter · e outros</span>
     </div>`;
   }
@@ -668,32 +675,51 @@ function viewConciliacao() {
   const acct = accounts.find((a) => a.nome === state.reconAccount);
   const saldoAtual = acct ? acct.saldo : 0;
   const pend = state.recon.filter((r) => r.status === "pendente");
-  const projPend = pend.reduce((s, r) => s + reconEffect(r), 0);
-  const projConc = state.recon.filter((r) => r.status === "conciliado").reduce((s, r) => s + reconEffect(r), 0);
-  const saldoFuturo = saldoAtual + projPend; // se aceitar todos os pendentes
+  let despTot = 0, credTot = 0;
+  pend.forEach((r) => { const e = reconEffect(r); if (e < 0) despTot += e; else credTot += e; });
+  const saldoFuturo = saldoAtual + despTot + credTot;
   const head = `<div class="card recon-head">
     <div class="rh-l"><span class="acct-ic">${ic(acct ? acctIconOf(acct) : "wallet", 18)}</span><div><div class="rh-label">Conciliando</div><div class="rh-acct">${state.reconAccount || "—"}</div></div></div>
     <div class="rh-bals">
       <div class="rh-bal"><span>Saldo atual</span><b class="num">${fmt(saldoAtual)}</b></div>
-      <div class="rh-bal"><span>Já conciliado</span><b class="num" style="color:${projConc >= 0 ? "var(--pos)" : "var(--neg)"}">${projConc >= 0 ? "+" : "−"} ${fmtNum(projConc)}</b></div>
-      <div class="rh-bal accent"><span>Saldo se aceitar tudo (${pend.length})</span><b class="num" style="color:${saldoFuturo >= saldoAtual ? "var(--pos)" : "var(--neg)"}">${fmt(saldoFuturo)}</b></div>
+      <div class="rh-bal"><span>Despesas a lançar</span><b class="num" style="color:var(--neg)">${fmt(despTot)}</b></div>
+      <div class="rh-bal"><span>Créditos / pagamentos</span><b class="num" style="color:var(--pos)">+ ${fmtNum(credTot)}</b></div>
+      <div class="rh-bal accent"><span>Saldo projetado (${pend.length})</span><b class="num" style="color:${saldoFuturo >= saldoAtual ? "var(--pos)" : "var(--neg)"}">${fmt(saldoFuturo)}</b></div>
     </div>
   </div>`;
-  const bar = head + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div></div><button class="ghost" data-action="reimport">Reimportar</button></div>`;
+  const novosCount = state.recon.filter((r) => r.status === "conciliado" && !r.match).length;
+  const saveLabel = novosCount ? `Salvar ${novosCount} lançamento${novosCount > 1 ? "s" : ""}` : conc ? "Salvar conciliação" : "Nada para salvar";
+  const bar = head + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div></div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button><button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
   const list = state.recon.map((r) => {
     const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
     const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
+    const catList = r.sug.tipo === "receita" ? catTree.receita : catTree.despesa;
+    const curCat = catList.find((c) => c.nome === r.sug.cat);
+    const subs = curCat ? curCat.subs : [];
     const sug = !isEdit
-      ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat} <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span> <span class="dot">·</span> ${r.sug.conta}</span>`}</div>`
-      : `<div class="edit-body"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><select data-recon-field="cat">${(r.sug.tipo === "receita" ? catTree.receita : catTree.despesa).map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select></div>`;
+      ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat}${r.sug.sub ? ` <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span>` : ""} <span class="dot">·</span> ${r.sug.conta}</span>`}</div>`
+      : `<div class="edit-body">
+          <input data-recon-field="desc" value="${(r.raw || "").replace(/"/g, "&quot;")}" placeholder="Descrição">
+          <div class="edit-row"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><input type="date" data-recon-field="data" value="${r.iso || ""}"></div>
+          ${r.sug.tipo === "transferencia"
+            ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
+            : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>`}
+        </div>`;
     const match = r.match && !isEdit ? `<div class="recon-match">${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b></div>` : "";
     const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
-    const actions = done ? `<span class="conc-tag">${ic("check", 14)} Conciliado</span>`
-      : skip ? `<span class="skip-tag">Ignorado</span>`
-        : `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} ${isEdit ? "Salvar" : "Aceitar"}</button><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} ${isEdit ? "Cancelar" : "Editar"}</button><button class="act skip-btn" data-recon-ignore="${r.id}">${ic("x", 13)}</button>`;
-    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
+    const inst = r.note ? `<div class="recon-inst">${ic("circle-alert", 12)} ${r.note}</div>` : "";
+    const actions = isEdit
+      ? `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Salvar</button><button class="act edit" data-recon-edit="${r.id}">${ic("x", 13)} Cancelar</button>`
+      : done
+        ? `<span class="conc-tag">${ic("check", 14)} Conciliado</span><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-reactivate="${r.id}" title="Desfazer">${ic("undo", 13)}</button>`
+        : skip
+          ? `<span class="skip-tag">${r.note ? "Parcela pulada" : "Ignorado"}</span><button class="act edit" data-recon-reactivate="${r.id}">reativar</button>`
+          : `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Aceitar</button><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-ignore="${r.id}">${ic("x", 13)}</button>`;
+    const rawDate = r.iso ? r.iso.split("-").reverse().join("/") : "";
+    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${inst}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
   }).join("");
-  return bar + `<div class="recon-list">${list}</div>`;
+  const addLine = `<button class="recon-add-line" data-recon-add>${ic("plus", 14)} Adicionar lançamento manualmente</button>`;
+  return bar + addLine + `<div class="recon-list">${list}</div>`;
 }
 
 function catDetailRow(t, hideSub) {
@@ -818,8 +844,9 @@ function modalHTML() {
   const canSave = parseValor(f.valor) > 0 && (baseTipo === "transferencia" || !!f.cat);
 
   const editing = !!state.editTx;
+  const recon = !!state.modalRecon;
   return `<div class="overlay" id="overlay"><div class="modal modal-tx" style="--acc:${t.cor}">
-    <div class="modal-head"><h3>${editing ? "Editar lançamento" : "Nova transação"}</h3><button class="x" data-action="close-modal">${ic("x", 18)}</button></div>
+    <div class="modal-head"><h3>${editing ? "Editar lançamento" : recon ? "Adicionar à conciliação" : "Nova transação"}</h3><button class="x" data-action="close-modal">${ic("x", 18)}</button></div>
     <div class="tx-body">
       <div class="type-seg3">${seg}</div>
       ${reembToggle}
@@ -832,7 +859,7 @@ function modalHTML() {
       <div class="tx-note" style="background:${t.cor}12;color:${t.cor}"><span class="tx-note-ic">${ic("circle-alert", 14)}</span><span>${note}</span></div>
     </div>
     <div class="modal-foot-tx">
-      <button class="save-tx" data-action="save-tx" style="background:${t.cor}" ${canSave ? "" : "disabled"}>${ic("check", 16)} ${editing ? "Salvar alterações" : `Salvar ${t.label.toLowerCase()}`}</button>
+      <button class="save-tx" data-action="save-tx" style="background:${t.cor}" ${canSave ? "" : "disabled"}>${ic("check", 16)} ${editing ? "Salvar alterações" : recon ? "Adicionar à conciliação" : `Salvar ${t.label.toLowerCase()}`}</button>
     </div>
   </div></div>`;
 }
@@ -842,7 +869,7 @@ const state = {
   tab: "dashboard",
   tx: initialTx.slice(),
   recon: initialRecon.map((r) => ({ ...r })),
-  imported: false, reconAccount: null,
+  imported: false, reconAccount: null, reconFiles: [], reconDone: null, modalRecon: false,
   filter: "todas",
   modal: false,
   modalTipo: "despesa",
@@ -908,7 +935,7 @@ function renderModal() {
 }
 
 /* handlers */
-function openModal() { state.modal = true; state.editTx = null; state.modalTipo = "despesa"; state.form = freshForm(); state.acctMenu = null; renderModal(); }
+function openModal() { state.modal = true; state.modalRecon = false; state.editTx = null; state.modalTipo = "despesa"; state.form = freshForm(); state.acctMenu = null; renderModal(); }
 function openEditTx(id) {
   const t = state.tx.find((x) => x.id === +id); if (!t) return;
   state.editTx = t.id;
@@ -919,10 +946,10 @@ function openEditTx(id) {
     data: t.iso || TODAY_ISO, origem: t.origem || "Conta Corrente", destino: t.destino || "Investimentos",
     reembolso: t.tipo === "reembolso",
   };
-  state.pop = null; state.modal = true;
+  state.pop = null; state.modal = true; state.modalRecon = false;
   renderPop(); renderModal();
 }
-function closeModal() { state.modal = false; state.editTx = null; renderModal(); }
+function closeModal() { state.modal = false; state.modalRecon = false; state.editTx = null; renderModal(); }
 function setTipo(k) { state.modalTipo = k; state.form.cat = ""; state.form.sub = ""; state.form.reembolso = false; renderModal(); }
 function toggleReemb() { state.form.reembolso = !state.form.reembolso; state.form.cat = ""; state.form.sub = ""; renderModal(); }
 function pickCat(nome) {
@@ -943,6 +970,12 @@ function saveTx() {
   const tipo = state.modalTipo === "receita" && state.form.reembolso ? "reembolso" : state.modalTipo;
   if (v <= 0) return;
   if (tipo !== "transferencia" && !state.form.cat) return;
+  if (state.modalRecon) {
+    state.recon = [formToRecon(), ...state.recon];
+    state.modalRecon = false; state.modal = false; state.editTx = null;
+    renderModal(); renderView();
+    return;
+  }
   const iso = state.form.data || TODAY_ISO;
   const orig = state.editTx ? state.tx.find((t) => t.id === state.editTx) : null;
   const base = { id: state.editTx || Date.now(), data: dataBR(iso), iso, desc: state.form.desc || TIPOS[tipo].label, tipo, status: orig ? orig.status : "pendente" };
@@ -1074,7 +1107,8 @@ function renderPop() {
       : `<button class="mini-btn" data-pop-close>Entendi</button>`;
   } else if (p.kind === "subEdit") {
     title = "Editar subcategoria";
-    body = `<p class="pop-hint">Dentro de <b>${p.parent}</b></p><label class="fld"><span class="fld-label">Nome</span><input data-se="nome" value="${p.sub}" autocomplete="off"></label>`;
+    const seOpts = catTree[p.tipo].map((c) => `<option${c.nome === p.parent ? " selected" : ""}>${c.nome}</option>`).join("");
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-se="nome" value="${p.sub}" autocomplete="off"></label><label class="fld"><span class="fld-label">Categoria</span><select data-se="parent">${seOpts}</select></label>`;
     foot = `<button class="pop-danger" data-sub-del-ask="${p.tipo}|${p.parent}|${p.sub}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-sub-rename-save>Salvar</button>`;
   } else if (p.kind === "subDelete") {
     const node = catTree[p.tipo].find((c) => c.nome === p.parent);
@@ -1155,10 +1189,28 @@ function confirmCatDelete(tipo, nome) {
 }
 function openSubEdit(tipo, parent, sub) { state.pop = { kind: "subEdit", tipo, parent, sub }; renderPop(); }
 function saveSubRename() {
-  const p = state.pop, inp = document.querySelector('[data-se="nome"]'), nv = inp ? inp.value.trim() : "";
+  const p = state.pop, inp = document.querySelector('[data-se="nome"]'), selP = document.querySelector('[data-se="parent"]');
+  const nv = inp ? inp.value.trim() : "", np = selP ? selP.value : p.parent;
   if (!nv) { if (inp) inp.focus(); return; }
-  const node = catTree[p.tipo].find((c) => c.nome === p.parent);
-  if (node) { const i = node.subs.indexOf(p.sub); if (i >= 0 && nv !== p.sub && !node.subs.includes(nv)) { node.subs[i] = nv; state.tx.forEach((t) => { if (t.cat === p.parent && t.sub === p.sub) t.sub = nv; }); if (state.catDetail && state.catDetail.cat === p.parent && state.catDetail.sub === p.sub) state.catDetail.sub = nv; } }
+  const oldNode = catTree[p.tipo].find((c) => c.nome === p.parent);
+  const newNode = catTree[p.tipo].find((c) => c.nome === np);
+  if (!oldNode || !newNode) { closePop(); renderView(); return; }
+  const moved = np !== p.parent, renamed = nv !== p.sub;
+  if (moved) {
+    // não deixa mover para uma categoria que já tem uma sub com esse nome
+    if (newNode.subs.includes(nv)) { if (inp) inp.focus(); return; }
+    oldNode.subs = oldNode.subs.filter((s) => s !== p.sub);
+    newNode.subs.push(nv);
+    state.tx.forEach((t) => { if (t.cat === p.parent && t.sub === p.sub) { t.cat = np; t.sub = nv; } });
+    if (state.catDetail && state.catDetail.cat === p.parent && state.catDetail.sub === p.sub) { state.catDetail.cat = np; state.catDetail.sub = nv; }
+  } else if (renamed) {
+    const i = oldNode.subs.indexOf(p.sub);
+    if (i >= 0 && !oldNode.subs.includes(nv)) {
+      oldNode.subs[i] = nv;
+      state.tx.forEach((t) => { if (t.cat === p.parent && t.sub === p.sub) t.sub = nv; });
+      if (state.catDetail && state.catDetail.cat === p.parent && state.catDetail.sub === p.sub) state.catDetail.sub = nv;
+    }
+  }
   closePop(); renderView();
 }
 function openSubDelete(tipo, parent, sub) { state.pop = { kind: "subDelete", tipo, parent, sub }; renderPop(); }
@@ -1184,6 +1236,26 @@ function pcShow(pc, i) {
 }
 function pcHide(pc) { if (!pc) return; pc.querySelectorAll(".pc-dot.on").forEach((d) => d.classList.remove("on")); const g = pc.querySelector(".pc-guide"), t = pc.querySelector(".pc-tip"); if (g) g.hidden = true; if (t) t.hidden = true; }
 
+// mudança em um campo da edição inline (mantém subcategoria dependente da categoria)
+function reconFieldChange(id, field, value) {
+  const r = state.recon.find((x) => String(x.id) === String(id)); if (!r) return;
+  if (field === "sub") { r.sug.sub = value; return; }
+  if (field === "conta") { r.sug.conta = value; return; }
+  if (field === "origem") { r.sug.origem = value; return; }
+  if (field === "destino") { r.sug.destino = value; return; }
+  if (field === "desc") { r.raw = value; return; }
+  if (field === "data") { r.iso = value; return; }
+  // tipo/cat mudam os selects dependentes → preserva desc/data digitados e re-renderiza
+  const scope = document.querySelector(`[data-recon-id="${id}"]`);
+  if (scope) { const d = scope.querySelector('[data-recon-field="desc"]'); if (d) r.raw = d.value; const dt = scope.querySelector('[data-recon-field="data"]'); if (dt) r.iso = dt.value; }
+  if (field === "tipo") {
+    const tipoKey = Object.keys(TIPOS).find((k) => TIPOS[k].label === value) || value;
+    r.sug.tipo = tipoKey;
+    if (tipoKey !== "transferencia") { const list = catTree[tipoKey === "receita" ? "receita" : "despesa"]; r.sug.cat = list[0] ? list[0].nome : ""; r.sug.sub = ""; }
+    else { const ativas = accounts.filter((a) => !a.arquivada); r.sug.origem = r.sug.origem || r.sug.conta || state.reconAccount || (ativas[0] && ativas[0].nome); r.sug.destino = r.sug.destino || (ativas.find((a) => a.nome !== r.sug.origem) || {}).nome || ""; }
+  } else if (field === "cat") { r.sug.cat = value; r.sug.sub = ""; }
+  renderView();
+}
 function reconAccept(id) {
   const r0 = state.recon.find((r) => r.id === id);
   let patch = {};
@@ -1192,26 +1264,192 @@ function reconAccept(id) {
     if (scope) {
       const val = (f) => { const el = scope.querySelector(`[data-recon-field="${f}"]`); return el ? el.value : null; };
       const tipoKey = Object.keys(TIPOS).find((k) => TIPOS[k].label === val("tipo")) || r0.sug.tipo;
-      patch = { sug: { ...r0.sug, tipo: tipoKey, cat: val("cat") || r0.sug.cat, conta: val("conta") || r0.sug.conta } };
+      patch = { sug: { ...r0.sug, tipo: tipoKey, cat: val("cat") || r0.sug.cat, sub: val("sub") != null ? val("sub") : r0.sug.sub, conta: val("conta") || r0.sug.conta, origem: val("origem") || r0.sug.origem, destino: val("destino") || r0.sug.destino } };
+      const desc = val("desc"); if (desc != null && desc.trim()) patch.raw = desc.trim();
+      const data = val("data"); if (data) patch.iso = data;
     }
   }
+  // aceitar é uma decisão reversível — nada é gravado até "Salvar conciliação" (reconCommit)
   state.recon = state.recon.map((r) => (r.id === id ? { ...r, ...patch, status: "conciliado" } : r));
   state.editing = null; renderView();
 }
 function reconIgnore(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "ignorado" } : r)); state.editing = null; renderView(); }
+function reconReactivate(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "pendente" } : r)); state.editing = null; renderView(); }
+// grava de vez: cria os lançamentos aceitos (sem correspondência) e encerra a sessão
+function reconCommit() {
+  const aceitos = state.recon.filter((r) => r.status === "conciliado");
+  if (!aceitos.length) return;
+  const novos = aceitos.filter((r) => !r.match).map(reconToTx);
+  if (novos.length) state.tx = [...novos, ...state.tx];
+  state.recon = []; state.reconFiles = []; state.imported = false; state.reconAccount = null; state.editing = null;
+  state.reconDone = { criados: novos.length, conciliados: aceitos.length };
+  renderView();
+}
 function reconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
 
+/* ---------- motor de conciliação (lê OFX/CSV, sugere, casa duplicatas) ---------- */
+let _txSeq = 0;
+function parseOFX(text) {
+  const out = [];
+  const blocks = text.match(/<STMTTRN>[\s\S]*?<\/STMTTRN>/gi) || [];
+  const tag = (b, t) => { const m = b.match(new RegExp("<" + t + ">\\s*([^<\r\n]*)", "i")); return m ? m[1].trim() : ""; };
+  blocks.forEach((b) => {
+    const amt = parseFloat(tag(b, "TRNAMT").replace(",", "."));
+    const dt = tag(b, "DTPOSTED").slice(0, 8);
+    const iso = dt.length === 8 ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}` : "";
+    const desc = tag(b, "NAME") || tag(b, "MEMO") || "Lançamento";
+    if (!isNaN(amt)) out.push({ iso, desc, valor: amt });
+  });
+  return out;
+}
+function parseCSV(text) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return [];
+  const delim = (lines[0].match(/;/g) || []).length >= (lines[0].match(/,/g) || []).length ? ";" : ",";
+  const dateRe = /\d{2}[\/\-]\d{2}[\/\-]\d{2,4}|\d{4}-\d{2}-\d{2}/;
+  const parseNum = (s) => { s = (s || "").replace(/["R$\s]/g, "").trim(); if (!/\d/.test(s)) return NaN; if (/,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", "."); else s = s.replace(/,/g, ""); return parseFloat(s); };
+  const toIso = (s) => { let m = String(s).match(/(\d{2})[\/\-](\d{2})[\/\-](\d{2,4})/); if (m) { let y = m[3].length === 2 ? "20" + m[3] : m[3]; return `${y}-${m[2]}-${m[1]}`; } m = String(s).match(/(\d{4})-(\d{2})-(\d{2})/); return m ? m[0] : ""; };
+  const out = [];
+  lines.forEach((l) => {
+    const cols = l.split(delim);
+    const di = cols.findIndex((c) => dateRe.test(c)); if (di < 0) return;
+    let amt = NaN, ai = -1;
+    for (let j = cols.length - 1; j >= 0; j--) { if (j === di) continue; const n = parseNum(cols[j]); if (!isNaN(n) && /[.,]|^-?\d+$/.test(cols[j].trim())) { amt = n; ai = j; break; } }
+    if (isNaN(amt)) return;
+    let desc = "";
+    cols.forEach((c, j) => { if (j !== di && j !== ai && c && c.trim().length > desc.length && !/^-?[\d.,]+$/.test(c.trim())) desc = c.trim(); });
+    out.push({ iso: toIso(cols[di]), desc: desc || "Lançamento", valor: amt });
+  });
+  return out;
+}
+const RECON_RULES = [
+  { kw: ["ifood", "rappi", "restaurante", "lanche", "burger", "pizza", "bar ", "padaria"], cat: "LAZER", sub: "Comer fora" },
+  { kw: ["uber", "99app", "99 ", "posto", "shell", "ipiranga", "combustiv", "estacion", "pedagio", "sem parar"], cat: "Custo de Vida", sub: "Carro" },
+  { kw: ["mercado", "supermerc", "nordestao", "carrefour", "feira", "hortifruti", "atacad", "assai"], cat: "Custo de Vida", sub: "Feira" },
+  { kw: ["netflix", "spotify", "assinatura", "prime", "hbo", "disney", "youtube"], cat: "Custo de Vida", sub: "Assinaturas" },
+  { kw: ["farmacia", "drogaria", "consulta", "medic", "hospital", "unimed", "plano de saude"], cat: "Custo de Vida", sub: "Plano de saude" },
+  { kw: ["aluguel", "condominio", "energia", "enel", "cemig", "agua", "internet", "vivo", "claro", "tim ", "net "], cat: "Casa", sub: "Contas" },
+  { kw: ["salario", "pro-labore", "pro labore", "prolabore"], cat: "Trabalho", sub: "Salário", tipo: "receita" },
+  { kw: ["dividendo", "juros", "rendimento", "cdb", "tesouro", "renda fixa", "aplicacao resgate"], cat: "Rendimentos financeiros", sub: "Renda Fixa", tipo: "receita" },
+  { kw: ["aporte", "investimento", "aplicacao", "compra ativo"], cat: "Investimento", sub: "Investimento" },
+  { kw: ["amazon", "mercado livre", "mercadolivre", "magazine", "aliexpress", "shopee", "loja", "roupa", "renner"], cat: "Compras", sub: "" },
+];
+function findReconMatch(p) {
+  if (!p.iso) return null;
+  return state.tx.find((t) => t.status !== "importado" && Math.abs(Math.abs(t.valor) - Math.abs(p.valor)) < 0.01 && t.iso && Math.abs((new Date(t.iso) - new Date(p.iso)) / 864e5) <= 3) || null;
+}
+function catExists(tipo, nome) { return catTree[tipo] && catTree[tipo].some((c) => c.nome === nome); }
+// detecta parcela "N/M" na descrição (com palavra parcela, ou N/M ao fim) — evita confundir com data
+function parseInstallment(desc) {
+  const d = (desc || "").trim();
+  const m = d.match(/parc\w*\D*(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})/i)
+    || d.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*$/)
+    || d.match(/\b(\d{1,2})\s+de\s+(\d{1,2})\s*$/i);
+  if (!m) return null;
+  const n = +m[1], tot = +m[2];
+  if (tot < 2 || tot > 24 || n < 1 || n > tot) return null;
+  return { n, m: tot };
+}
+function buildRecon(parsed, account) {
+  // Cartão: fatura (ex.: Nubank) costuma trazer compras como valor POSITIVO. Se num cartão a maioria
+  // dos valores é positiva, inverte o sinal para que compras contem como despesa.
+  const acc = accounts.find((a) => a.nome === account);
+  let flip = 1;
+  if (acc && acc.tipo === "cartao") {
+    const pos = parsed.filter((p) => p.valor > 0).length, neg = parsed.filter((p) => p.valor < 0).length;
+    if (pos > neg) flip = -1;
+  }
+  const isPay = (d) => /pagamento\s*(recebido|de\s*fatura|fatura)?|pgto|pagto/i.test(d || "");
+  return parsed.slice(0, 300).map((p, idx) => {
+    // pagamento de fatura do cartão → transferência (não é receita/despesa do orçamento)
+    if (acc && acc.tipo === "cartao" && isPay(p.desc) && p.valor * flip > 0) {
+      return { id: "imp" + idx, raw: p.desc, valor: Math.abs(p.valor), iso: p.iso, sug: { tipo: "transferencia", origem: "Pagamento", destino: account }, conf: 90, match: null, status: "pendente", note: "Pagamento de fatura — transferência, não entra no orçamento" };
+    }
+    const inst = parseInstallment(p.desc);
+    let valor = p.valor * flip, status = "pendente", note = null;
+    if (inst) {
+      if (inst.n === 1) { valor = valor * inst.m; note = `Parcela 1/${inst.m} — importando o valor cheio (${inst.m}×)`; }
+      else { status = "ignorado"; note = `Parcela ${inst.n}/${inst.m} — o total já foi lançado na 1ª`; }
+    }
+    const isDesp = valor < 0;
+    const rule = RECON_RULES.find((r) => r.kw.some((k) => (p.desc || "").toLowerCase().includes(k)));
+    const tipo = rule && rule.tipo ? rule.tipo : (isDesp ? "despesa" : "receita");
+    // categoria: da regra se existir, senão a 1ª do tipo
+    const catObj = (rule && catExists(tipo, rule.cat) ? catTree[tipo].find((c) => c.nome === rule.cat) : catTree[tipo][0]) || null;
+    const cat = catObj ? catObj.nome : "Outros";
+    // subcategoria SEMPRE pré-preenchida: a da regra se pertencer à categoria, senão a 1ª sub real
+    // (ignora o fallback em que a única "sub" é o próprio nome da categoria)
+    const firstSub = catObj ? (catObj.subs.find((s) => s !== catObj.nome) || "") : "";
+    const sub = (rule && rule.sub && catObj && catObj.subs.includes(rule.sub)) ? rule.sub : firstSub;
+    const match = findReconMatch({ iso: p.iso, valor });
+    const conf = Math.min((rule ? 85 : 55) + (match ? 12 : 0), 99);
+    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug: { tipo, cat, sub, conta: account }, conf, match: match ? `${match.desc} · ${match.data}` : null, status, note };
+  });
+}
+let _manSeq = 0;
+// "Adicionar lançamento" abre o MESMO modal de Nova transação, mas em modo conciliação
+function openReconAdd() {
+  state.modalRecon = true; state.modal = true; state.editTx = null;
+  state.modalTipo = "despesa"; state.form = freshForm();
+  if (state.reconAccount) { state.form.conta = state.reconAccount; state.form.origem = state.reconAccount; }
+  state.acctMenu = null; state.pop = null;
+  renderPop(); renderModal();
+}
+// converte o formulário do modal num item de conciliação (pendente), como se viesse do extrato
+function formToRecon() {
+  const v = parseValor(state.form.valor);
+  const tipo = state.modalTipo === "receita" && state.form.reembolso ? "reembolso" : state.modalTipo;
+  const iso = state.form.data || TODAY_ISO;
+  const raw = (state.form.desc || "").trim() || TIPOS[tipo].label;
+  const id = "man" + (_manSeq++);
+  if (tipo === "transferencia") {
+    const origem = state.form.origem || state.reconAccount, destino = state.form.destino || "—";
+    const sign = destino === state.reconAccount ? 1 : -1;
+    return { id, raw, valor: sign * Math.abs(v), iso, sug: { tipo: "transferencia", origem, destino }, conf: 100, match: null, status: "pendente", manual: true };
+  }
+  const signed = tipo === "despesa" ? -Math.abs(v) : Math.abs(v);
+  const match = findReconMatch({ iso, valor: signed });
+  return { id, raw, valor: signed, iso, sug: { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount }, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, status: "pendente", manual: true };
+}
+function reconToTx(r) {
+  const iso = r.iso || TODAY_ISO, tipo = r.sug.tipo;
+  const base = { id: Date.now() + (_txSeq++), data: dataBR(iso), iso, desc: r.raw || TIPOS[tipo].label, tipo, status: "conciliado" };
+  if (tipo === "transferencia") return { ...base, origem: r.sug.origem || r.sug.conta, destino: r.sug.destino || "—", valor: Math.abs(r.valor) };
+  const list = tipo === "receita" ? catTree.receita : catTree.despesa, catObj = list.find((c) => c.nome === r.sug.cat);
+  return { ...base, cat: r.sug.cat, sub: r.sug.sub || (catObj && catObj.subs[0]) || "", conta: r.sug.conta, valor: tipo === "despesa" ? -Math.abs(r.valor) : Math.abs(r.valor) };
+}
+function addReconFile(file) {
+  state.reconDone = null;
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  const entry = { name: file.name, ext, parsed: ["ofx", "csv", "txt"].includes(ext) ? null : "unsupported" };
+  state.reconFiles.push(entry);
+  if (entry.parsed === null) {
+    const reader = new FileReader();
+    reader.onload = () => { try { entry.parsed = ext === "ofx" ? parseOFX(reader.result) : parseCSV(reader.result); } catch (e) { entry.parsed = []; } renderView(); };
+    reader.onerror = () => { entry.parsed = []; renderView(); };
+    reader.readAsText(file);
+  }
+  renderView();
+}
+function addReconFiles(fileList) { [...fileList].forEach(addReconFile); }
+function reconAllParsed() { return state.reconFiles.reduce((a, f) => (Array.isArray(f.parsed) ? a.concat(f.parsed) : a), []); }
 const ACTIONS = {
   "open-modal": openModal,
   "close-modal": closeModal,
   "save-tx": saveTx,
   "import": () => {
+    state.reconDone = null;
     const sel = document.querySelector("[data-imp-acct]");
     state.reconAccount = sel ? sel.value : (accounts.find((a) => !a.arquivada) || {}).nome;
-    state.recon = initialRecon.map((r) => { const c = { ...r, status: "pendente" }; if (c.sug && c.sug.tipo !== "transferencia") c.sug = { ...c.sug, conta: state.reconAccount }; return c; });
+    const all = reconAllParsed();
+    if (all.length) {
+      state.recon = buildRecon(all, state.reconAccount);
+    } else {
+      state.recon = initialRecon.map((r) => { const c = { ...r, status: "pendente" }; if (c.sug && c.sug.tipo !== "transferencia") c.sug = { ...c.sug, conta: state.reconAccount }; return c; });
+    }
     state.imported = true; state.editing = null; renderView();
   },
-  "reimport": () => { state.imported = false; state.reconAccount = null; state.editing = null; renderView(); },
+  "reimport": () => { state.imported = false; state.reconAccount = null; state.reconFiles = []; state.editing = null; renderView(); },
 };
 
 function wire() {
@@ -1252,8 +1490,10 @@ function wire() {
     if (aei) { const inp = document.querySelector('[data-ae="nome"]'); if (inp) state.pop.curName = inp.value; state.pop.editIcon = aei.dataset.aeIcon; renderPop(); return; }
     const aes = e.target.closest("[data-acct-edit-save]");
     if (aes) { saveAcctEditForm(aes.dataset.acctEditSave); return; }
-    const it = e.target.closest("[data-imp-type]");
-    if (it) { it.parentElement.querySelectorAll(".imp-type").forEach((x) => x.classList.remove("on")); it.classList.add("on"); return; }
+    const iclr = e.target.closest("[data-imp-clear]");
+    if (iclr) { state.reconFiles.splice(+iclr.dataset.impClear, 1); renderView(); return; }
+    const idrop = e.target.closest("[data-imp-drop]");
+    if (idrop && !e.target.closest("[data-imp-file]")) { const inp = idrop.querySelector("[data-imp-file]"); if (inp) inp.click(); return; }
     const cdet = e.target.closest("[data-cat-detail]");
     if (cdet) { const [tp, ct, sb] = cdet.dataset.catDetail.split("|"); openCatDetail(tp, ct, sb); return; }
     if (e.target.closest("[data-cat-detail-back]")) { state.catDetail = null; renderView(); return; }
@@ -1321,6 +1561,11 @@ function wire() {
     if (edt) { reconEdit(edt.dataset.reconEdit); return; }
     const ign = e.target.closest("[data-recon-ignore]");
     if (ign) { reconIgnore(ign.dataset.reconIgnore); return; }
+    const rea = e.target.closest("[data-recon-reactivate]");
+    if (rea) { reconReactivate(rea.dataset.reconReactivate); return; }
+    if (e.target.closest("[data-recon-commit]")) { reconCommit(); return; }
+    if (e.target.closest("[data-recon-done-x]")) { state.reconDone = null; renderView(); return; }
+    if (e.target.closest("[data-recon-add]")) { openReconAdd(); return; }
     const act = e.target.closest("[data-action]");
     if (act && ACTIONS[act.dataset.action]) { ACTIONS[act.dataset.action](); return; }
     // clique fora fecha o menu de conta aberto
@@ -1405,6 +1650,23 @@ function wire() {
   document.addEventListener("dragend", () => {
     if (state.dragKey !== null) { state.dragKey = null; renderView(); }
     else document.querySelectorAll(".drop-over,.dragging").forEach((r) => r.classList.remove("drop-over", "dragging"));
+  });
+  // conciliação: enviar arquivo (seleção + arrastar-soltar)
+  document.addEventListener("change", (e) => {
+    const f = e.target.closest("[data-imp-file]");
+    if (f && f.files && f.files.length) { addReconFiles(f.files); f.value = ""; return; }
+    const ia = e.target.closest("[data-imp-acct]");
+    if (ia) { state.reconAccount = ia.value; return; } // mantém a conta escolhida ao re-renderizar
+    const rf = e.target.closest("[data-recon-field]");
+    if (rf) { const card = rf.closest("[data-recon-id]"); if (card) reconFieldChange(card.dataset.reconId, rf.dataset.reconField, rf.value); }
+  });
+  document.addEventListener("dragover", (e) => { const d = e.target.closest("[data-imp-drop]"); if (d) { e.preventDefault(); d.classList.add("drag"); } });
+  document.addEventListener("dragleave", (e) => { const d = e.target.closest("[data-imp-drop]"); if (d && !(e.relatedTarget && d.contains(e.relatedTarget))) d.classList.remove("drag"); });
+  document.addEventListener("drop", (e) => {
+    const d = e.target.closest("[data-imp-drop]"); if (!d) return;
+    e.preventDefault(); d.classList.remove("drag");
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files.length) addReconFiles(files);
   });
 }
 
