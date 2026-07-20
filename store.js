@@ -181,6 +181,21 @@
   let syncSched = null;
   function scheduleSync() { clearTimeout(syncSched); syncSched = setTimeout(() => sync().catch(() => {}), 1500); }
 
+  const EPOCH = "1970-01-01T00:00:00Z";
+  // PostgREST corta em 1000 linhas/requisição → pagina com .range() até esgotar.
+  async function selectAll(table, tweak) {
+    const PAGE = 1000; let from = 0; const all = [];
+    for (;;) {
+      let q = sb.from(table).select("*").order("updated_at", { ascending: true }).range(from, from + PAGE - 1);
+      if (tweak) q = tweak(q);
+      const { data, error } = await q;
+      if (error) throw error;
+      all.push(...(data || []));
+      if (!data || data.length < PAGE) break;
+      from += PAGE;
+    }
+    return all;
+  }
   // push (diff→upsert) + pull (updated_at>cursor). Retorna {pulled:bool, model?} se o remoto mudou.
   async function sync() {
     if (!userId || syncing || !navigator.onLine) return { pulled: false };
@@ -199,21 +214,21 @@
         }
         if (Object.keys(pending).length) await kvSet("lastSynced", current);
       }
-      // pull incremental
-      const cursor = (await kvGet("cursor")) || "1970-01-01T00:00:00Z";
+      // pull incremental (paginado)
+      const cursor = (await kvGet("cursor")) || EPOCH;
       let maxTs = cursor, remoteChanged = false;
       const pulledRows = {};
       for (const t of TABLES) {
-        const { data, error } = await sb.from(t).select("*").gt("updated_at", cursor).order("updated_at", { ascending: true });
-        if (error) throw error;
-        pulledRows[t] = data || [];
-        (data || []).forEach((r) => { if (r.updated_at > maxTs) maxTs = r.updated_at; });
-        if (data && data.length) remoteChanged = true;
+        const data = await selectAll(t, (q) => q.gt("updated_at", cursor));
+        pulledRows[t] = data;
+        data.forEach((r) => { if (r.updated_at > maxTs) maxTs = r.updated_at; });
+        if (data.length) remoteChanged = true;
       }
       if (remoteChanged) {
-        // reconstrói o modelo a partir do banco inteiro (simples e correto p/ single-user)
-        const full = {};
-        for (const t of TABLES) { const { data } = await sb.from(t).select("*"); full[t] = data || []; }
+        // reconstrói o modelo do banco inteiro. No 1º sync (cursor no epoch) o pull já trouxe
+        // tudo — reaproveita; senão refaz o full paginado.
+        const full = cursor === EPOCH ? pulledRows : {};
+        if (cursor !== EPOCH) for (const t of TABLES) full[t] = await selectAll(t);
         const model2 = rowsToModel(full);
         await kvSet("snapshot", model2);
         await kvSet("lastSynced", modelToRows(model2));

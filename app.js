@@ -1802,6 +1802,9 @@ async function boot() {
   const seedModel = currentModel(); // estado inicial = OF_DATA (local) ou mock; usado só p/ 1º seed
   let model = await Store.loadSnapshot();
   if (!model) {
+    // 1º acesso neste aparelho: sem snapshot local, precisamos puxar da nuvem antes de mostrar a tela.
+    // Mostra "carregando" pra não exibir o shell vazio (R$ 0,00) durante os segundos do sync.
+    renderAuthLoading();
     try { await Store.sync(); } catch (e) { /* offline: segue com o que tiver */ }
     model = await Store.loadSnapshot();
   }
@@ -1815,6 +1818,7 @@ async function boot() {
   }
   applyModel(model);
   refreshDataLabels();
+  hideAuth(); // remove o "carregando", se estava
   if (!_wired) { wire(); _wired = true; }
   renderView(); renderModal(); renderPop();
   // pull em segundo plano: se outro aparelho mudou, atualiza a tela
@@ -1842,6 +1846,10 @@ let _authState = { view: "signin", mode: "login", email: "", msg: "" };
 function showLogin() { _booted = false; _authState = { view: "signin", mode: "login", email: "", msg: "" }; renderAuth(); }
 function hideAuth() { const g = document.getElementById("auth-gate"); if (g) g.innerHTML = ""; }
 function renderAuthError(msg) { _authState = { view: "error", mode: "login", email: "", msg }; renderAuth(); }
+function renderAuthLoading() {
+  const g = document.getElementById("auth-gate"); if (!g) return;
+  g.innerHTML = `<div class="auth-overlay"><div class="auth-card"><div class="auth-brand">${ic("wallet", 30)}</div><h2>Carregando seus dados…</h2><p>Sincronizando com a nuvem. No primeiro acesso deste aparelho isso leva alguns segundos.</p><div class="auth-spin"></div></div></div>`;
+}
 function renderAuth() {
   const g = document.getElementById("auth-gate"); if (!g) return;
   const s = _authState;
