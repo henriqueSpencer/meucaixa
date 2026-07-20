@@ -129,18 +129,20 @@
   function kvSet(k, v) { return new Promise((res, rej) => { const r = idb.transaction("kv", "readwrite").objectStore("kv").put({ k, v }); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
 
   // ---------------------------------------------------------------- Supabase + sync
-  let sb = null, userId = null, syncing = false, syncTimer = null;
+  let sb = null, userId = null, user = null, syncing = false, syncTimer = null;
   const authCbs = [];
 
   async function init() {
     idb = await openIDB();
-    sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true } });
+    sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" } });
     sb.auth.onAuthStateChange((_evt, session) => {
-      userId = session ? session.user.id : null;
+      user = session ? session.user : null;
+      userId = user ? user.id : null;
       authCbs.forEach((cb) => cb(!!userId));
     });
     const { data } = await sb.auth.getSession();
-    userId = data.session ? data.session.user.id : null;
+    user = data.session ? data.session.user : null;
+    userId = user ? user.id : null;
     if (userId) startAutoSync();
     return { authed: !!userId };
   }
@@ -150,7 +152,17 @@
     const redirect = location.origin + location.pathname;
     return sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirect } });
   }
-  async function signOut() { stopAutoSync(); await sb.auth.signOut(); userId = null; }
+  async function signInWithGoogle() {
+    const redirect = location.origin + location.pathname;
+    return sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: redirect } });
+  }
+  async function signInPassword(email, password) { return sb.auth.signInWithPassword({ email, password }); }
+  async function signUpPassword(email, password) {
+    const redirect = location.origin + location.pathname;
+    return sb.auth.signUp({ email, password, options: { emailRedirectTo: redirect } });
+  }
+  async function setPassword(password) { return sb.auth.updateUser({ password }); }
+  async function signOut() { stopAutoSync(); await sb.auth.signOut(); userId = null; user = null; }
 
   // snapshot local (fonte da verdade offline)
   async function loadSnapshot() { return (await kvGet("snapshot")) || null; }
@@ -182,7 +194,7 @@
         for (const t of TABLES) {
           if (!pending[t] || !pending[t].length) continue;
           const payload = pending[t].map((r) => Object.assign({ user_id: userId }, r));
-          const { error } = await sb.from(t).upsert(payload, { onConflict: "id" });
+          const { error } = await sb.from(t).upsert(payload, { onConflict: "user_id,id" });
           if (error) throw error;
         }
         if (Object.keys(pending).length) await kvSet("lastSynced", current);
@@ -214,9 +226,10 @@
     } finally { syncing = false; }
   }
 
-  // servidor vazio? (1ª vez) → semeia com o modelo dado (OF_DATA convertido)
+  // usuário nunca fez onboarding? (0 contas) → semeia o starter. Checa CONTAS, não transações:
+  // um usuário pode ter categorias/contas sem nenhum lançamento ainda.
   async function isRemoteEmpty() {
-    const { count, error } = await sb.from("transactions").select("id", { count: "exact", head: true });
+    const { count, error } = await sb.from("accounts").select("id", { count: "exact", head: true });
     if (error) throw error;
     return (count || 0) === 0;
   }
@@ -227,9 +240,10 @@
   }
 
   window.Store = {
-    init, onAuth, isAuthed, signIn, signOut,
+    init, onAuth, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, signOut,
     loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed,
     get userId() { return userId; },
+    get user() { return user; },
     // puros (p/ testes)
     _modelToRows: modelToRows, _rowsToModel: rowsToModel, _diffRows: diffRows,
   };

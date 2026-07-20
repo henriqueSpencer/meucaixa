@@ -17,14 +17,29 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
 - **`store.js`** — `window.Store`. IndexedDB é a **fonte da verdade local**; sincroniza com o Postgres
   do Supabase por **diff** (push = upsert do que mudou; pull = linhas com `updated_at > cursor`;
   deleções = tombstone na coluna `deleted`; resolução **last-write-wins** por `updated_at` carimbado no
-  servidor). Single-user em vários aparelhos → sem conflito entre pessoas.
+  servidor). **Multi-usuário**: cada conta só vê seus dados (RLS `user_id = auth.uid()`); o upsert usa
+  `onConflict: "user_id,id"`. **PK é composta `(user_id, id)`** em todas as tabelas (migração
+  `composite_pk_per_user`) — sem isso, os ids determinísticos de categoria (`c|tipo|nome`) colidiriam
+  entre usuários numa PK global. O FK self de `categories` (parent) também é composto `(user_id, parent_id)`.
 - **`app.js`** — o app usa o modelo em memória (`accounts` / `catTree` / `state.tx` / `state.dashOrder`).
   `currentModel()`/`applyModel()` fazem a ponte; `store.js` converte modelo⇄linhas (`_modelToRows`/
   `_rowsToModel`) e faz o diff. Categorias têm **ids determinísticos por nome** (`c|tipo|nome`,
   `c|tipo|pai|sub`) — renomear = id novo + tombstone do velho. Transações referenciam cat/sub/conta
   **por nome** (coluna do banco é `descricao`, não `desc`).
-- **Login** magic-link (`Store.signIn(email)`), sessão persistida pelo supabase-js. `init()` → gate de
-  auth; `boot()` carrega do IndexedDB (ou puxa/semeia) e sobe o app. Botão "sair" na sidebar.
+- **Login**: **e-mail + senha** (`Store.signInPassword`/`signUpPassword`; tela com toggle Entrar⇄Criar
+  conta). Cliente supabase-js com `flowType:"pkce"` + `detectSessionInUrl`. `init()` → gate de auth
+  (`renderAuth`); `boot()` carrega do IndexedDB (ou puxa/semeia) e sobe o app. A sidebar mostra o usuário
+  logado (`Store.user`, via `updateSidebarUser`) + botões **"definir senha"** (ícone chave,
+  `Store.setPassword`→`updateUser`, bootstrap sem e-mail p/ contas criadas por link mágico) e "sair".
+  Código de **Google OAuth** (`Store.signInWithGoogle`, PKCE) está pronto mas **desativado** pelo flag
+  `AUTH_GOOGLE=false` no `app.js` — pra ligar: ativar provedor no Supabase (Google Cloud OAuth Client Web
+  + redirect `.../auth/v1/callback`; Providers → Google com client id/secret) e virar o flag. Magic-link
+  (`Store.signIn`) segue no `store.js` como recurso de recuperação, fora da UI.
+  Obs.: p/ signup sem fricção de e-mail, desligar "Confirm email" no Supabase Auth (senão o app mostra
+  "Confirme seu e-mail" após criar conta).
+- **Onboarding de usuário novo**: se o servidor está vazio (0 contas, `isRemoteEmpty` checa `accounts`),
+  `boot()` semeia `defaultSeedModel()` — 2 contas zeradas (Conta Corrente, Carteira) + categorias comuns
+  BR, sem lançamentos. O usuário existente (com dados) nunca cai nesse caminho.
 - **PWA**: `manifest.json` + `sw.js` (shell offline: network-first no HTML, stale-while-revalidate nos
   assets; Supabase passa direto pela rede). Ícones em `icons/` (carteira brass 192/512).
 
@@ -66,7 +81,18 @@ tag e limpe as tabelas.
   `const state`/`accounts`/`catTree` são de escopo de módulo e **não** são acessíveis via `window.eval`
   — verifique pelo DOM ou pelas funções globais.
 
+## Importar extrato (tela Conciliação)
+Lê **OFX/CSV/TXT** (`parseOFX`/`parseCSV`, texto) e **PDF** do **Mercado Pago** (`parsePDF`→`mpParsePage`
+em `app.js`). O PDF é lido por **coordenadas** via **pdf.js** (vendorizado em `vendor/pdf.min.js` +
+`vendor/pdf.worker.min.js`, carregado sob demanda por `import()` dinâmico; `workerSrc` aponta pro
+`.js`). Cada transação é ancorada na **coluna "Valor"** (bandas de x do template MP: Data `x<85`,
+Descrição `85–190`, Valor `270–348`, Saldo `≥348`); data e descrição multilinha casam com a âncora
+mais próxima em y. Não depende de cabeçalho (só a pág. 1 tem). Validação: soma dos movimentos bate com
+Entradas−Saídas do extrato. **Não há mais "extrato de exemplo"** — sem arquivo lido, o botão fica
+desabilitado (removidos `initialRecon` e o fallback no action `import`).
+
 ## Mapa de arquivos
 `index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `store.js` (persistência+sync) ·
-`styles.css` · `vendor/supabase.js` (UMD vendorizado) · `manifest.json` + `sw.js` + `icons/` (PWA) ·
+`styles.css` · `vendor/supabase.js` (UMD vendorizado) · `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`
+(pdf.js, leitura de PDF na importação) · `manifest.json` + `sw.js` + `icons/` (PWA) ·
 `gerar_dados.py`→`dados.js` (seed local, gitignored).

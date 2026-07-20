@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Meu Caixa">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=37">
+  <link rel="stylesheet" href="styles.css?v=40">
 </head>
 <body>
   <div class="fin-root">
@@ -66,6 +66,9 @@
             <div class="u-name">Henrique</div>
             <div class="u-sub">conta pessoal</div>
           </div>
+          <button class="side-signout" data-setpass title="Definir senha">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.5 12.5 8-8"/><path d="m16 4.5 3 3"/><path d="m13.5 7 2.5 2.5"/></svg>
+          </button>
           <button class="side-signout" data-signout title="Sair">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           </button>
@@ -107,8 +110,8 @@
   </div>
 
   <script src="vendor/supabase.js"></script>
-  <script src="store.js?v=1"></script>
-  <script src="app.js?v=37"></script>
+  <script src="store.js?v=3"></script>
+  <script src="app.js?v=42"></script>
   <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {})); }</script>
 </body>
 </html>

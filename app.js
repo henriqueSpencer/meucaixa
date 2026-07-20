@@ -99,16 +99,6 @@ const initialTx = OF ? OF.tx : [
   { id: 10, data: "01/07", desc: "Compra do carro", tipo: "transferencia", origem: "Conta Corrente", destino: "Carro — Honda City", valor: 82000, status: "conciliado", nota: "Alocação de patrimônio" },
 ];
 
-const initialRecon = [
-  { id: "r1", raw: "PAG*IFOOD 88 SAOPAULO", valor: -54.3, iso: "2026-06-14", sug: { tipo: "despesa", cat: "Alimentação", sub: "Delivery", conta: "Cartão de Crédito" }, conf: 96, match: null, status: "pendente" },
-  { id: "r2", raw: "POSTO SHELL BR NATAL RN", valor: -220, iso: "2026-06-12", sug: { tipo: "despesa", cat: "Transporte", sub: "Combustível", conta: "Cartão de Crédito" }, conf: 98, match: "Posto Shell · 12/07 · pendente", status: "pendente" },
-  { id: "r3", raw: "TED RECEBIDA JOAO S CLIENTE", valor: 2500, iso: "2026-06-11", sug: { tipo: "receita", cat: "Trabalho", sub: "Freelance", conta: "Conta Corrente" }, conf: 71, match: null, status: "pendente" },
-  { id: "r4", raw: "NORDESTAO SUPERM NATAL", valor: -388.7, iso: "2026-06-10", sug: { tipo: "despesa", cat: "Alimentação", sub: "Supermercado", conta: "Cartão de Crédito" }, conf: 94, match: null, status: "pendente" },
-  { id: "r5", raw: "NETFLIX.COM ASSINATURA", valor: -44.9, iso: "2026-06-09", sug: { tipo: "despesa", cat: "Lazer", sub: "Streaming", conta: "Cartão de Crédito" }, conf: 99, match: null, status: "pendente" },
-  { id: "r6", raw: "SAQUE 24HORAS TERMINAL", valor: -200, iso: "2026-06-08", sug: { tipo: "transferencia", origem: "Conta Corrente", destino: "Carteira" }, conf: 64, match: null, status: "pendente" },
-  { id: "r7", raw: "PIX ENVIADO APLICACAO", valor: -1000, iso: "2026-06-05", sug: { tipo: "transferencia", origem: "Conta Corrente", destino: "Investimentos" }, conf: 87, match: null, status: "pendente" },
-];
-
 accounts.forEach((a, i) => { if (a.arquivada === undefined) a.arquivada = false; a.ordem = i; });
 const netWorth = () => accounts.filter((a) => !a.arquivada).reduce((s, a) => s + a.saldo, 0);
 const patrimonioLiquido = accounts.reduce((s, a) => s + a.saldo, 0);
@@ -509,16 +499,39 @@ function dashEditor() {
   return `<div class="dash-editor">${rows}</div>`;
 }
 
+// totais de receita/despesa de um mês (ym "YYYY-MM"), somados das transações reais.
+// transferência não conta; reembolso abate a despesa (mesma convenção do byCat).
+function monthTotals(ym) {
+  let rec = 0, desp = 0;
+  if (ym) state.tx.forEach((t) => {
+    if ((t.iso || "").slice(0, 7) !== ym) return;
+    if (t.tipo === "receita") rec += Math.abs(t.valor);
+    else if (t.tipo === "despesa") desp += Math.abs(t.valor);
+    else if (t.tipo === "reembolso") desp -= Math.abs(t.valor);
+  });
+  return { rec, desp: Math.max(desp, 0) };
+}
+// mês de referência do Extrato: o do resumo (OF) se houver, senão o último mês com receita/despesa
+// (ignora meses só com transferência — alinhado ao "Despesas por categoria" via defaultMonth)
+function refMonthYM() {
+  const months = txMonths();
+  if (OF && OF.refMonthYM && months.includes(OF.refMonthYM)) return OF.refMonthYM;
+  const movi = (t) => t.tipo === "receita" || t.tipo === "despesa" || t.tipo === "reembolso";
+  for (let i = months.length - 1; i >= 0; i--) if (state.tx.some((t) => movi(t) && (t.iso || "").slice(0, 7) === months[i])) return months[i];
+  return months.length ? months[months.length - 1] : null;
+}
 function statementBand() {
-  const res = receitasMes - despesasMes;
-  const cap = REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1);
+  const ym = refMonthYM();
+  const t = ym ? monthTotals(ym) : { rec: receitasMes, desp: despesasMes }; // fallback mock/vazio
+  const rec = t.rec, desp = t.desp, res = rec - desp;
+  const cap = ym ? monthLabel(ym) : (REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1));
   return `<div class="statement">
     <div class="stmt-top"><span class="stmt-eyebrow">Extrato</span><span class="stmt-period">${cap}</span></div>
     <div class="stmt-main">
       <div class="stmt-net"><span class="stmt-lbl">Patrimônio líquido</span><span class="stmt-big num">${fmt(netWorth())}</span></div>
       <div class="stmt-ledger">
-        <div class="stmt-row"><span class="sl-k">Receitas do mês</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(receitasMes)}</span></div>
-        <div class="stmt-row"><span class="sl-k">Despesas do mês</span><span class="sl-op">−</span><span class="sl-v num" style="color:var(--neg)">${fmtNum(despesasMes)}</span></div>
+        <div class="stmt-row"><span class="sl-k">Receitas do mês</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
+        <div class="stmt-row"><span class="sl-k">Despesas do mês</span><span class="sl-op">−</span><span class="sl-v num" style="color:var(--neg)">${fmtNum(desp)}</span></div>
         <div class="stmt-row total"><span class="sl-k">Resultado</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(res)}</span></div>
       </div>
     </div>
@@ -665,8 +678,8 @@ function viewConciliacao() {
         <label class="fld"><span class="fld-label">Conta</span><select data-imp-acct>${opts}</select></label>
         <div class="fld"><span class="fld-label">Arquivos${files.length ? ` (${files.length})` : ""}</span>${list}${drop}</div>
       </div>
-      <button class="cta big" data-action="import">${ic("sparkles", 16)} ${totalN > 0 ? `Importar ${totalN} lançamentos${files.length > 1 ? ` de ${files.length} arquivos` : ""}` : "Importar (extrato de exemplo)"}</button>
-      <span class="import-formats">Nubank · Caixa · Itaú · Bradesco · Inter · e outros</span>
+      <button class="cta big" data-action="import" ${totalN > 0 ? "" : "disabled"}>${ic("sparkles", 16)} ${totalN > 0 ? `Importar ${totalN} lançamentos${files.length > 1 ? ` de ${files.length} arquivos` : ""}` : "Adicione um arquivo para importar"}</button>
+      <span class="import-formats">Mercado Pago · Nubank · Caixa · Itaú · Bradesco · Inter · e outros</span>
     </div>`;
   }
   const conc = state.recon.filter((r) => r.status === "conciliado").length;
@@ -868,7 +881,7 @@ function modalHTML() {
 const state = {
   tab: "dashboard",
   tx: initialTx.slice(),
-  recon: initialRecon.map((r) => ({ ...r })),
+  recon: [],
   imported: false, reconAccount: null, reconFiles: [], reconDone: null, modalRecon: false,
   filter: "todas",
   modal: false,
@@ -1324,6 +1337,45 @@ function parseCSV(text) {
   });
   return out;
 }
+/* ---------- PDF (extrato Mercado Pago) — leitura por coordenadas via pdf.js ---------- */
+let _pdfLib = null;
+function loadPdfLib() {
+  if (!_pdfLib) _pdfLib = import("./vendor/pdf.min.js").then((m) => { const lib = m.default || m; lib.GlobalWorkerOptions.workerSrc = "vendor/pdf.worker.min.js"; return lib; });
+  return _pdfLib;
+}
+// reconstrói UMA página do extrato: cada transação é ancorada na coluna "Valor"; data e descrição
+// (que pode ter várias linhas) são casadas à âncora mais próxima em y. Bandas de x = layout do MP.
+function mpParsePage(items) {
+  const money = (s) => { const m = String(s).match(/R\$\s*(-?)\s*([\d.]+),(\d{2})/); if (!m) return null; const n = parseFloat(m[2].replace(/\./g, "") + "." + m[3]); return m[1] === "-" ? -n : n; };
+  const toIso = (s) => { const m = String(s).match(/(\d{2})-(\d{2})-(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
+  const anchors = [], dates = [], descs = [];
+  for (const it of items) {
+    const s = (it.str || "").trim(); if (!s) continue;
+    const x = it.x, y = it.y, v = money(s);
+    if (v !== null && x >= 270 && x < 348) { anchors.push({ y, valor: v }); continue; } // coluna Valor (não pega o resumo nem o Saldo)
+    else if (x < 85 && /^\d{2}-\d{2}-\d{4}$/.test(s)) dates.push({ y, iso: toIso(s) });   // coluna Data
+    else if (x >= 85 && x < 190) descs.push({ y, s });                                     // coluna Descrição
+  }
+  const near = (arr, y, tol) => { let best = null, bd = tol; for (const a of arr) { const d = Math.abs(a.y - y); if (d <= bd) { bd = d; best = a; } } return best; };
+  const nearestAnchor = (y) => { let bi = -1, bd = 1e9; anchors.forEach((a, i) => { const d = Math.abs(a.y - y); if (d < bd) { bd = d; bi = i; } }); return { i: bi, d: bd }; };
+  const bucket = anchors.map(() => []);
+  for (const d of descs) { const { i, d: dist } = nearestAnchor(d.y); if (i >= 0 && dist <= 20) bucket[i].push(d); } // > 20 = rodapé/resumo, descarta
+  return anchors.map((a, i) => {
+    const dt = near(dates, a.y, 12);
+    const desc = bucket[i].sort((p, q) => q.y - p.y).map((d) => d.s).join(" ").replace(/\s+/g, " ").trim();
+    return { iso: dt ? dt.iso : "", desc: desc || "Lançamento", valor: a.valor };
+  });
+}
+async function parsePDF(buffer) {
+  const pdfjs = await loadPdfLib();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+  let out = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    out = out.concat(mpParsePage(tc.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))));
+  }
+  return out;
+}
 const RECON_RULES = [
   { kw: ["ifood", "rappi", "restaurante", "lanche", "burger", "pizza", "bar ", "padaria"], cat: "LAZER", sub: "Comer fora" },
   { kw: ["uber", "99app", "99 ", "posto", "shell", "ipiranga", "combustiv", "estacion", "pedagio", "sem parar"], cat: "Custo de Vida", sub: "Carro" },
@@ -1423,13 +1475,18 @@ function reconToTx(r) {
 function addReconFile(file) {
   state.reconDone = null;
   const ext = (file.name.split(".").pop() || "").toLowerCase();
-  const entry = { name: file.name, ext, parsed: ["ofx", "csv", "txt"].includes(ext) ? null : "unsupported" };
+  const entry = { name: file.name, ext, parsed: ["ofx", "csv", "txt", "pdf"].includes(ext) ? null : "unsupported" };
   state.reconFiles.push(entry);
   if (entry.parsed === null) {
     const reader = new FileReader();
-    reader.onload = () => { try { entry.parsed = ext === "ofx" ? parseOFX(reader.result) : parseCSV(reader.result); } catch (e) { entry.parsed = []; } renderView(); };
     reader.onerror = () => { entry.parsed = []; renderView(); };
-    reader.readAsText(file);
+    if (ext === "pdf") {
+      reader.onload = () => { parsePDF(reader.result).then((rows) => { entry.parsed = rows; renderView(); }).catch(() => { entry.parsed = []; renderView(); }); };
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.onload = () => { try { entry.parsed = ext === "ofx" ? parseOFX(reader.result) : parseCSV(reader.result); } catch (e) { entry.parsed = []; } renderView(); };
+      reader.readAsText(file);
+    }
   }
   renderView();
 }
@@ -1444,11 +1501,8 @@ const ACTIONS = {
     const sel = document.querySelector("[data-imp-acct]");
     state.reconAccount = sel ? sel.value : (accounts.find((a) => !a.arquivada) || {}).nome;
     const all = reconAllParsed();
-    if (all.length) {
-      state.recon = buildRecon(all, state.reconAccount);
-    } else {
-      state.recon = initialRecon.map((r) => { const c = { ...r, status: "pendente" }; if (c.sug && c.sug.tipo !== "transferencia") c.sug = { ...c.sug, conta: state.reconAccount }; return c; });
-    }
+    if (!all.length) return; // sem arquivos lidos não há o que importar (botão fica desabilitado)
+    state.recon = buildRecon(all, state.reconAccount);
     state.imported = true; state.editing = null; renderView();
   },
   "reimport": () => { state.imported = false; state.reconAccount = null; state.reconFiles = []; state.editing = null; renderView(); },
@@ -1681,16 +1735,64 @@ async function init() {
   elModal = document.getElementById("modal-root");
   // listeners de autenticação (a tela de login existe antes do wire() do app)
   document.addEventListener("submit", (e) => {
-    if (e.target.closest("[data-auth-form]")) { e.preventDefault(); const inp = document.querySelector("[data-auth-email]"); const email = inp ? inp.value.trim() : ""; if (email) submitLogin(email); }
+    if (e.target.closest("[data-auth-form]")) { e.preventDefault(); submitAuth(); return; }
+    if (e.target.closest("[data-setpass-form]")) { e.preventDefault(); submitSetPass(); return; }
   });
   document.addEventListener("click", (e) => {
-    if (e.target.closest("[data-auth-back]")) { _authState = { view: "signin", email: _authState.email, msg: "" }; renderAuth(); return; }
+    if (e.target.closest("[data-auth-google]")) { e.preventDefault(); loginGoogle(); return; }
+    if (e.target.closest("[data-auth-toggle]")) { e.preventDefault(); const em = document.querySelector("[data-auth-email]"); _authState = { view: "signin", mode: _authState.mode === "signup" ? "login" : "signup", email: em ? em.value.trim() : _authState.email, msg: "" }; renderAuth(); return; }
+    if (e.target.closest("[data-auth-back]")) { _authState = { view: "signin", mode: "login", email: _authState.email, msg: "" }; renderAuth(); return; }
+    if (e.target.closest("[data-setpass]")) { e.preventDefault(); openSetPass(); return; }
+    if (e.target.closest("[data-setpass-cancel]")) { e.preventDefault(); hideAuth(); return; }
     if (e.target.closest("[data-signout]")) { if (window.Store) Store.signOut().then(() => location.reload()).catch(() => location.reload()); return; }
   });
   if (!window.Store) { renderAuthError("Falha ao carregar o módulo de dados."); return; }
   try { await Store.init(); } catch (e) { renderAuthError("Sem conexão com o servidor. Tente recarregar."); return; }
   Store.onAuth((authed) => { if (authed) boot(); else showLogin(); });
   if (Store.isAuthed()) boot(); else showLogin();
+}
+
+// reflete o usuário logado na sidebar (nome/e-mail/inicial) — antes era "Henrique" fixo
+function updateSidebarUser() {
+  const u = window.Store && Store.user; if (!u) return;
+  const meta = u.user_metadata || {};
+  const nome = meta.full_name || meta.name || (u.email ? u.email.split("@")[0] : "Você");
+  const nameEl = document.querySelector(".side-user .u-name");
+  const subEl = document.querySelector(".side-user .u-sub");
+  const avEl = document.querySelector(".side-user .avatar");
+  if (nameEl) nameEl.textContent = nome;
+  if (subEl) subEl.textContent = u.email || "conta pessoal";
+  if (avEl) avEl.textContent = (nome.trim()[0] || "?").toUpperCase();
+}
+
+// começo utilizável para um usuário novo: 2 contas zeradas + categorias comuns (BR). Sem lançamentos.
+function defaultSeedModel() {
+  const cat = (nome, subs) => ({ nome, subs, total: 0 });
+  return {
+    accounts: [
+      { id: "cc", nome: "Conta Corrente", sub: "Banco", tipo: "banco", saldo: 0, grupo: "fin", arquivada: false, ordem: 0 },
+      { id: "cart", nome: "Carteira", sub: "Dinheiro", tipo: "dinheiro", saldo: 0, grupo: "fin", arquivada: false, ordem: 1 },
+    ],
+    catTree: {
+      receita: [
+        cat("Salário", ["Salário", "Adiantamento", "13º / Férias"]),
+        cat("Renda extra", ["Freelance", "Vendas", "Bonificação"]),
+        cat("Rendimentos", ["Juros", "Dividendos"]),
+        cat("Outros", ["Reembolsos", "Presentes"]),
+      ],
+      despesa: [
+        cat("Moradia", ["Aluguel", "Condomínio", "Energia", "Água", "Internet"]),
+        cat("Alimentação", ["Supermercado", "Restaurante", "Delivery"]),
+        cat("Transporte", ["Combustível", "Aplicativos", "Transporte público", "Manutenção"]),
+        cat("Saúde", ["Plano de saúde", "Farmácia", "Consultas"]),
+        cat("Lazer", ["Streaming", "Bares e restaurantes", "Viagens"]),
+        cat("Compras", ["Roupas", "Eletrônicos", "Casa"]),
+        cat("Educação", ["Cursos", "Livros"]),
+        cat("Outros", ["Taxas e tarifas", "Diversos"]),
+      ],
+    },
+    tx: [], dashOrder: state.dashOrder.slice(), prefs: {},
+  };
 }
 
 // carrega os dados (do IndexedDB; puxa/semeia se preciso) e sobe o app
@@ -1704,10 +1806,11 @@ async function boot() {
     model = await Store.loadSnapshot();
   }
   if (!model) {
-    // 1ª vez neste usuário: se há dados reais locais (OF) e o servidor está vazio, semeia
+    // 1ª vez neste usuário: se o servidor está vazio, semeia um começo utilizável
+    // (dados reais locais OF em dev; senão o starter genérico com contas e categorias padrão).
     let remoteEmpty = true;
     try { remoteEmpty = await Store.isRemoteEmpty(); } catch (e) { remoteEmpty = false; }
-    if (OF && remoteEmpty) { await Store.seed(seedModel); model = seedModel; }
+    if (remoteEmpty) { const starter = OF ? seedModel : defaultSeedModel(); await Store.seed(starter); model = starter; }
     else model = { accounts: [], catTree: { receita: [], despesa: [] }, tx: [], dashOrder: state.dashOrder.slice() };
   }
   applyModel(model);
@@ -1721,6 +1824,7 @@ async function boot() {
 function refreshDataLabels() {
   const netEl = document.getElementById("side-net-val");
   if (netEl) netEl.textContent = fmt(netWorth());
+  updateSidebarUser();
   if (OF) {
     const cap = REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1);
     PAGE.dashboard[1] = `Como está seu dinheiro em ${cap}`;
@@ -1731,36 +1835,92 @@ function refreshDataLabels() {
   if (demo) demo.style.display = "none"; // não é mais "dados de exemplo" — vem do banco
 }
 
-/* ---------- tela de login (magic-link) ---------- */
-let _authState = { view: "signin", email: "", msg: "" };
-function showLogin() { _booted = false; _authState = { view: "signin", email: "", msg: "" }; renderAuth(); }
+/* ---------- tela de login (e-mail + senha; Google desativado por ora) ---------- */
+const AUTH_GOOGLE = false; // liga o botão "Entrar com Google" quando o provedor estiver ativo no Supabase
+const GOOGLE_SVG = `<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
+let _authState = { view: "signin", mode: "login", email: "", msg: "" };
+function showLogin() { _booted = false; _authState = { view: "signin", mode: "login", email: "", msg: "" }; renderAuth(); }
 function hideAuth() { const g = document.getElementById("auth-gate"); if (g) g.innerHTML = ""; }
-function renderAuthError(msg) { _authState = { view: "error", email: "", msg }; renderAuth(); }
+function renderAuthError(msg) { _authState = { view: "error", mode: "login", email: "", msg }; renderAuth(); }
 function renderAuth() {
   const g = document.getElementById("auth-gate"); if (!g) return;
   const s = _authState;
   let inner;
   if (s.view === "sent") {
-    inner = `<div class="auth-ic">${ic("check", 26)}</div><h2>Verifique seu e-mail</h2>
-      <p>Enviamos um link de acesso para <b>${s.email}</b>. Abra no mesmo aparelho para entrar.</p>
-      <button class="auth-btn ghost" data-auth-back>Usar outro e-mail</button>`;
+    inner = `<div class="auth-ic">${ic("check", 26)}</div><h2>Confirme seu e-mail</h2>
+      <p>Enviamos um link de confirmação para <b>${s.email}</b>. Abra-o para ativar a conta e depois entre com sua senha.</p>
+      <button class="auth-btn ghost" data-auth-back>Voltar ao login</button>`;
   } else if (s.view === "error") {
     inner = `<div class="auth-ic err">${ic("circle-alert", 26)}</div><h2>Ops</h2><p>${s.msg}</p>
       <button class="auth-btn" onclick="location.reload()">Recarregar</button>`;
   } else {
+    const signup = s.mode === "signup", busy = s.view === "busy";
+    const google = AUTH_GOOGLE
+      ? `<button class="auth-btn google" data-auth-google>${GOOGLE_SVG}<span>Entrar com Google</span></button><div class="auth-or"><span>ou com seu e-mail</span></div>`
+      : "";
     inner = `<div class="auth-brand">${ic("wallet", 30)}</div><h2>Meu Caixa</h2>
-      <p>Entre com seu e-mail — enviamos um link de acesso, sem senha.</p>
-      <form data-auth-form><input type="email" data-auth-email value="${s.email || ""}" placeholder="voce@email.com" autocomplete="email" required>
-      <button class="auth-btn" type="submit"${s.view === "sending" ? " disabled" : ""}>${s.view === "sending" ? "Enviando…" : "Enviar link de acesso"}</button></form>
-      ${s.msg ? `<p class="auth-msg err">${s.msg}</p>` : ""}`;
+      <p>${signup ? "Crie sua conta — seus dados ficam privados e sincronizados entre aparelhos." : "Entre para acessar suas finanças, privadas e sincronizadas entre aparelhos."}</p>
+      ${google}
+      <form data-auth-form>
+        <input type="email" data-auth-email value="${s.email || ""}" placeholder="voce@email.com" autocomplete="email" required>
+        <input type="password" data-auth-pass placeholder="Senha" autocomplete="${signup ? "new-password" : "current-password"}" minlength="6" required>
+        <button class="auth-btn" type="submit"${busy ? " disabled" : ""}>${busy ? "Aguarde…" : signup ? "Criar conta" : "Entrar"}</button>
+      </form>
+      ${s.msg ? `<p class="auth-msg err">${s.msg}</p>` : ""}
+      <p class="auth-switch">${signup ? "Já tem conta?" : "Ainda não tem conta?"} <a href="#" data-auth-toggle>${signup ? "Entrar" : "Criar conta"}</a></p>`;
   }
   g.innerHTML = `<div class="auth-overlay"><div class="auth-card">${inner}</div></div>`;
-  const inp = g.querySelector("[data-auth-email]"); if (inp) inp.focus();
+  const inp = g.querySelector(s.email ? "[data-auth-pass]" : "[data-auth-email]"); if (inp) setTimeout(() => inp.focus(), 0);
 }
-async function submitLogin(email) {
-  _authState = { view: "sending", email, msg: "" }; renderAuth();
-  try { const { error } = await Store.signIn(email); if (error) throw error; _authState = { view: "sent", email, msg: "" }; }
-  catch (e) { _authState = { view: "signin", email, msg: "Não consegui enviar. Confira o e-mail e tente de novo." }; }
-  renderAuth();
+async function loginGoogle() {
+  try { const { error } = await Store.signInWithGoogle(); if (error) throw error; /* redireciona pro Google */ }
+  catch (e) { _authState = Object.assign({}, _authState, { view: "signin", msg: "Não consegui abrir o login do Google." }); renderAuth(); }
+}
+async function submitAuth() {
+  const em = document.querySelector("[data-auth-email]"), pw = document.querySelector("[data-auth-pass]");
+  const email = em ? em.value.trim() : "", password = pw ? pw.value : "";
+  const signup = _authState.mode === "signup";
+  if (!email || password.length < 6) { _authState = Object.assign({}, _authState, { view: "signin", email, msg: "Informe e-mail e uma senha de 6+ caracteres." }); renderAuth(); return; }
+  _authState = { view: "busy", mode: _authState.mode, email, msg: "" }; renderAuth();
+  try {
+    if (signup) {
+      const { data, error } = await Store.signUpPassword(email, password);
+      if (error) throw error;
+      // sem sessão = projeto exige confirmação por e-mail; com sessão = entra direto (onAuthStateChange → boot)
+      if (!data.session) { _authState = { view: "sent", mode: "login", email, msg: "" }; renderAuth(); }
+    } else {
+      const { error } = await Store.signInPassword(email, password);
+      if (error) throw error; // sucesso → onAuthStateChange dispara boot()
+    }
+  } catch (e) {
+    const raw = (e && e.message || "").toLowerCase();
+    let msg = signup ? "Não consegui criar a conta. Tente novamente." : "E-mail ou senha incorretos.";
+    if (raw.includes("already registered") || raw.includes("already exists")) msg = "Esse e-mail já tem conta. Faça login.";
+    else if (raw.includes("not confirmed")) msg = "Confirme seu e-mail antes de entrar (verifique sua caixa de entrada).";
+    else if (raw.includes("password")) msg = "Senha muito curta (mínimo 6 caracteres).";
+    _authState = { view: "signin", mode: _authState.mode, email, msg }; renderAuth();
+  }
+}
+// definir/alterar senha (usuário já logado) — bootstrap sem depender de e-mail
+function openSetPass() { const g = document.getElementById("auth-gate"); if (!g) return;
+  g.innerHTML = `<div class="auth-overlay"><div class="auth-card"><div class="auth-brand">${ic("wallet", 26)}</div><h2>Definir senha</h2>
+    <p>Escolha uma senha para entrar por e-mail + senha neste e em outros aparelhos.</p>
+    <form data-setpass-form>
+      <input type="password" data-setpass-pass placeholder="Nova senha (6+ caracteres)" autocomplete="new-password" minlength="6" required>
+      <button class="auth-btn" type="submit">Salvar senha</button>
+    </form>
+    <p class="auth-msg" data-setpass-msg></p>
+    <button class="auth-btn ghost" data-setpass-cancel>Cancelar</button></div></div>`;
+  const inp = g.querySelector("[data-setpass-pass]"); if (inp) setTimeout(() => inp.focus(), 0);
+}
+async function submitSetPass() {
+  const pw = document.querySelector("[data-setpass-pass]"), msgEl = document.querySelector("[data-setpass-msg]");
+  const password = pw ? pw.value : "";
+  if (password.length < 6) { if (msgEl) { msgEl.textContent = "A senha precisa ter ao menos 6 caracteres."; msgEl.className = "auth-msg err"; } return; }
+  if (msgEl) { msgEl.textContent = "Salvando…"; msgEl.className = "auth-msg"; }
+  try { const { error } = await Store.setPassword(password); if (error) throw error;
+    if (msgEl) { msgEl.textContent = "Senha definida! Já pode entrar por e-mail + senha."; msgEl.className = "auth-msg ok"; }
+    setTimeout(hideAuth, 1400);
+  } catch (e) { if (msgEl) { msgEl.textContent = "Não consegui salvar. Tente novamente."; msgEl.className = "auth-msg err"; } }
 }
 document.addEventListener("DOMContentLoaded", init);
