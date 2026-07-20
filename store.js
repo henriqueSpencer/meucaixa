@@ -127,13 +127,23 @@
   }
   function kvGet(k) { return new Promise((res, rej) => { const r = idb.transaction("kv").objectStore("kv").get(k); r.onsuccess = () => res(r.result ? r.result.v : undefined); r.onerror = () => rej(r.error); }); }
   function kvSet(k, v) { return new Promise((res, rej) => { const r = idb.transaction("kv", "readwrite").objectStore("kv").put({ k, v }); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
+  function kvDel(k) { return new Promise((res, rej) => { const r = idb.transaction("kv", "readwrite").objectStore("kv").delete(k); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
 
   // ---------------------------------------------------------------- Supabase + sync
+  // Bump quando um bug de sync exigir descartar o cache local e re-puxar tudo.
+  // v2: correção do limite de 1000 linhas (snapshots antigos vinham truncados/vazios).
+  const SYNC_VERSION = 2;
   let sb = null, userId = null, user = null, syncing = false, syncTimer = null;
   const authCbs = [];
 
   async function init() {
     idb = await openIDB();
+    // auto-reparo: se o snapshot local foi criado por uma versão com bug de sync, descarta p/
+    // forçar um pull completo (paginado) no boot — sem isso o cache ruim persistiria pra sempre.
+    if ((await kvGet("syncVersion")) !== SYNC_VERSION) {
+      await kvDel("snapshot"); await kvDel("cursor"); await kvDel("lastSynced");
+      await kvSet("syncVersion", SYNC_VERSION);
+    }
     sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" } });
     sb.auth.onAuthStateChange((_evt, session) => {
       user = session ? session.user : null;
