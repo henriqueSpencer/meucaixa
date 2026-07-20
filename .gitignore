@@ -12,3 +12,6 @@ gerar_dados.py
 
 # prints do Orçamento Fácil (contêm dados financeiros reais)
 imagens/
+
+# wrangler (cache local do deploy)
+.wrangler/
