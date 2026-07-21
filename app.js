@@ -380,12 +380,8 @@ function catTotals(tipo) {
   Object.keys(m).forEach((k) => { if (m[k] < 0) m[k] = 0; });
   return m;
 }
-function defaultMonth(tipo) {
-  const months = txMonths();
-  if (OF && OF.refMonthYM && months.includes(OF.refMonthYM)) return OF.refMonthYM; // mesmo mês do resumo
-  for (let i = months.length - 1; i >= 0; i--) if (state.tx.some((t) => t.tipo === tipo && (t.iso || "").slice(0, 7) === months[i])) return months[i];
-  return months[months.length - 1] || null;
-}
+// mês inicial do donut/ganhos = mês atual (consistente com o Extrato). O usuário navega com as setas.
+function defaultMonth(tipo) { return (OF && OF.refMonthYM) || TODAY_ISO.slice(0, 7); }
 const ymLabel = (ym) => monthLabel(ym + "-01");
 const catColor = (i) => donutPalette[i % donutPalette.length];
 const MES3 = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -452,7 +448,7 @@ function bySub(tipo, cat, ym) {
 function catDonutBlock(tipo) {
   const st = state.donut[tipo];
   if (!st.month) st.month = defaultMonth(tipo);
-  const ym = st.month, months = txMonths(), idx = months.indexOf(ym), drill = st.drill;
+  const ym = st.month, months = monthsAxis(), idx = months.indexOf(ym), drill = st.drill;
   const data = drill ? bySub(tipo, drill, ym) : (ym ? byCat(tipo, ym) : []);
   const total = data.reduce((s, d) => s + d.valor, 0);
   const active = st.active && data.some((d) => d.nome === st.active) ? st.active : null;
@@ -570,13 +566,11 @@ function monthTotals(ym) {
 }
 // mês de referência do Extrato: o do resumo (OF) se houver, senão o último mês com receita/despesa
 // (ignora meses só com transferência — alinhado ao "Despesas por categoria" via defaultMonth)
-function refMonthYM() {
-  const months = txMonths();
-  if (OF && OF.refMonthYM && months.includes(OF.refMonthYM)) return OF.refMonthYM;
-  const movi = (t) => t.tipo === "receita" || t.tipo === "despesa" || t.tipo === "reembolso";
-  for (let i = months.length - 1; i >= 0; i--) if (state.tx.some((t) => movi(t) && (t.iso || "").slice(0, 7) === months[i])) return months[i];
-  return months.length ? months[months.length - 1] : null;
-}
+// mês de referência do dashboard = MÊS ATUAL (calendário). Se estiver vazio, os cards mostram zero —
+// é o comportamento esperado (não mostrar "junho" em julho).
+function refMonthYM() { return (OF && OF.refMonthYM) || TODAY_ISO.slice(0, 7); }
+// eixo de meses p/ navegação: os meses com lançamento + o mês atual (mesmo sem lançamento)
+function monthsAxis() { const s = new Set(txMonths()); s.add(TODAY_ISO.slice(0, 7)); return [...s].sort(); }
 function statementBand() {
   const ym = refMonthYM();
   const t = ym ? monthTotals(ym) : { rec: 0, desp: 0 }; // sem lançamentos → zero (não mock)
@@ -1360,7 +1354,7 @@ function saveCatForm() {
 /* donut de categorias: navegação, seleção, lançamentos */
 function openDonutTx(arg) { const [tipo, cat, sub] = arg.split("|"); state.pop = { kind: "catTx", tipo, cat, sub: sub || null, ym: state.donut[tipo].month }; renderPop(); }
 function donutMonthNav(tipo, dir) {
-  const st = state.donut[tipo], months = txMonths(), i = months.indexOf(st.month), j = dir === "prev" ? i - 1 : i + 1;
+  const st = state.donut[tipo], months = monthsAxis(), i = months.indexOf(st.month), j = dir === "prev" ? i - 1 : i + 1;
   if (j < 0 || j >= months.length) return;
   st.month = months[j]; st.active = null; renderView();
 }
