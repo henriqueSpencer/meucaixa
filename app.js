@@ -138,6 +138,7 @@ const PAGE = {
   transacoes: ["Transações", "Receitas, despesas, transferências e reembolsos"],
   conciliacao: ["Conciliação", "Importe o extrato e confirme as sugestões"],
   categorias: ["Categorias", "Estrutura de receitas e despesas"],
+  historico: ["Histórico", "Toda alteração registrada, por dia — como um diário de mudanças"],
 };
 
 /* ---------- 3. helpers ---------- */
@@ -151,6 +152,9 @@ const isoPlusDays = (iso, n) => { const d = new Date((iso || TODAY_ISO) + "T12:0
 
 const ICON = {
   "layout": '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+  "trash": '<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+  "rotate": '<path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/>',
+  "history": '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><polyline points="12 7 12 12 15 14"/>',
   "wallet": '<path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="13" r="1.1" fill="currentColor" stroke="none"/>',
   "transfer": '<polyline points="16 3 21 8 16 13"/><line x1="21" y1="8" x2="4" y2="8"/><polyline points="8 11 3 16 8 21"/><line x1="3" y1="16" x2="20" y2="16"/>',
   "checklist": '<path d="M9 6h11"/><path d="M9 12h11"/><path d="M9 18h11"/><path d="m4 6 1 1 2-2"/><path d="m4 12 1 1 2-2"/><path d="m4 18 1 1 2-2"/>',
@@ -815,7 +819,81 @@ function viewCategorias() {
   return `<div class="cat-cols">${cols}</div>`;
 }
 
-const VIEWS = { dashboard: viewDashboard, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias };
+/* ---------- Histórico de alterações (audit_log) — visão git-like por dia ---------- */
+const _esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const _WD = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+const _dayKey = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+function _dayLabel(k) {
+  const [y, m, dd] = k.split("-").map(Number); const d = new Date(y, m - 1, dd);
+  const today = _dayKey(new Date()), yest = _dayKey(new Date(Date.now() - 864e5));
+  const base = `${_WD[d.getDay()]}, ${String(dd).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
+  return k === today ? `Hoje · ${base}` : k === yest ? `Ontem · ${base}` : base;
+}
+const _hhmm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+// campos exibíveis no diff (nome técnico → rótulo PT), na ordem que aparecem
+const HIST_FIELDS = { descricao: "descrição", valor: "valor", tipo: "tipo", cat: "categoria", sub: "subcategoria", conta: "conta", origem: "origem", destino: "destino", iso: "data", status: "status", nome: "nome", sub_: "sub", saldo: "saldo", parent_id: "categoria-pai", arquivada: "arquivada", ordem: "ordem" };
+function _fmtField(f, v) {
+  if (v === null || v === undefined || v === "") return "vazio";
+  if (f === "valor" || f === "saldo") return fmt(Number(v));
+  if (f === "iso") return String(v).split("-").reverse().join("/");
+  if (f === "arquivada") return v === true || v === "true" ? "sim" : "não";
+  return String(v);
+}
+function _histDiff(od, nd) {
+  const out = [];
+  Object.keys(HIST_FIELDS).forEach((f) => {
+    const o = od ? od[f] : undefined, n = nd ? nd[f] : undefined;
+    if (JSON.stringify(o === undefined ? null : o) !== JSON.stringify(n === undefined ? null : n))
+      out.push({ f: HIST_FIELDS[f], o: _fmtField(f, o), n: _fmtField(f, n) });
+  });
+  return out;
+}
+const _ACT = { insert: { lb: "criou", cls: "add", ic: "plus" }, update: { lb: "editou", cls: "edit", ic: "pencil" }, delete: { lb: "excluiu", cls: "del", ic: "trash" } };
+const _ENT = { transactions: "lançamento", accounts: "conta", categories: "categoria" };
+function histEntry(r) {
+  const a = _ACT[r.action] || { lb: r.action, cls: "", ic: "list" };
+  const ent = _ENT[r.tbl] || r.tbl;
+  const nd = r.new_data || {}, od = r.old_data || {};
+  const valor = r.tbl === "transactions" ? (nd.valor != null ? nd.valor : od.valor) : null;
+  const valStr = valor != null && valor !== "" ? `<span class="he-val num">${fmt(Number(valor))}</span>` : "";
+  let diff = "";
+  if (r.action === "update") {
+    const ch = _histDiff(od, nd);
+    diff = ch.length ? `<div class="he-diff">${ch.map((c) => `<div class="he-ch"><span class="he-f">${c.f}</span><span class="he-o">${_esc(c.o)}</span>${ic("arrow-right", 11)}<span class="he-n">${_esc(c.n)}</span></div>`).join("")}</div>` : "";
+  }
+  return `<div class="hist-entry ${a.cls}"><span class="he-time num">${_hhmm(r.changed_at)}</span><span class="he-ic">${ic(a.ic, 13)}</span><div class="he-main"><div class="he-line"><b>${a.lb}</b> <span class="he-ent">${ent}</span> <span class="he-label">${_esc(r.label || "—")}</span> ${valStr}</div>${diff}</div></div>`;
+}
+function renderHistBody() {
+  const a = state.audit;
+  if (a === null || a === undefined) return `<div class="hist-loading"><div class="auth-spin"></div><span>Carregando histórico…</span></div>`;
+  if (a === "error") return `<div class="card"><div class="empty-mini">Não consegui carregar o histórico. <button class="link" data-hist-refresh>Tentar de novo</button></div></div>`;
+  if (!a.length) return `<div class="card hist-empty"><span class="he-empty-ic">${ic("history", 30)}</span><h3>Nenhuma alteração ainda</h3><p>A partir de agora, toda adição, edição ou exclusão de lançamentos, contas e categorias aparece aqui — agrupada por dia.</p></div>`;
+  const groups = {};
+  a.forEach((r) => { const k = _dayKey(r.changed_at); (groups[k] = groups[k] || []).push(r); });
+  const days = Object.keys(groups).sort().reverse();
+  const body = days.map((k) => {
+    const rows = groups[k], n = rows.length;
+    return `<div class="hist-day"><div class="hist-day-head"><span class="hd-label">${_dayLabel(k)}</span><span class="hd-count">${n} ${n === 1 ? "alteração" : "alterações"}</span></div><div class="hist-list">${rows.map(histEntry).join("")}</div></div>`;
+  }).join("");
+  return `<div class="hist-top"><span class="card-sub">${a.length} ${a.length === 1 ? "alteração registrada" : "alterações registradas"}${a.length >= 300 ? " (últimas 300)" : ""}</span><button class="ghost hist-refresh" data-hist-refresh>${ic("rotate", 14)} Atualizar</button></div>${body}`;
+}
+async function loadHistorico(force) {
+  if (state._auditLoading) return;
+  if (state.audit && state.audit !== "error" && !force) return; // já carregado; refresh só com force
+  state._auditLoading = true;
+  const hasCache = state.audit && state.audit !== "error";
+  if (!hasCache) { state.audit = null; const r0 = document.getElementById("hist-root"); if (r0) r0.innerHTML = renderHistBody(); } // spinner só sem cache
+  try { state.audit = await Store.fetchAudit(300); }
+  catch (e) { if (!hasCache) state.audit = "error"; }
+  state._auditLoading = false;
+  const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody();
+}
+function viewHistorico() {
+  loadHistorico();
+  return `<div id="hist-root">${renderHistBody()}</div>`;
+}
+
+const VIEWS = { dashboard: viewDashboard, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico };
 
 /* ---------- drill-down do gráfico Receitas × Despesas ---------- */
 function renderDrill() {
@@ -1604,7 +1682,8 @@ function wire() {
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); return; }
+    if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     const filt = e.target.closest("[data-filter]");
     if (filt) { state.filter = filt.dataset.filter; renderView(); return; }
     // drill-down

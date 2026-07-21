@@ -49,6 +49,12 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
 - Tabelas: `accounts`, `categories` (hierárquica via `parent_id`), `transactions`, `prefs` (jsonb).
   Todas com `user_id uuid default auth.uid()`, `updated_at` (trigger `set_updated_at`), `deleted`,
   índice `(user_id, updated_at)` e **RLS** `for all using/with check (user_id = auth.uid())`.
+- **`audit_log`** (append-only, migração `audit_log`): histórico de alterações. Gatilhos `zaudit_*`
+  (`after insert/update/delete`) em accounts/categories/transactions chamam `log_change()`
+  (**SECURITY DEFINER**) que grava `action` (insert/update/delete — tombstone `deleted=true` vira
+  'delete'), `old_data`/`new_data` (jsonb), `label` e `changed_at`. Ignora update que só mexeu em
+  `updated_at`. RLS só-select por usuário. Alimenta a aba **Histórico** (`fetchAudit`→`viewHistorico`,
+  diff git-like agrupado por dia). Registra a partir de agora — não reconstrói edições passadas.
 - Administrável pelo MCP do Supabase nesta máquina (`list_tables`/`execute_sql`/`apply_migration`).
 - **Login de produção** exige, no painel (Authentication → URL Configuration): Site URL
   `https://meucaixa.pages.dev` e Redirect URL `https://meucaixa.pages.dev/**`.

@@ -172,6 +172,13 @@
     return sb.auth.signUp({ email, password, options: { emailRedirectTo: redirect } });
   }
   async function setPassword(password) { return sb.auth.updateUser({ password }); }
+  // histórico de alterações (audit_log) — mais recente primeiro
+  async function fetchAudit(limit) {
+    if (!userId) return [];
+    const { data, error } = await sb.from("audit_log").select("*").order("changed_at", { ascending: false }).limit(limit || 300);
+    if (error) throw error;
+    return data || [];
+  }
   async function signOut() { stopAutoSync(); await sb.auth.signOut(); userId = null; user = null; }
 
   // snapshot local (fonte da verdade offline)
@@ -265,7 +272,7 @@
   }
 
   window.Store = {
-    init, onAuth, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, signOut,
+    init, onAuth, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, fetchAudit, signOut,
     loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed,
     get userId() { return userId; },
     get user() { return user; },
