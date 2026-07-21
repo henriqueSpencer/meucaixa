@@ -10,6 +10,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Meu Caixa">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
   <link rel="stylesheet" href="styles.css?v=42">
 </head>
 <body>
@@ -88,10 +90,6 @@
           <p id="pg-sub">Como está seu dinheiro em Julho de 2026</p>
         </div>
         <div class="top-right">
-          <span class="pill-demo">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.7 4.3L18 9l-4.3 1.7L12 15l-1.7-4.3L6 9l4.3-1.7z"/></svg>
-            dados de exemplo
-          </span>
           <button class="month" data-drill="open" title="Detalhar por mês">
             julho 2026
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
@@ -114,8 +112,8 @@
   </div>
 
   <script src="vendor/supabase.js"></script>
-  <script src="store.js?v=6"></script>
-  <script src="app.js?v=45"></script>
+  <script src="store.js?v=7"></script>
+  <script src="app.js?v=46"></script>
   <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {})); }</script>
 </body>
 </html>

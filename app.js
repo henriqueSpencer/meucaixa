@@ -145,7 +145,7 @@ const PAGE = {
 const fmt = (n) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtShort = (n) => "R$ " + Math.abs(n).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 const fmtNum = (n) => Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const TODAY_ISO = "2026-07-18"; // "hoje" do protótipo (dados mock são de Jul/2026)
+const TODAY_ISO = new Date().toISOString().slice(0, 10); // data real de hoje (default de nova transação, chips Hoje/Ontem)
 const parseValor = (s) => parseFloat(String(s || "").replace(/\./g, "").replace(",", ".")) || 0;
 const dataBR = (iso) => { const [, m, d] = (iso || TODAY_ISO).split("-"); return `${d}/${m}`; };
 const isoPlusDays = (iso, n) => { const d = new Date((iso || TODAY_ISO) + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
@@ -312,7 +312,7 @@ function areaChartSVG(s) {
 // série mês a mês de receitas e despesas, das transações reais (reembolso abate a despesa)
 function receitaDespesaSeries() {
   const months = txMonths();
-  if (!months.length) return monthly; // fallback ao mock/OF
+  if (!months.length) return []; // sem lançamentos → gráfico vazio (nada de dados de exemplo)
   const rec = {}, desp = {};
   state.tx.forEach((t) => {
     const k = (t.iso || "").slice(0, 7); if (!k) return;
@@ -324,6 +324,7 @@ function receitaDespesaSeries() {
 }
 function blkReceitaDespesa() {
   const full = receitaDespesaSeries(), N = full.length;
+  if (!N) return `<div class="card"><div class="card-head"><h3>Receitas × Despesas</h3></div><div class="empty-mini">Sem lançamentos ainda — adicione uma transação para ver o gráfico.</div></div>`;
   const opts = [6, 12, 24].filter((x) => x < N);
   const valid = [...opts.map(String), "all"];
   const range = valid.includes(state.rdRange) ? state.rdRange : (N > 12 ? "12" : "all");
@@ -359,6 +360,19 @@ function byCat(tipo, ym) {
   });
   return Object.entries(map).filter(([, v]) => v > 0.005).map(([nome, valor]) => ({ nome, valor })).sort((a, b) => b.valor - a.valor);
 }
+// total real (todo o histórico) por categoria — receita soma; despesa soma e abate reembolso
+function catTotals(tipo) {
+  const m = {};
+  state.tx.forEach((t) => {
+    const nome = t.cat; if (!nome) return;
+    if (tipo === "despesa") {
+      if (t.tipo === "despesa") m[nome] = (m[nome] || 0) + Math.abs(t.valor);
+      else if (t.tipo === "reembolso") m[nome] = (m[nome] || 0) - Math.abs(t.valor);
+    } else if (t.tipo === tipo) m[nome] = (m[nome] || 0) + Math.abs(t.valor);
+  });
+  Object.keys(m).forEach((k) => { if (m[k] < 0) m[k] = 0; });
+  return m;
+}
 function defaultMonth(tipo) {
   const months = txMonths();
   if (OF && OF.refMonthYM && months.includes(OF.refMonthYM)) return OF.refMonthYM; // mesmo mês do resumo
@@ -372,7 +386,7 @@ const mesAbbrev = (ym) => (ym ? `${MES3[+ym.slice(5, 7) - 1]}/${ym.slice(2, 4)}`
 // série de patrimônio líquido mês a mês, reconstruída dos fluxos (receita−despesa) a partir do saldo atual
 function netWorthSeries() {
   const months = txMonths();
-  if (!months.length) return (patrimonioSerie || []).map((d) => ({ ym: null, mes: d.mes, valor: d.valor }));
+  if (!months.length) return []; // sem histórico real → vazio (o bloco mostra "Sem histórico")
   const flow = {};
   state.tx.forEach((t) => { if (t.tipo === "transferencia") return; const k = (t.iso || "").slice(0, 7); if (!k) return; flow[k] = (flow[k] || 0) + (t.tipo === "despesa" ? -Math.abs(t.valor) : Math.abs(t.valor)); });
   const val = new Array(months.length);
@@ -558,7 +572,7 @@ function refMonthYM() {
 }
 function statementBand() {
   const ym = refMonthYM();
-  const t = ym ? monthTotals(ym) : { rec: receitasMes, desp: despesasMes }; // fallback mock/vazio
+  const t = ym ? monthTotals(ym) : { rec: 0, desp: 0 }; // sem lançamentos → zero (não mock)
   const rec = t.rec, desp = t.desp, res = rec - desp;
   const cap = ym ? monthLabel(ym) : (REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1));
   return `<div class="statement">
@@ -812,8 +826,10 @@ function viewCategorias() {
   if (state.catDetail) return viewCatDetail();
   const cols = [["receita", "Receitas"], ["despesa", "Despesas"]].map(([tipo, titulo]) => {
     const cor = tipo === "receita" ? C.receita : C.despesa;
-    const maxT = Math.max(...catTree[tipo].map((c) => c.total), 1);
-    const nodes = catTree[tipo].map((c) => `<div class="cat-node"><div class="cat-node-head cn-click" data-cat-detail="${tipo}|${c.nome}"><span class="cn-ic">${ic(catIconOf(c), 15)}</span><span class="cn-name">${c.nome}</span><span class="cn-actions"><button class="cn-btn" data-cat-edit="${tipo}|${c.nome}" title="Editar">${ic("pencil", 13)}</button><button class="cn-btn" data-cat-del="${tipo}|${c.nome}" title="Excluir">${ic("archive", 13)}</button></span><span class="cn-total num" style="color:${c.total ? cor : "var(--line-strong)"}">${c.total ? fmtShort(c.total) : "—"}</span></div><div class="cn-bar"><span style="width:${(c.total / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<button class="sub-pill" data-cat-detail="${tipo}|${c.nome}|${s}" title="Ver lançamentos">${s}</button>`).join("")}<button class="sub-add" data-add-sub="${tipo}|${c.nome}">${ic("plus", 11)} subcategoria</button></div></div>`).join("");
+    const totals = catTotals(tipo); // total real (todo o histórico) por categoria, das transações
+    const tot = (c) => totals[c.nome] || 0;
+    const maxT = Math.max(...catTree[tipo].map(tot), 1);
+    const nodes = catTree[tipo].map((c) => `<div class="cat-node"><div class="cat-node-head cn-click" data-cat-detail="${tipo}|${c.nome}"><span class="cn-ic">${ic(catIconOf(c), 15)}</span><span class="cn-name">${c.nome}</span><span class="cn-actions"><button class="cn-btn" data-cat-edit="${tipo}|${c.nome}" title="Editar">${ic("pencil", 13)}</button><button class="cn-btn" data-cat-del="${tipo}|${c.nome}" title="Excluir">${ic("archive", 13)}</button></span><span class="cn-total num" style="color:${tot(c) ? cor : "var(--line-strong)"}">${tot(c) ? fmtShort(tot(c)) : "—"}</span></div><div class="cn-bar"><span style="width:${(tot(c) / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<button class="sub-pill" data-cat-detail="${tipo}|${c.nome}|${s}" title="Ver lançamentos">${s}</button>`).join("")}<button class="sub-add" data-add-sub="${tipo}|${c.nome}">${ic("plus", 11)} subcategoria</button></div></div>`).join("");
     return `<div class="card cat-col"><div class="cat-col-head" style="border-color:${cor}33"><span class="cat-dot" style="background:${cor}"></span><h3>${titulo}</h3><span class="cat-count">${catTree[tipo].length} categorias</span></div><div class="cat-tree">${nodes}</div><button class="cat-add" style="color:${cor}" data-add-cat="${tipo}">${ic("plus", 14)} Nova categoria de ${tipo === "receita" ? "receita" : "despesa"}</button></div>`;
   }).join("");
   return `<div class="cat-cols">${cols}</div>`;
@@ -1908,6 +1924,18 @@ function defaultSeedModel() {
   };
 }
 
+// self-heal: um usuário sem NENHUMA categoria (seed antigo/parcial vindo de código em cache velho)
+// não consegue nem lançar transação. Injeta o conjunto padrão e persiste. Idempotente — só age
+// quando está realmente vazio; não mexe nas categorias de quem já tem as suas.
+function ensureSeeded() {
+  if (catTree.receita.length || catTree.despesa.length) return;
+  const def = defaultSeedModel();
+  catTree.receita.push(...def.catTree.receita.map(cloneCat));
+  catTree.despesa.push(...def.catTree.despesa.map(cloneCat));
+  if (!accounts.length) def.accounts.forEach((a) => accounts.push(a));
+  saveState();
+}
+
 // carrega os dados (do IndexedDB; puxa/semeia se preciso) e sobe o app
 async function boot() {
   if (_booted) return; _booted = true;
@@ -1930,6 +1958,7 @@ async function boot() {
     else model = { accounts: [], catTree: { receita: [], despesa: [] }, tx: [], dashOrder: state.dashOrder.slice() };
   }
   applyModel(model);
+  ensureSeeded(); // self-heal: injeta categorias/contas padrão se o usuário ficou sem nenhuma
   refreshDataLabels();
   hideAuth(); // remove o "carregando", se estava
   if (!_wired) { wire(); _wired = true; }
@@ -1942,12 +1971,13 @@ function refreshDataLabels() {
   const netEl = document.getElementById("side-net-val");
   if (netEl) netEl.textContent = fmt(netWorth());
   updateSidebarUser();
-  if (OF) {
-    const cap = REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1);
-    PAGE.dashboard[1] = `Como está seu dinheiro em ${cap}`;
-    const monthEl = document.querySelector(".month");
-    if (monthEl && monthEl.childNodes[0]) monthEl.childNodes[0].textContent = REF_LABEL + " ";
-  }
+  // título e seletor de mês refletem o mês real com lançamentos (não "Julho 2026" fixo)
+  const ym = refMonthYM();
+  const cap = ym ? monthLabel(ym) : "";
+  PAGE.dashboard[1] = cap ? `Como está seu dinheiro em ${cap}` : "Suas finanças pessoais";
+  if (elSub && state.tab === "dashboard") elSub.textContent = PAGE.dashboard[1];
+  const monthEl = document.querySelector(".month");
+  if (monthEl && monthEl.childNodes[0]) monthEl.childNodes[0].textContent = (cap ? cap.toLowerCase() : "sem lançamentos") + " ";
   const demo = document.querySelector(".pill-demo");
   if (demo) demo.style.display = "none"; // não é mais "dados de exemplo" — vem do banco
 }

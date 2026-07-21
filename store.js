@@ -247,6 +247,15 @@
         const full = cursor === EPOCH ? pulledRows : {};
         if (cursor !== EPOCH) for (const t of TABLES) full[t] = await selectAll(t);
         const model2 = rowsToModel(full);
+        // proteção contra corrida: se o usuário editou o snapshot DURANTE este sync (ex.: arquivar
+        // uma conta), sobrescrever com o estado do servidor apagaria a edição não-enviada. Nesse
+        // caso NÃO sobrescreve nem avança o cursor — mantém a edição local e reconcilia no próximo
+        // sync (que empurra a edição e re-puxa). Sem isso, edições recentes "voltavam" no reload.
+        const latest = await loadSnapshot();
+        if (latest && model && JSON.stringify(latest) !== JSON.stringify(model)) {
+          scheduleSync();
+          return { pulled: false };
+        }
         await kvSet("snapshot", model2);
         await kvSet("lastSynced", modelToRows(model2));
         await kvSet("cursor", maxTs);
