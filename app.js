@@ -246,9 +246,13 @@ function kpi(label, valor, delta, good, iconName, cor) {
 function barChartSVG(data) {
   const W = 520, H = 240, padL = 44, padR = 12, padT = 14, padB = 28;
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const max = Math.max(...data.flatMap((d) => [d.receita, d.despesa]));
-  const gridMax = Math.ceil(max / 4000) * 4000;
-  const n = data.length, bw = 14, gap = 4;
+  const max = Math.max(1, ...data.flatMap((d) => [d.receita, d.despesa]));
+  const gridMax = Math.max(4000, Math.ceil(max / 4000) * 4000);
+  const n = data.length || 1;
+  // barras e rótulos se adaptam à quantidade de meses (cabe de 3 a 30+ meses sem sobrepor)
+  const slot = plotW / n, gap = Math.min(4, slot * 0.12);
+  const bw = Math.max(2, Math.min(14, slot / 2 - gap));
+  const rx = Math.min(3, bw / 2), lblStep = Math.max(1, Math.ceil(n / 8));
   let g = "";
   for (let i = 0; i <= 4; i++) {
     const val = (gridMax * i) / 4, y = padT + plotH - (val / gridMax) * plotH;
@@ -256,12 +260,12 @@ function barChartSVG(data) {
     g += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--subtle)">${fmtShort(val)}</text>`;
   }
   data.forEach((d, i) => {
-    const cx = padL + (i + 0.5) * (plotW / n);
+    const cx = padL + (i + 0.5) * slot;
     [["receita", C.receita, -1, "Receitas"], ["despesa", C.despesa, 1, "Despesas"]].forEach(([k, col, side, lbl]) => {
       const h = (d[k] / gridMax) * plotH, x = side < 0 ? cx - bw - gap / 2 : cx + gap / 2, y = padT + plotH - h;
-      g += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="3" fill="${col}"><title>${lbl} · ${d.mes}: ${fmt(d[k])}</title></rect>`;
+      g += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="${rx}" fill="${col}"><title>${lbl} · ${d.mes}: ${fmt(d[k])}</title></rect>`;
     });
-    g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--subtle)">${d.mes}</text>`;
+    if (i % lblStep === 0 || i === n - 1) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--subtle)">${d.mes}</text>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" width="100%" height="100%" font-family="Inter,sans-serif">${g}</svg>`;
 }
@@ -301,8 +305,36 @@ function areaChartSVG(s) {
 
 /* ---------- 6. views ---------- */
 /* blocos reordenáveis do dashboard */
+// série mês a mês de receitas e despesas, das transações reais (reembolso abate a despesa)
+function receitaDespesaSeries() {
+  const months = txMonths();
+  if (!months.length) return monthly; // fallback ao mock/OF
+  const rec = {}, desp = {};
+  state.tx.forEach((t) => {
+    const k = (t.iso || "").slice(0, 7); if (!k) return;
+    if (t.tipo === "receita") rec[k] = (rec[k] || 0) + Math.abs(t.valor);
+    else if (t.tipo === "despesa") desp[k] = (desp[k] || 0) + Math.abs(t.valor);
+    else if (t.tipo === "reembolso") desp[k] = (desp[k] || 0) - Math.abs(t.valor);
+  });
+  return months.map((ym) => ({ ym, mes: mesAbbrev(ym), receita: Math.max(rec[ym] || 0, 0), despesa: Math.max(desp[ym] || 0, 0) }));
+}
 function blkReceitaDespesa() {
-  return `<div class="card dash-clickable" data-drill="open"><div class="card-head"><h3>Receitas × Despesas</h3><span class="card-sub drill-hint">detalhar ${ic("arrow-right", 12)}</span></div><div class="chart" style="height:260px">${barChartSVG(monthly)}</div><div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span></div></div>`;
+  const full = receitaDespesaSeries(), N = full.length;
+  const opts = [6, 12, 24].filter((x) => x < N);
+  const valid = [...opts.map(String), "all"];
+  const range = valid.includes(state.rdRange) ? state.rdRange : (N > 12 ? "12" : "all");
+  const nShow = range === "all" ? N : Math.min(+range, N);
+  const s = full.slice(-nShow), n = s.length;
+  const chips = [...opts.map((x) => ({ k: String(x), lb: x + "M" })), { k: "all", lb: "Tudo" }].map((r) => `<button class="pc-range${range === r.k ? " on" : ""}" data-rdrange="${r.k}">${r.lb}</button>`).join("");
+  return `<div class="card">
+    <div class="card-head">
+      <div><h3>Receitas × Despesas</h3><span class="card-sub">${n} ${n === 1 ? "mês" : "meses"}</span></div>
+      <button class="card-sub drill-hint" data-drill="open">detalhar ${ic("arrow-right", 12)}</button>
+    </div>
+    ${opts.length ? `<div class="pc-ranges"><div class="pc-chips">${chips}</div></div>` : ""}
+    <div class="chart" style="height:260px">${barChartSVG(s)}</div>
+    <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span></div>
+  </div>`;
 }
 /* meses e despesas por categoria a partir das transações reais */
 function txMonths() {
@@ -1529,6 +1561,8 @@ function wire() {
     if (e.target.closest("[data-cat-form-save]")) { saveCatForm(); return; }
     const pr = e.target.closest("[data-pcrange]");
     if (pr) { state.pcRange = pr.dataset.pcrange; state.pcSel = null; renderView(); return; }
+    const rdr = e.target.closest("[data-rdrange]");
+    if (rdr) { state.rdRange = rdr.dataset.rdrange; renderView(); return; }
     if (e.target.closest("[data-pcsel-clear]")) { state.pcSel = null; renderView(); return; }
     const dm = e.target.closest("[data-donut-month]");
     if (dm) { const [tp, dir] = dm.dataset.donutMonth.split("|"); donutMonthNav(tp, dir); return; }
