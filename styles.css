@@ -741,3 +741,28 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .hist-empty h3{font-size:16px;margin-bottom:8px;color:var(--ink)}
 .hist-empty p{font-size:13px;color:var(--sub);max-width:420px;margin:0 auto;line-height:1.5}
 @media (max-width:640px){.hist-entry{grid-template-columns:44px 24px 1fr}.he-val{margin-left:0}}
+
+/* ---------- Configurações ---------- */
+.cfg{display:flex;flex-direction:column;gap:16px;max-width:620px}
+.cfg-card{padding:20px 22px}
+.cfg-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.cfg-ic{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--card-2);color:var(--brand);flex:0 0 auto}
+.cfg-head h3{font-size:15px;color:var(--ink)}
+.cfg-p{font-size:13px;color:var(--sub);line-height:1.5;margin-bottom:14px}
+.cfg-p b{color:var(--ink)}
+.cfg-profile{display:flex;gap:16px;align-items:flex-start}
+.cfg-avatar{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;background:rgba(168,130,60,.16);color:var(--brand);font-size:22px;font-weight:700;flex:0 0 auto}
+.cfg-fields{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.cfg-fields .fld input{width:100%;font-size:14px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card-2);color:var(--ink);font-family:inherit}
+.cfg-fields .fld input:focus{outline:none;border-color:var(--brand)}
+.cfg-fields .fld input:disabled{opacity:.65;cursor:not-allowed}
+.cfg-actions{display:flex;align-items:center;gap:12px;margin-top:14px}
+.cfg-msg{font-size:12.5px;color:var(--sub)}
+.cfg-msg.ok{color:#1E6B4F}
+.cfg-msg.err{color:var(--neg)}
+.cfg-card .ghost{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;padding:10px 16px;border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--ink);cursor:pointer}
+.cfg-card .ghost:hover{border-color:var(--line-strong);background:var(--card-2)}
+.cfg-card .danger{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;padding:10px 16px;border:1px solid var(--neg);border-radius:10px;background:transparent;color:var(--neg);cursor:pointer}
+.cfg-card .danger:hover{background:rgba(194,74,56,.08)}
+.cfg-card.danger-zone{border-color:rgba(194,74,56,.3)}
+.cfg-ver{text-align:center;font-size:11.5px;color:var(--subtle);margin-top:4px}

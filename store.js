@@ -173,6 +173,7 @@
     return sb.auth.signUp({ email, password, options: { emailRedirectTo: redirect } });
   }
   async function setPassword(password) { return sb.auth.updateUser({ password }); }
+  async function updateName(nome) { return sb.auth.updateUser({ data: { full_name: nome } }); }
   // histórico de alterações (audit_log) — mais recente primeiro
   async function fetchAudit(limit) {
     if (!userId) return [];
@@ -301,7 +302,7 @@
   }
 
   window.Store = {
-    init, onAuth, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, fetchAudit, signOut,
+    init, onAuth, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, updateName, fetchAudit, signOut,
     loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed,
     get userId() { return userId; },
     get user() { return user; },

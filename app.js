@@ -139,7 +139,9 @@ const PAGE = {
   conciliacao: ["Conciliação", "Importe o extrato e confirme as sugestões"],
   categorias: ["Categorias", "Estrutura de receitas e despesas"],
   historico: ["Histórico", "Toda alteração registrada, por dia — como um diário de mudanças"],
+  config: ["Configurações", "Sua conta, segurança e dados"],
 };
+const APP_VERSION = (() => { try { const s = [...document.scripts].find((x) => /app\.js/.test(x.src)); const m = s && s.src.match(/v=(\d+)/); return m ? m[1] : ""; } catch (e) { return ""; } })();
 
 /* ---------- 3. helpers ---------- */
 const fmt = (n) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -153,6 +155,11 @@ const isoPlusDays = (iso, n) => { const d = new Date((iso || TODAY_ISO) + "T12:0
 const ICON = {
   "layout": '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
   "trash": '<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
+  "key": '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.5 12.5 8-8"/><path d="m16 4.5 3 3"/><path d="m13.5 7 2.5 2.5"/>',
+  "settings": '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  "download": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  "shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
+  "log-out": '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>',
   "rotate": '<path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/>',
   "history": '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/><polyline points="12 7 12 12 15 14"/>',
   "wallet": '<path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="13" r="1.1" fill="currentColor" stroke="none"/>',
@@ -909,7 +916,68 @@ function viewHistorico() {
   return `<div id="hist-root">${renderHistBody()}</div>`;
 }
 
-const VIEWS = { dashboard: viewDashboard, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico };
+/* ---------- Configurações do usuário ---------- */
+function viewConfig() {
+  const u = (window.Store && Store.user) || {};
+  const meta = u.user_metadata || {};
+  const nome = meta.full_name || meta.name || "";
+  const email = u.email || "";
+  const inicial = ((nome || email || "?").trim()[0] || "?").toUpperCase();
+  const nAcc = accounts.filter((a) => !a.arquivada).length;
+  const nCat = catTree.receita.length + catTree.despesa.length;
+  const nTx = state.tx.length;
+  return `<div class="cfg">
+    <div class="card cfg-card">
+      <div class="cfg-head"><span class="cfg-ic">${ic("user", 17)}</span><h3>Perfil</h3></div>
+      <div class="cfg-profile"><span class="cfg-avatar">${inicial}</span>
+        <div class="cfg-fields">
+          <label class="fld"><span class="fld-label">Nome</span><input data-cfg-name value="${nome.replace(/"/g, "&quot;")}" placeholder="Seu nome" autocomplete="name"></label>
+          <label class="fld"><span class="fld-label">E-mail</span><input value="${email}" disabled></label>
+        </div>
+      </div>
+      <div class="cfg-actions"><button class="cta" data-config-save-name>Salvar nome</button><span class="cfg-msg" data-cfg-name-msg></span></div>
+    </div>
+    <div class="card cfg-card">
+      <div class="cfg-head"><span class="cfg-ic">${ic("shield", 17)}</span><h3>Segurança</h3></div>
+      <p class="cfg-p">Defina ou altere a senha usada para entrar por e-mail + senha.</p>
+      <button class="ghost" data-setpass>${ic("key", 15)} Alterar senha</button>
+    </div>
+    <div class="card cfg-card">
+      <div class="cfg-head"><span class="cfg-ic">${ic("download", 17)}</span><h3>Seus dados</h3></div>
+      <p class="cfg-p"><b>${nAcc}</b> ${nAcc === 1 ? "conta" : "contas"} · <b>${nCat}</b> categorias · <b>${nTx}</b> ${nTx === 1 ? "lançamento" : "lançamentos"}. Baixe um backup completo em JSON quando quiser.</p>
+      <button class="ghost" data-config-export>${ic("download", 15)} Exportar backup (.json)</button>
+    </div>
+    <div class="card cfg-card">
+      <div class="cfg-head"><span class="cfg-ic">${ic("settings", 17)}</span><h3>Aparência</h3></div>
+      <p class="cfg-p">O tema acompanha automaticamente o modo claro/escuro do seu sistema.</p>
+    </div>
+    <div class="card cfg-card danger-zone">
+      <div class="cfg-head"><span class="cfg-ic">${ic("log-out", 17)}</span><h3>Sessão</h3></div>
+      <p class="cfg-p">Sair desconecta esta conta neste aparelho (seus dados continuam salvos na nuvem).</p>
+      <button class="danger" data-signout>${ic("log-out", 15)} Sair da conta</button>
+    </div>
+    <p class="cfg-ver">Meu Caixa${APP_VERSION ? ` · versão ${APP_VERSION}` : ""}</p>
+  </div>`;
+}
+async function saveConfigName() {
+  const inp = document.querySelector("[data-cfg-name]"); const nome = inp ? inp.value.trim() : "";
+  const msg = document.querySelector("[data-cfg-name-msg]");
+  if (msg) { msg.textContent = "Salvando…"; msg.className = "cfg-msg"; }
+  try { const { error } = await Store.updateName(nome); if (error) throw error;
+    if (msg) { msg.textContent = "Nome salvo ✓"; msg.className = "cfg-msg ok"; }
+    updateSidebarUser();
+  } catch (e) { if (msg) { msg.textContent = "Não consegui salvar. Tente de novo."; msg.className = "cfg-msg err"; } }
+}
+function exportBackup() {
+  const data = { app: "MeuCaixa", exportedAt: new Date().toISOString(), user: (window.Store && Store.user && Store.user.email) || null, model: currentModel() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `meucaixa-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const VIEWS = { dashboard: viewDashboard, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
 
 /* ---------- drill-down do gráfico Receitas × Despesas ---------- */
 function renderDrill() {
@@ -1700,6 +1768,8 @@ function wire() {
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
+    if (e.target.closest("[data-config-save-name]")) { saveConfigName(); return; }
+    if (e.target.closest("[data-config-export]")) { exportBackup(); return; }
     const filt = e.target.closest("[data-filter]");
     if (filt) { state.filter = filt.dataset.filter; renderView(); return; }
     // drill-down
