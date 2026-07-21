@@ -21,6 +21,16 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   `onConflict: "user_id,id"`. **PK é composta `(user_id, id)`** em todas as tabelas (migração
   `composite_pk_per_user`) — sem isso, os ids determinísticos de categoria (`c|tipo|nome`) colidiriam
   entre usuários numa PK global. O FK self de `categories` (parent) também é composto `(user_id, parent_id)`.
+  **Robustez do sync (aprendido na marra):** (1) o pull **pagina** com `.range()` (`selectAll`) — o
+  PostgREST corta em 1000 linhas/req, e sem paginar um aparelho novo baixava só 1000 das N transações;
+  (2) **cache por-usuário**: `loadSnapshot` descarta o snapshot se o `uid` gravado ≠ usuário logado,
+  `saveSnapshot` carimba o `uid`, `signOut` limpa — senão, ao trocar de conta no mesmo navegador o novo
+  usuário via os dados do anterior (era só local; o servidor sempre isolou via RLS); (3) **guarda
+  anti-corrida** no pull: se o snapshot local mudou durante o sync (edição não-enviada, ex.: arquivar),
+  NÃO sobrescreve com o servidor — compara a **forma canônica** (`modelToRows`, não o modelo cru, senão
+  um re-save benigno dá falso-positivo e atrasa dados novos); (4) **`SYNC_VERSION`** (const no `store.js`):
+  bump força descartar snapshot/cursor/lastSynced e re-puxar tudo (usado quando um bug de sync exige
+  limpar o cache de todos). Testes desses casos ficam em node (fake-indexeddb + stub Supabase).
 - **`app.js`** — o app usa o modelo em memória (`accounts` / `catTree` / `state.tx` / `state.dashOrder`).
   `currentModel()`/`applyModel()` fazem a ponte; `store.js` converte modelo⇄linhas (`_modelToRows`/
   `_rowsToModel`) e faz o diff. Categorias têm **ids determinísticos por nome** (`c|tipo|nome`,
@@ -39,9 +49,24 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   "Confirme seu e-mail" após criar conta).
 - **Onboarding de usuário novo**: se o servidor está vazio (0 contas, `isRemoteEmpty` checa `accounts`),
   `boot()` semeia `defaultSeedModel()` — 2 contas zeradas (Conta Corrente, Carteira) + categorias comuns
-  BR, sem lançamentos. O usuário existente (com dados) nunca cai nesse caminho.
+  BR, sem lançamentos. Além disso, `ensureSeeded()` (no boot, após `applyModel`) faz **self-heal**: se o
+  usuário ficou **sem nenhuma categoria** (seed parcial / código antigo em cache), injeta o conjunto
+  padrão e persiste — senão não dá nem pra lançar transação. Usuário com dados nunca cai nesses caminhos.
+- **Telas (`VIEWS`/`PAGE`, aba via `data-tab`)**: `dashboard`, `contas`, `transacoes`, `conciliacao`,
+  `categorias`, `historico` (audit git-like), `config` (Configurações). Nova aba = entrada em `VIEWS` +
+  `PAGE` + botão `data-tab` no `index.html` (as funções `view*` são globais).
+- **Configurações (`viewConfig`)**: perfil (nome editável via `Store.updateName`→`user_metadata.full_name`;
+  e-mail read-only), segurança (alterar senha, reusa `data-setpass`), seus dados (resumo + `exportBackup`
+  = download JSON do `currentModel`), aparência (tema segue o sistema), sessão (sair) + versão (`APP_VERSION`).
+- **Dados reais, sem mock**: dashboard/Extrato/gráficos calculam das transações reais. `refMonthYM()` =
+  último mês com receita/despesa (pula meses só-transferência); título/seletor de mês refletem ele.
+  `TODAY_ISO` = data real de hoje (era fixa). Totais das categorias vêm de `catTotals()` (as linhas do
+  banco têm `total:0`). Sem lançamentos → zero/vazio (não os antigos 15.800/8.900). Os `const` mock
+  (`monthly`/`receitasMes`/etc.) só sobrevivem como fallback do modo dev com `OF_DATA`.
 - **PWA**: `manifest.json` + `sw.js` (shell offline: network-first no HTML, stale-while-revalidate nos
-  assets; Supabase passa direto pela rede). Ícones em `icons/` (carteira brass 192/512).
+  assets; Supabase passa direto pela rede). Ícones em `icons/` (carteira brass 192/512). **Favicon**: o
+  Safari ignorava SVG/PNG externo → usa **SVG inline (data-URI)** no `<link rel=icon>` do `index.html`
+  (padrão que funciona, igual ao DIVYVAL) + **`/favicon.ico`** na raiz (16/32/48, gerado com Pillow).
 
 ## Supabase (projeto `meucaixa`)
 - ref/project_id: **`umvtbondcihigdltspub`** · região sa-east-1 · URL `https://umvtbondcihigdltspub.supabase.co`
@@ -66,9 +91,12 @@ Cloudflare Pages, projeto `meucaixa` (**direct-upload via wrangler**; o token OA
 DIST=$(mktemp -d); git archive HEAD | tar -x -C "$DIST"
 npx --yes wrangler@latest pages deploy "$DIST" --project-name=meucaixa --branch=main --commit-dirty=true
 ```
-`.assetsignore` enxuga o site. **Auto-deploy no push** via `.github/workflows/deploy.yml` (já commitado,
-usa `cloudflare/wrangler-action`, accountId `b7345f757a0fc365da5dcdea7a033db5`): só falta o repo ter o
-secret **`CLOUDFLARE_API_TOKEN`** (token do template *Cloudflare Pages — Edit*) para os runs passarem.
+`.assetsignore` enxuga o site. **Deploy é MANUAL por enquanto** (comando acima) — a produção atualiza a
+cada mudança. **Auto-deploy no push** via `.github/workflows/deploy.yml` (wrangler-action, accountId
+`b7345f757a0fc365da5dcdea7a033db5`) está pronto mas **falta o secret `CLOUDFLARE_API_TOKEN`**; enquanto
+não existe, o workflow **pula sem falhar** (checa o token num step e só publica se houver) — assim não
+spamma email de erro. Quando o secret entrar (o **usuário** configura — criar/guardar credencial não é
+tarefa do assistente; o OAuth local do wrangler não serve pro action), o Actions assume o deploy sozinho.
 
 ## Dados reais (seed já feito)
 Vieram do `base.bak` (export SQLite do **Orçamento Fácil**). `gerar_dados.py` → `dados.js`
@@ -83,9 +111,13 @@ tag e limpe as tabelas.
   conta **henriqueSpencer**.
 - Mount points de modais (`#modal-root`/`#drill-root`/`#pop-root`/`#auth-gate`) ficam **dentro de
   `.fin-root`** (os tokens de cor são escopados ali; fora disso os pop-ups ficam invisíveis).
-- Testes com **jsdom** (no scratchpad, com `fake-indexeddb` e um Supabase stub). Limitação conhecida:
-  `const state`/`accounts`/`catTree` são de escopo de módulo e **não** são acessíveis via `window.eval`
-  — verifique pelo DOM ou pelas funções globais.
+- **Testar SEM navegador** (preferência do usuário — automação de browser gasta muito token/é lenta;
+  navegador só em último caso). Ordem: (1) `node --check`; (2) **node/jsdom** no scratchpad com
+  `fake-indexeddb` + stub do Supabase — dá pra carregar `store.js`/`app.js` e chamar as funções globais
+  (`viewConfig()` etc.) ou dirigir o `sync()` injetando a corrida pelo stub; (3) **SQL via MCP do
+  Supabase** pra checar o efeito real no banco (ex.: `arquivada` das contas, contagem por usuário).
+  Limitação do jsdom: `const state`/`accounts`/`catTree`/`VIEWS` são de escopo léxico e **não** vêm via
+  `window.eval` (mas `function view*`/`Store` sim) — verifique pelo DOM ou chamando as funções globais.
 
 ## Importar extrato (tela Conciliação)
 Lê **OFX/CSV/TXT** (`parseOFX`/`parseCSV`, texto) e **PDF** do **Mercado Pago** (`parsePDF`→`mpParsePage`
