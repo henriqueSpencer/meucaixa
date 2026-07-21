@@ -268,8 +268,11 @@
         // uma conta), sobrescrever com o estado do servidor apagaria a edição não-enviada. Nesse
         // caso NÃO sobrescreve nem avança o cursor — mantém a edição local e reconcilia no próximo
         // sync (que empurra a edição e re-puxa). Sem isso, edições recentes "voltavam" no reload.
+        // compara a forma CANÔNICA (linhas), não o modelo cru: um re-save benigno reescreve o
+        // snapshot com estrutura equivalente-porém-diferente e daria falso-positivo (abortava o
+        // pull à toa, atrasando a chegada de dados novos). modelToRows normaliza os campos.
         const latest = await loadSnapshot();
-        if (latest && model && JSON.stringify(latest) !== JSON.stringify(model)) {
+        if (latest && model && JSON.stringify(modelToRows(latest)) !== JSON.stringify(modelToRows(model))) {
           scheduleSync();
           return { pulled: false };
         }
