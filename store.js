@@ -132,7 +132,8 @@
   // ---------------------------------------------------------------- Supabase + sync
   // Bump quando um bug de sync exigir descartar o cache local e re-puxar tudo.
   // v2: correção do limite de 1000 linhas (snapshots antigos vinham truncados/vazios).
-  const SYNC_VERSION = 2;
+  // v3: cache passa a ser por-usuário — limpa qualquer snapshot de outro usuário no mesmo aparelho.
+  const SYNC_VERSION = 3;
   let sb = null, userId = null, user = null, syncing = false, syncTimer = null;
   const authCbs = [];
 
@@ -179,11 +180,27 @@
     if (error) throw error;
     return data || [];
   }
-  async function signOut() { stopAutoSync(); await sb.auth.signOut(); userId = null; user = null; }
+  async function signOut() {
+    stopAutoSync();
+    // limpa o cache local do usuário — o snapshot é por-aparelho; sem isso o PRÓXIMO usuário a
+    // logar neste navegador carregaria os dados de quem saiu (vazamento entre contas).
+    try { await kvDel("snapshot"); await kvDel("cursor"); await kvDel("lastSynced"); await kvDel("uid"); } catch (e) {}
+    await sb.auth.signOut(); userId = null; user = null;
+  }
 
-  // snapshot local (fonte da verdade offline)
-  async function loadSnapshot() { return (await kvGet("snapshot")) || null; }
+  // snapshot local (fonte da verdade offline) — escopado ao usuário logado
+  async function loadSnapshot() {
+    // se o snapshot em cache é de OUTRO usuário (troca de conta no mesmo aparelho), descarta.
+    const cachedUid = await kvGet("uid");
+    if (userId && cachedUid && cachedUid !== userId) {
+      await kvDel("snapshot"); await kvDel("cursor"); await kvDel("lastSynced");
+      await kvSet("uid", userId);
+      return null;
+    }
+    return (await kvGet("snapshot")) || null;
+  }
   async function saveSnapshot(model) {
+    if (userId) await kvSet("uid", userId); // carimba de quem é o snapshot
     await kvSet("snapshot", model);
     scheduleSync();
   }
