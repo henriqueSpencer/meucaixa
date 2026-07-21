@@ -775,7 +775,7 @@ function viewConciliacao() {
             ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
             : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>`}
         </div>`;
-    const match = r.match && !isEdit ? `<div class="recon-match">${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b></div>` : "";
+    const match = r.match && !isEdit ? `<div class="recon-match${r.matchId != null ? " click" : ""}"${r.matchId != null ? ` data-tx-open="${r.matchId}"` : ""}>${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b>${r.matchId != null ? ` ${ic("arrow-right", 12)}` : ""}</div>` : "";
     const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
     const inst = r.note ? `<div class="recon-inst">${ic("circle-alert", 12)} ${r.note}</div>` : "";
     const actions = isEdit
@@ -1146,7 +1146,7 @@ function renderModal() {
 /* handlers */
 function openModal() { state.modal = true; state.modalRecon = false; state.editTx = null; state.modalTipo = "despesa"; state.form = freshForm(); state.acctMenu = null; renderModal(); }
 function openEditTx(id) {
-  const t = state.tx.find((x) => x.id === +id); if (!t) return;
+  const t = state.tx.find((x) => String(x.id) === String(id)); if (!t) return;
   state.editTx = t.id;
   state.modalTipo = t.tipo === "reembolso" ? "receita" : t.tipo;
   state.form = {
@@ -1272,7 +1272,7 @@ function renderPop() {
   const p = state.pop;
   let title = "", body = "", foot = "";
   if (p.kind === "tx") {
-    const t = state.tx.find((x) => x.id === p.id);
+    const t = state.tx.find((x) => String(x.id) === String(p.id));
     if (!t) { state.pop = null; el.innerHTML = ""; return; }
     title = "Lançamento";
     const linha = (k, v) => `<div class="pop-line"><span>${k}</span><span>${v}</span></div>`;
@@ -1336,8 +1336,8 @@ function renderPop() {
   const first = el.querySelector("input"); if (first) first.focus();
 }
 function closePop() { state.pop = null; renderPop(); }
-function openTxPop(id) { state.pop = { kind: "tx", id: +id }; renderPop(); }
-function delTx(id) { state.tx = state.tx.filter((t) => t.id !== +id); closePop(); renderView(); }
+function openTxPop(id) { state.pop = { kind: "tx", id: String(id) }; renderPop(); }
+function delTx(id) { state.tx = state.tx.filter((t) => String(t.id) !== String(id)); closePop(); renderView(); }
 function openAcctForm() { state.pop = { kind: "acctForm" }; renderPop(); }
 function saveAcctForm() {
   const g = (s) => document.querySelector(`[data-af="${s}"]`);
@@ -1631,7 +1631,7 @@ function buildRecon(parsed, account) {
     const sub = (rule && rule.sub && catObj && catObj.subs.includes(rule.sub)) ? rule.sub : firstSub;
     const match = findReconMatch({ iso: p.iso, valor });
     const conf = Math.min((rule ? 85 : 55) + (match ? 12 : 0), 99);
-    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug: { tipo, cat, sub, conta: account }, conf, match: match ? `${match.desc} · ${match.data}` : null, status, note };
+    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug: { tipo, cat, sub, conta: account }, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note };
   });
 }
 let _manSeq = 0;
@@ -1657,7 +1657,7 @@ function formToRecon() {
   }
   const signed = tipo === "despesa" ? -Math.abs(v) : Math.abs(v);
   const match = findReconMatch({ iso, valor: signed });
-  return { id, raw, valor: signed, iso, sug: { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount }, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, status: "pendente", manual: true };
+  return { id, raw, valor: signed, iso, sug: { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount }, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true };
 }
 function reconToTx(r) {
   const iso = r.iso || TODAY_ISO, tipo = r.sug.tipo;

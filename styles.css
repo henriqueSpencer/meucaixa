@@ -766,3 +766,7 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .cfg-card .danger:hover{background:rgba(194,74,56,.08)}
 .cfg-card.danger-zone{border-color:rgba(194,74,56,.3)}
 .cfg-ver{text-align:center;font-size:11.5px;color:var(--subtle);margin-top:4px}
+
+.recon-match.click{cursor:pointer;transition:.12s}
+.recon-match.click:hover{color:var(--ink);text-decoration:underline}
+.recon-match.click svg:last-child{opacity:.6}
