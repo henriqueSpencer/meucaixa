@@ -755,10 +755,10 @@ function viewConciliacao() {
   const ign = state.recon.filter((r) => r.status === "ignorado").length;
   const acct = accounts.find((a) => a.nome === state.reconAccount);
   const saldoAtual = acct ? acct.saldo : 0;
-  // saldo projetado = o que o saldo VAI ficar após salvar = saldo atual + os itens que serão CRIADOS
-  // (não-rejeitados e SEM correspondência). Os com correspondência já existem na conta (o saldo já os
-  // reflete) e não geram lançamento novo → não somam. Assim a projeção bate com o saldo salvo.
-  const contam = state.recon.filter((r) => r.status !== "ignorado" && !r.match);
+  // saldo projetado = saldo atual + TODOS os itens não-ignorados. Os com correspondência a um lançamento
+  // existente já vêm ignorados (X) por padrão — logo não somam por padrão —, mas se o usuário reativar
+  // ou aceitar um deles, ele passa a contar. Só o X (ignorar) tira do projetado.
+  const contam = state.recon.filter((r) => r.status !== "ignorado");
   let despTot = 0, credTot = 0;
   contam.forEach((r) => { const e = reconEffect(r); if (e < 0) despTot += e; else credTot += e; });
   const saldoFuturo = saldoAtual + despTot + credTot;
@@ -1665,6 +1665,7 @@ function buildRecon(parsed, account) {
     const firstSub = catObj ? (catObj.subs.find((s) => s !== catObj.nome) || "") : "";
     const sub = (rule && rule.sub && catObj && catObj.subs.includes(rule.sub)) ? rule.sub : firstSub;
     const match = findReconMatch({ iso: p.iso, valor });
+    if (match) status = "ignorado"; // já existe um lançamento igual → vem marcado com X (reative p/ contar)
     const conf = Math.min((rule ? 85 : 55) + (match ? 12 : 0), 99);
     return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug: { tipo, cat, sub, conta: account }, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note };
   });
