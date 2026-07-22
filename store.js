@@ -100,6 +100,44 @@
     return pending;
   }
 
+  // igualdade de linha ignorando meta. Ausente(undefined) só é igual a ausente.
+  function rowEq(a, b) { if (!a || !b) return a === b; return shallowEq(stripMeta(a), stripMeta(b)); }
+
+  // MERGE 3-vias por linha — o coração da "validação criteriosa" do sync.
+  //   base   = último estado do servidor que ESTE aparelho confirmou (lastSynced)
+  //   local  = snapshot local atual (o que o app tem em memória/IndexedDB)
+  //   remote = estado COMPLETO e atual do servidor (null quando nada mudou lá desde o cursor)
+  // Regra: uma linha só é EMPURRADA quando difere da base (edição/inclusão/exclusão minha genuína)
+  // E o servidor NÃO a alterou. Se o servidor mudou a linha, o remoto vence (nunca sobrescrevemos um
+  // valor mais novo do servidor com um valor local obsoleto — foi essa a causa do "push fantasma").
+  // Retorna { merged: linhas do novo estado local, push: linhas a fazer upsert (inclui tombstones) }.
+  function mergeRows(localR, baseR, remoteR) {
+    const merged = {}, push = {};
+    TABLES.forEach((t) => {
+      const L = index(localR[t] || []);
+      const B = index((baseR && baseR[t]) || []);
+      const R = remoteR ? index(remoteR[t] || []) : B; // servidor inalterado ⇒ remoto == base
+      const ids = new Set([].concat(Object.keys(L), Object.keys(B), Object.keys(R)));
+      const mrows = [], prows = [];
+      ids.forEach((id) => {
+        const l = L[id], b = B[id], r = R[id];
+        const localChanged = l ? !rowEq(l, b) : !!b;   // presente e ≠base, ou ausente mas existia (delete local)
+        const remoteChanged = r ? !rowEq(r, b) : !!b;  // idem no servidor
+        if (localChanged && !remoteChanged) {
+          if (l) { mrows.push(l); prows.push(l); }               // minha edição/inclusão → mantém e empurra
+          else if (b) prows.push(Object.assign({}, b, { deleted: true })); // minha exclusão → tombstone
+        } else if (remoteChanged) {
+          if (r) mrows.push(r);                                   // servidor venceu (inclui conflito) — não empurra
+        } else if (l) {
+          mrows.push(l);                                          // nada mudou
+        }
+      });
+      merged[t] = mrows;
+      if (prows.length) push[t] = prows;
+    });
+    return { merged, push };
+  }
+
   // ---------------------------------------------------------------- helpers puros
   function num(x) { const n = parseFloat(x); return isFinite(n) ? n : 0; }
   function idFix(id) { return /^-?\d+$/.test(String(id)) ? Number(id) : id; } // tx ids numéricos voltam number
@@ -253,25 +291,19 @@
     }
     return all;
   }
-  // push (diff→upsert) + pull (updated_at>cursor). Retorna {pulled:bool, model?} se o remoto mudou.
+  // sync = PULL primeiro, depois MERGE 3-vias, depois PUSH só das edições genuínas.
+  // Ordem importa: puxar antes de empurrar garante que nunca sobrescrevemos um valor mais novo do
+  // servidor com um valor local obsoleto (o "push fantasma" que zerava/revertia dados no reload).
+  // Retorna {pulled:bool, model?} — model presente quando o estado local mudou e o app deve reaplicar.
   async function sync() {
     if (!userId || syncing || !navigator.onLine) return { pulled: false };
     syncing = true;
     try {
       const model = await loadSnapshot();
-      if (model) {
-        const current = modelToRows(model);
-        const lastSynced = (await kvGet("lastSynced")) || {};
-        const pending = diffRows(current, lastSynced);
-        for (const t of TABLES) {
-          if (!pending[t] || !pending[t].length) continue;
-          const payload = pending[t].map((r) => Object.assign({ user_id: userId }, r));
-          const { error } = await sb.from(t).upsert(payload, { onConflict: "user_id,id" });
-          if (error) throw error;
-        }
-        if (Object.keys(pending).length) await kvSet("lastSynced", current);
-      }
-      // pull incremental (paginado)
+      const localRows = model ? modelToRows(model) : { accounts: [], categories: [], transactions: [], prefs: [] };
+      const base = (await kvGet("lastSynced")) || {};
+
+      // 1) PULL incremental (paginado): descobre se o servidor mudou desde o cursor.
       const cursor = (await kvGet("cursor")) || EPOCH;
       let maxTs = cursor, remoteChanged = false;
       const pulledRows = {};
@@ -281,34 +313,47 @@
         data.forEach((r) => { if (r.updated_at > maxTs) maxTs = r.updated_at; });
         if (data.length) remoteChanged = true;
       }
+      // estado remoto COMPLETO e normalizado (só quando algo mudou lá). No 1º sync (cursor no epoch)
+      // o pull incremental já trouxe tudo — reaproveita; senão refaz o full paginado.
+      let remoteRows = null;
       if (remoteChanged) {
-        // reconstrói o modelo do banco inteiro. No 1º sync (cursor no epoch) o pull já trouxe
-        // tudo — reaproveita; senão refaz o full paginado.
         const full = cursor === EPOCH ? pulledRows : {};
         if (cursor !== EPOCH) for (const t of TABLES) full[t] = await selectAll(t);
-        const model2 = rowsToModel(full);
-        // proteção contra corrida: se o usuário editou o snapshot DURANTE este sync (ex.: arquivar
-        // uma conta), sobrescrever com o estado do servidor apagaria a edição não-enviada. Nesse
-        // caso NÃO sobrescreve nem avança o cursor — mantém a edição local e reconcilia no próximo
-        // sync (que empurra a edição e re-puxa). Sem isso, edições recentes "voltavam" no reload.
-        // compara a forma CANÔNICA (linhas), não o modelo cru: um re-save benigno reescreve o
-        // snapshot com estrutura equivalente-porém-diferente e daria falso-positivo (abortava o
-        // pull à toa, atrasando a chegada de dados novos). modelToRows normaliza os campos.
-        const latest = await loadSnapshot();
-        if (latest && model && JSON.stringify(modelToRows(latest)) !== JSON.stringify(modelToRows(model))) {
-          scheduleSync();
-          return { pulled: false };
-        }
+        remoteRows = modelToRows(rowsToModel(full));
+      }
+
+      // 2) MERGE 3-vias → novo estado local + linhas a empurrar (edições minhas que o servidor não tocou).
+      const { merged, push } = mergeRows(localRows, base, remoteRows);
+
+      // 3) PUSH das edições genuínas (inclui tombstones de exclusão).
+      let pushed = false;
+      for (const t of TABLES) {
+        if (!push[t] || !push[t].length) continue;
+        const payload = push[t].map((r) => Object.assign({ user_id: userId }, r));
+        const { error } = await sb.from(t).upsert(payload, { onConflict: "user_id,id" });
+        if (error) throw error;
+        pushed = true;
+      }
+
+      // 4) Persistência local. Guarda anti-corrida: se o snapshot mudou DURANTE o sync (edição do
+      // usuário / outra aba), não aplica o merge nem avança o cursor — reconcilia no próximo ciclo.
+      const latest = await loadSnapshot();
+      const localUnchanged = JSON.stringify(latest ? modelToRows(latest) : localRows) === JSON.stringify(localRows);
+      if (!localUnchanged) { scheduleSync(); return { pulled: false }; }
+
+      if (remoteChanged) {
+        const model2 = rowsToModel(merged);
         const nv = ((await kvGet("snapVersion")) || 0) + 1; // nova versão + avisa as outras abas
         await kvSet("snapshot", model2);
         await kvSet("snapVersion", nv);
         _snapVer = nv;
         bcPost(nv);
-        await kvSet("lastSynced", modelToRows(model2));
+        await kvSet("lastSynced", merged);
         await kvSet("cursor", maxTs);
-        syncing = false;
         return { pulled: true, model: model2 };
       }
+      // servidor inalterado: se empurramos algo, a baseline agora é o que o servidor passou a ter.
+      if (pushed) await kvSet("lastSynced", merged);
       await kvSet("cursor", maxTs);
       return { pulled: false };
     } finally { syncing = false; }
@@ -333,6 +378,6 @@
     get userId() { return userId; },
     get user() { return user; },
     // puros (p/ testes)
-    _modelToRows: modelToRows, _rowsToModel: rowsToModel, _diffRows: diffRows,
+    _modelToRows: modelToRows, _rowsToModel: rowsToModel, _diffRows: diffRows, _mergeRows: mergeRows,
   };
 })();
