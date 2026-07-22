@@ -107,6 +107,20 @@ const despesasMes = OF ? OF.despesasMes : 8900;
 
 /* helpers de conta / drill */
 const acctById = (id) => accounts.find((a) => a.id === id);
+const acctByName = (nome) => accounts.find((a) => a.nome === nome);
+// aplica (sign=+1) ou reverte (sign=-1) o efeito de UM lançamento no saldo das contas afetadas.
+// Chamado só em ações do app (criar/editar/excluir/conciliar) — o saldo é guardado, não recalculado.
+function applyTxToBalance(tx, sign) {
+  if (!tx) return;
+  if (tx.tipo === "transferencia") {
+    const amt = Math.abs(tx.valor), o = acctByName(tx.origem), d = acctByName(tx.destino);
+    if (o) o.saldo -= sign * amt;
+    if (d) d.saldo += sign * amt;
+  } else {
+    const c = acctByName(tx.conta);
+    if (c) c.saldo += sign * tx.valor; // tx.valor já assinado (despesa negativa, receita/reembolso positiva)
+  }
+}
 const acctTx = (nome) => state.tx.filter((t) => t.conta === nome || t.origem === nome || t.destino === nome);
 // valor do lançamento sob a ótica DESTA conta (transferência: saída se origem, entrada se destino)
 function txValorConta(t, nome) {
@@ -1190,9 +1204,12 @@ function saveTx() {
     const catObj = list.find((c) => c.nome === state.form.cat) || list[0];
     tx = { ...base, cat: catObj.nome, sub: state.form.sub || catObj.subs[0], conta: state.form.conta || "Conta Corrente", valor: tipo === "despesa" ? -Math.abs(v) : Math.abs(v) };
   }
+  if (orig) applyTxToBalance(orig, -1); // reverte o efeito antigo (edição)
+  applyTxToBalance(tx, 1);              // aplica o efeito novo no saldo das contas
   state.tx = state.editTx ? state.tx.map((t) => (t.id === state.editTx ? tx : t)) : [tx, ...state.tx];
   state.editTx = null;
   state.modal = false;
+  refreshSideNet();
   renderModal();
   renderView();
 }
@@ -1331,7 +1348,7 @@ function renderPop() {
 }
 function closePop() { state.pop = null; renderPop(); }
 function openTxPop(id) { state.pop = { kind: "tx", id: String(id) }; renderPop(); }
-function delTx(id) { state.tx = state.tx.filter((t) => String(t.id) !== String(id)); closePop(); renderView(); }
+function delTx(id) { const t = state.tx.find((x) => String(x.id) === String(id)); if (t) applyTxToBalance(t, -1); state.tx = state.tx.filter((x) => String(x.id) !== String(id)); refreshSideNet(); closePop(); renderView(); }
 function openAcctForm() { state.pop = { kind: "acctForm" }; renderPop(); }
 function saveAcctForm() {
   const g = (s) => document.querySelector(`[data-af="${s}"]`);
@@ -1483,9 +1500,10 @@ function reconCommit() {
   const aceitos = state.recon.filter((r) => r.status === "conciliado");
   if (!aceitos.length) return;
   const novos = aceitos.filter((r) => !r.match).map(reconToTx);
-  if (novos.length) state.tx = [...novos, ...state.tx];
+  if (novos.length) { novos.forEach((t) => applyTxToBalance(t, 1)); state.tx = [...novos, ...state.tx]; }
   state.recon = []; state.reconFiles = []; state.imported = false; state.reconAccount = null; state.editing = null;
   state.reconDone = { criados: novos.length, conciliados: aceitos.length };
+  refreshSideNet();
   renderView();
 }
 function reconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
