@@ -112,10 +112,13 @@ const acctByName = (nome) => accounts.find((a) => a.nome === nome);
 // Chamado só em ações do app (criar/editar/excluir/conciliar) — o saldo é guardado, não recalculado.
 function applyTxToBalance(tx, sign) {
   if (!tx) return;
+  // conta de patrimônio: transferir dinheiro pra ela é ALOCAR — mexe no alocado também
+  // (mantém a relação Valor atual = Valor alocado + Custos).
+  const bump = (a, delta) => { if (!a) return; a.saldo += delta; if (a.tipo === "patrimonio" && a.alocado != null) a.alocado += delta; };
   if (tx.tipo === "transferencia") {
-    const amt = Math.abs(tx.valor), o = acctByName(tx.origem), d = acctByName(tx.destino);
-    if (o) o.saldo -= sign * amt;
-    if (d) d.saldo += sign * amt;
+    const amt = Math.abs(tx.valor);
+    bump(acctByName(tx.origem), -sign * amt);
+    bump(acctByName(tx.destino), sign * amt);
   } else {
     const c = acctByName(tx.conta);
     if (c) c.saldo += sign * tx.valor; // tx.valor já assinado (despesa negativa, receita/reembolso positiva)
