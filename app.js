@@ -752,9 +752,10 @@ function viewConciliacao() {
   const ign = state.recon.filter((r) => r.status === "ignorado").length;
   const acct = accounts.find((a) => a.nome === state.reconAccount);
   const saldoAtual = acct ? acct.saldo : 0;
-  // saldo projetado = saldo atual + TODOS os itens não-rejeitados (aceitos + pendentes), cada um 1x.
-  // Só os rejeitados (X / ignorados) ficam de fora.
-  const contam = state.recon.filter((r) => r.status !== "ignorado");
+  // saldo projetado = o que o saldo VAI ficar após salvar = saldo atual + os itens que serão CRIADOS
+  // (não-rejeitados e SEM correspondência). Os com correspondência já existem na conta (o saldo já os
+  // reflete) e não geram lançamento novo → não somam. Assim a projeção bate com o saldo salvo.
+  const contam = state.recon.filter((r) => r.status !== "ignorado" && !r.match);
   let despTot = 0, credTot = 0;
   contam.forEach((r) => { const e = reconEffect(r); if (e < 0) despTot += e; else credTot += e; });
   const saldoFuturo = saldoAtual + despTot + credTot;
@@ -1609,7 +1610,13 @@ const RECON_RULES = [
 ];
 function findReconMatch(p) {
   if (!p.iso) return null;
-  return state.tx.find((t) => t.status !== "importado" && Math.abs(Math.abs(t.valor) - Math.abs(p.valor)) < 0.01 && t.iso && Math.abs((new Date(t.iso) - new Date(p.iso)) / 864e5) <= 3) || null;
+  const acc = state.reconAccount;
+  // só casa com lançamentos da MESMA conta que está sendo conciliada — senão uma compra do cartão
+  // "casaria" falsamente com um lançamento de outra conta do mesmo valor e não seria criada no commit.
+  return state.tx.find((t) => t.status !== "importado"
+    && (t.conta === acc || t.origem === acc || t.destino === acc)
+    && Math.abs(Math.abs(t.valor) - Math.abs(p.valor)) < 0.01
+    && t.iso && Math.abs((new Date(t.iso) - new Date(p.iso)) / 864e5) <= 3) || null;
 }
 function catExists(tipo, nome) { return catTree[tipo] && catTree[tipo].some((c) => c.nome === nome); }
 // detecta parcela "N/M" na descrição (com palavra parcela, ou N/M ao fim) — evita confundir com data
