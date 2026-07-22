@@ -113,6 +113,12 @@ Vieram do `base.bak` (export SQLite do **Orçamento Fácil**). `gerar_dados.py` 
 tag e limpe as tabelas.
 
 ## Convenções que SEMPRE importam
+- **Reembolso** (`tipo:"reembolso"`) é um **crédito lançado numa categoria de DESPESA** (valor positivo,
+  cat/sub de despesa — o modal usa `catTree.despesa` quando `reembolso`). Em **toda** visão de despesa ele
+  **abate o total** (net), nunca soma: totais (`byCat`, `catTotals`, `monthFlow`), séries e listas
+  (`viewCatDetail`, popup `catTx`) usam `contrib = reembolso ? -abs : +abs` e o filtro de despesa é
+  `t.tipo === "despesa" || t.tipo === "reembolso"` (nunca `=== "despesa"` sozinho). Na UI aparece como
+  crédito (`+`, cor positiva, tag "reembolso"). Ao criar qualquer lista/total de categoria, replique isso.
 - **Nunca** versionar/publicar dado financeiro: `base.bak`, `dados.js`, `gerar_dados.py`, `imagens/`,
   `.wrangler/` são **gitignored**. Ao deployar, use o `git archive` (nunca `deploy .` da pasta suja).
 - Commits em **português**, estilo enxuto, prefixo `MeuCaixa:`, **sem trailers automáticos de co-autoria**;
