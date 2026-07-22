@@ -1321,12 +1321,14 @@ function renderPop() {
     body = `${p.parent ? `<p class="pop-hint">Dentro de <b>${p.parent}</b></p>` : ""}<label class="fld"><span class="fld-label">Nome</span><input data-cf="nome" placeholder="${p.parent ? "Ex.: Mercado" : "Ex.: Educação"}" autocomplete="off"></label>`;
     foot = `<button class="mini-btn primary" data-cat-form-save>Adicionar</button><button class="mini-btn" data-pop-close>Cancelar</button>`;
   } else if (p.kind === "catTx") {
-    const tipo = p.tipo || "despesa", sinal = tipo === "despesa" ? "−" : "+", cor = tipo === "despesa" ? "var(--neg)" : "var(--pos)";
-    const list = state.tx.filter((t) => t.tipo === tipo && t.cat === p.cat && (!p.sub || (t.sub || "Sem subcategoria") === p.sub) && (t.iso || "").slice(0, 7) === p.ym).sort((a, b) => (b.iso || "").localeCompare(a.iso || ""));
-    const total = list.reduce((s, t) => s + Math.abs(t.valor), 0);
+    const tipo = p.tipo || "despesa", isDesp = tipo === "despesa", cor = isDesp ? "var(--neg)" : "var(--pos)";
+    // despesa inclui os reembolsos da categoria (abatem o total, como no byCat/viewCatDetail)
+    const list = state.tx.filter((t) => (isDesp ? (t.tipo === "despesa" || t.tipo === "reembolso") : t.tipo === "receita") && t.cat === p.cat && (!p.sub || (t.sub || "Sem subcategoria") === p.sub) && (t.iso || "").slice(0, 7) === p.ym).sort((a, b) => (b.iso || "").localeCompare(a.iso || ""));
+    const contrib = (t) => (t.tipo === "reembolso" ? -Math.abs(t.valor) : Math.abs(t.valor));
+    const total = list.reduce((s, t) => s + contrib(t), 0);
     title = p.sub ? `${p.cat} · ${p.sub}` : p.cat;
     body = `<div class="pop-cat-head"><span>${ymLabel(p.ym)} · ${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><b class="num" style="color:${cor}">${fmt(total)}</b></div>
-      <div class="pop-cat-list">${list.map((t) => `<div class="mini-row click" data-tx-open="${t.id}"><div class="mini-l"><div><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data}${t.sub ? " · " + t.sub : ""}${t.conta ? " · " + t.conta : ""}</div></div></div><span class="num" style="color:${cor};font-weight:600">${sinal} ${fmtNum(Math.abs(t.valor))}</span></div>`).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
+      <div class="pop-cat-list">${list.map((t) => { const reemb = t.tipo === "reembolso"; const rc = reemb ? "var(--pos)" : cor; const rs = reemb ? "+" : (isDesp ? "−" : "+"); return `<div class="mini-row click" data-tx-open="${t.id}"><div class="mini-l"><div><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data}${t.sub ? " · " + t.sub : ""}${t.conta ? " · " + t.conta : ""}${reemb ? " · reembolso" : ""}</div></div></div><span class="num" style="color:${rc};font-weight:600">${rs} ${fmtNum(Math.abs(t.valor))}</span></div>`; }).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
     foot = `<button class="mini-btn" data-cat-detail="${tipo}|${p.cat}${p.sub ? "|" + p.sub : ""}">${ic("list", 14)} Ver todos os meses</button>`;
   } else if (p.kind === "catEdit") {
     title = "Editar categoria";
