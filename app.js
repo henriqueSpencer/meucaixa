@@ -884,6 +884,9 @@ function _histDiff(od, nd) {
 const _ACT = { insert: { lb: "criou", cls: "add", ic: "plus" }, update: { lb: "editou", cls: "edit", ic: "pencil" }, delete: { lb: "excluiu", cls: "del", ic: "trash" } };
 const _ENT = { transactions: "lançamento", accounts: "conta", categories: "categoria" };
 function histEntry(r) {
+  if (r.action === "system") {
+    return `<div class="hist-entry sys"><span class="he-time num">${_hhmm(r.changed_at)}</span><span class="he-ic">${ic("shield", 13)}</span><div class="he-main"><div class="he-line"><b>Reparo do sistema</b></div><div class="he-sys">${_esc(r.label || "")}</div></div></div>`;
+  }
   const a = _ACT[r.action] || { lb: r.action, cls: "", ic: "list" };
   const ent = _ENT[r.tbl] || r.tbl;
   const nd = r.new_data || {}, od = r.old_data || {};

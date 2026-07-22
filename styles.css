@@ -778,3 +778,6 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 /* itens do histórico dentro do card colapsável do dia (sem a timeline antiga) */
 .hist-day .he-ic{margin-left:0}
 .hist-day .hist-entry:first-child{padding-top:8px}
+.hist-entry.sys .he-ic{background:rgba(46,158,107,.16);color:#1E6B4F}
+.hist-entry.sys .he-line b{color:#1E6B4F}
+.he-sys{font-size:12.5px;color:var(--sub);margin-top:3px;line-height:1.45}
