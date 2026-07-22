@@ -708,10 +708,14 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .hist-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
 .hist-refresh{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:7px 12px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--sub);cursor:pointer}
 .hist-refresh:hover{color:var(--ink);border-color:var(--line-strong)}
-.hist-day{margin-bottom:22px}
-.hist-day-head{display:flex;align-items:baseline;gap:10px;margin:0 0 10px 2px;position:sticky;top:0;z-index:1}
+.hist-day{margin-bottom:14px;border:1px solid var(--border);border-radius:12px;background:var(--card);overflow:hidden}
+.hist-day-head{display:flex;align-items:center;gap:9px;width:100%;padding:12px 14px;background:none;border:none;cursor:pointer;text-align:left;font-family:inherit}
+.hist-day-head:hover{background:var(--card-2)}
+.hd-chev{display:inline-flex;color:var(--subtle);transition:transform .18s;transform:rotate(-90deg)}
+.hist-day.open .hd-chev{transform:rotate(0)}
 .hd-label{font-size:13.5px;font-weight:700;color:var(--ink);text-transform:capitalize}
-.hd-count{font-size:11.5px;color:var(--subtle)}
+.hd-count{font-size:11.5px;color:var(--subtle);margin-left:auto}
+.hist-day .hist-list{border-top:1px solid var(--hair);border-left:none;margin:0;padding:2px 14px 6px}
 .hist-list{position:relative;border-left:2px solid var(--hair);margin-left:6px;padding-left:0}
 .hist-entry{display:grid;grid-template-columns:50px 26px 1fr;align-items:start;gap:8px;padding:9px 12px 9px 0;position:relative}
 .hist-entry+.hist-entry{border-top:1px solid var(--hair)}
@@ -770,3 +774,7 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .recon-match.click{cursor:pointer;transition:.12s}
 .recon-match.click:hover{color:var(--ink);text-decoration:underline}
 .recon-match.click svg:last-child{opacity:.6}
+
+/* itens do histórico dentro do card colapsável do dia (sem a timeline antiga) */
+.hist-day .he-ic{margin-left:0}
+.hist-day .hist-entry:first-child{padding-top:8px}

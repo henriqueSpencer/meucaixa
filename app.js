@@ -904,9 +904,17 @@ function renderHistBody() {
   const groups = {};
   a.forEach((r) => { const k = _dayKey(r.changed_at); (groups[k] = groups[k] || []).push(r); });
   const days = Object.keys(groups).sort().reverse();
+  if (!state.histOpen) state.histOpen = new Set(days.slice(0, 1)); // só o dia mais recente aberto por padrão
   const body = days.map((k) => {
-    const rows = groups[k], n = rows.length;
-    return `<div class="hist-day"><div class="hist-day-head"><span class="hd-label">${_dayLabel(k)}</span><span class="hd-count">${n} ${n === 1 ? "alteração" : "alterações"}</span></div><div class="hist-list">${rows.map(histEntry).join("")}</div></div>`;
+    const rows = groups[k], n = rows.length, open = state.histOpen.has(k);
+    return `<div class="hist-day${open ? " open" : ""}">
+      <button class="hist-day-head" data-hist-day="${k}">
+        <span class="hd-chev">${ic("chevron-down", 16)}</span>
+        <span class="hd-label">${_dayLabel(k)}</span>
+        <span class="hd-count">${n} ${n === 1 ? "alteração" : "alterações"}</span>
+      </button>
+      ${open ? `<div class="hist-list">${rows.map(histEntry).join("")}</div>` : ""}
+    </div>`;
   }).join("");
   return `<div class="hist-top"><span class="card-sub">${a.length} ${a.length === 1 ? "alteração registrada" : "alterações registradas"}${a.length >= 300 ? " (últimas 300)" : ""}</span><button class="ghost hist-refresh" data-hist-refresh>${ic("rotate", 14)} Atualizar</button></div>${body}`;
 }
@@ -1782,6 +1790,8 @@ function wire() {
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
+    const hday = e.target.closest("[data-hist-day]");
+    if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
     if (e.target.closest("[data-config-save-name]")) { saveConfigName(); return; }
     if (e.target.closest("[data-config-export]")) { exportBackup(); return; }
     const filt = e.target.closest("[data-filter]");
