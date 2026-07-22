@@ -135,7 +135,13 @@
   // v3: cache passa a ser por-usuário — limpa qualquer snapshot de outro usuário no mesmo aparelho.
   const SYNC_VERSION = 3;
   let sb = null, userId = null, user = null, syncing = false, syncTimer = null;
+  // coordenação entre ABAS: cada gravação de snapshot incrementa "snapVersion" no IndexedDB.
+  // _snapVer = a versão que ESTA aba viu por último. Se o IndexedDB estiver numa versão MAIOR na
+  // hora de gravar, é porque OUTRA aba gravou depois → não sobrescreve (senão a aba velha empurraria
+  // exclusões do que a outra fez — bug grave de perda de dados) e pede recarga via _staleCb.
+  let _snapVer = 0, _staleCb = null, _bc = null;
   const authCbs = [];
+  function bcPost(v) { try { if (_bc) _bc.postMessage({ v }); } catch (e) {} }
 
   async function init() {
     idb = await openIDB();
@@ -145,6 +151,8 @@
       await kvDel("snapshot"); await kvDel("cursor"); await kvDel("lastSynced");
       await kvSet("syncVersion", SYNC_VERSION);
     }
+    _snapVer = (await kvGet("snapVersion")) || 0;
+    try { _bc = new BroadcastChannel("meucaixa-sync"); _bc.onmessage = (e) => { const v = e && e.data && e.data.v; if (v && v > _snapVer) { _snapVer = v; if (_staleCb) _staleCb(); } }; } catch (e) {}
     sb = window.supabase.createClient(SB_URL, SB_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: "pkce" } });
     sb.auth.onAuthStateChange((_evt, session) => {
       user = session ? session.user : null;
@@ -198,13 +206,27 @@
       await kvSet("uid", userId);
       return null;
     }
+    _snapVer = (await kvGet("snapVersion")) || 0; // sincroniza a versão vista com o IndexedDB
     return (await kvGet("snapshot")) || null;
   }
   async function saveSnapshot(model) {
+    const curV = (await kvGet("snapVersion")) || 0;
+    if (curV > _snapVer) {
+      // OUTRA aba gravou depois que carreguei → meu modelo em memória está velho. NÃO sobrescreve
+      // (impede empurrar exclusões do que a outra aba fez) e pede recarga do app.
+      _snapVer = curV;
+      if (_staleCb) _staleCb();
+      return;
+    }
     if (userId) await kvSet("uid", userId); // carimba de quem é o snapshot
+    const nv = curV + 1;
     await kvSet("snapshot", model);
+    await kvSet("snapVersion", nv);
+    _snapVer = nv;
+    bcPost(nv);
     scheduleSync();
   }
+  function onStale(cb) { _staleCb = cb; }
 
   function startAutoSync() {
     stopAutoSync();
@@ -277,7 +299,11 @@
           scheduleSync();
           return { pulled: false };
         }
+        const nv = ((await kvGet("snapVersion")) || 0) + 1; // nova versão + avisa as outras abas
         await kvSet("snapshot", model2);
+        await kvSet("snapVersion", nv);
+        _snapVer = nv;
+        bcPost(nv);
         await kvSet("lastSynced", modelToRows(model2));
         await kvSet("cursor", maxTs);
         syncing = false;
@@ -302,7 +328,7 @@
   }
 
   window.Store = {
-    init, onAuth, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, updateName, fetchAudit, signOut,
+    init, onAuth, onStale, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, updateName, fetchAudit, signOut,
     loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed,
     get userId() { return userId; },
     get user() { return user; },

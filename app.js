@@ -1961,6 +1961,12 @@ async function init() {
   });
   if (!window.Store) { renderAuthError("Falha ao carregar o módulo de dados."); return; }
   try { await Store.init(); } catch (e) { renderAuthError("Sem conexão com o servidor. Tente recarregar."); return; }
+  // outra aba (ou o sync) atualizou os dados → recarrega o modelo local e re-renderiza, pra esta
+  // aba nunca ficar com estado velho (que poderia sobrescrever/apagar o que a outra aba fez).
+  if (Store.onStale) Store.onStale(() => {
+    if (!_booted) return;
+    Store.loadSnapshot().then((m) => { if (m) { applyModel(m); refreshDataLabels(); if (!state.modal) renderView(); } }).catch(() => {});
+  });
   Store.onAuth((authed) => { if (authed) boot(); else showLogin(); });
   if (Store.isAuthed()) boot(); else showLogin();
 }
