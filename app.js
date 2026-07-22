@@ -752,9 +752,11 @@ function viewConciliacao() {
   const ign = state.recon.filter((r) => r.status === "ignorado").length;
   const acct = accounts.find((a) => a.nome === state.reconAccount);
   const saldoAtual = acct ? acct.saldo : 0;
-  const pend = state.recon.filter((r) => r.status === "pendente");
+  // saldo projetado = saldo atual + TODOS os itens não-rejeitados (aceitos + pendentes), cada um 1x.
+  // Só os rejeitados (X / ignorados) ficam de fora.
+  const contam = state.recon.filter((r) => r.status !== "ignorado");
   let despTot = 0, credTot = 0;
-  pend.forEach((r) => { const e = reconEffect(r); if (e < 0) despTot += e; else credTot += e; });
+  contam.forEach((r) => { const e = reconEffect(r); if (e < 0) despTot += e; else credTot += e; });
   const saldoFuturo = saldoAtual + despTot + credTot;
   const head = `<div class="card recon-head">
     <div class="rh-l"><span class="acct-ic">${ic(acct ? acctIconOf(acct) : "wallet", 18)}</span><div><div class="rh-label">Conciliando</div><div class="rh-acct">${state.reconAccount || "—"}</div></div></div>
@@ -762,7 +764,7 @@ function viewConciliacao() {
       <div class="rh-bal"><span>Saldo atual</span><b class="num">${fmt(saldoAtual)}</b></div>
       <div class="rh-bal"><span>Despesas a lançar</span><b class="num" style="color:var(--neg)">${fmt(despTot)}</b></div>
       <div class="rh-bal"><span>Créditos / pagamentos</span><b class="num" style="color:var(--pos)">+ ${fmtNum(credTot)}</b></div>
-      <div class="rh-bal accent"><span>Saldo projetado (${pend.length})</span><b class="num" style="color:${saldoFuturo >= saldoAtual ? "var(--pos)" : "var(--neg)"}">${fmt(saldoFuturo)}</b></div>
+      <div class="rh-bal accent"><span>Saldo projetado (${contam.length})</span><b class="num" style="color:${saldoFuturo >= saldoAtual ? "var(--pos)" : "var(--neg)"}">${fmt(saldoFuturo)}</b></div>
     </div>
   </div>`;
   const novosCount = state.recon.filter((r) => r.status === "conciliado" && !r.match).length;
