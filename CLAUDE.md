@@ -137,6 +137,18 @@ mais próxima em y. Não depende de cabeçalho (só a pág. 1 tem). Validação:
 Entradas−Saídas do extrato. **Não há mais "extrato de exemplo"** — sem arquivo lido, o botão fica
 desabilitado (removidos `initialRecon` e o fallback no action `import`).
 
+**Status dos itens e saldo projetado** (`buildRecon`/`viewConciliacao`): cada item tem `status`
+(`pendente`/`conciliado`/`ignorado`). `findReconMatch` (restrito à conta selecionada, `state.reconAccount`)
+detecta correspondência com um lançamento já existente — item correspondente **já vem `ignorado` (X) por
+padrão** (`if (match) status = "ignorado"` no `buildRecon`), aparece com tag "Ignorado" + botão *reativar*.
+Parcelas `n>1` também nascem ignoradas (o total já entrou na 1ª). O **saldo projetado** conta **todos os
+itens não-ignorados** (`contam = recon.filter(r => r.status !== "ignorado")`, soma `reconEffect`); só o X
+tira do cálculo, então **reativar/aceitar** um correspondente faz ele voltar a somar (pedido do usuário).
+No salvar (`reconCommit`), item com `match` **nunca** vira lançamento novo (`novos = aceitos.filter(!r.match)`)
+— sem duplicata, mesmo aceito. Consequência: reativar um correspondente soma no projetado por cima do saldo
+que já o reflete (o projetado vira "total dos ativos", não previsão exata do saldo pós-save) — comportamento
+pedido explicitamente.
+
 ## Mapa de arquivos
 `index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `store.js` (persistência+sync) ·
 `styles.css` · `vendor/supabase.js` (UMD vendorizado) · `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`
