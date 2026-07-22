@@ -15,9 +15,17 @@ senão o navegador serve a versão antiga. (`vendor/supabase.js` não tem versã
 Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **direto com o Supabase**
 (sem servidor próprio). Persistência **offline-first**:
 - **`store.js`** — `window.Store`. IndexedDB é a **fonte da verdade local**; sincroniza com o Postgres
-  do Supabase por **diff** (push = upsert do que mudou; pull = linhas com `updated_at > cursor`;
-  deleções = tombstone na coluna `deleted`; resolução **last-write-wins** por `updated_at` carimbado no
-  servidor). **Multi-usuário**: cada conta só vê seus dados (RLS `user_id = auth.uid()`); o upsert usa
+  do Supabase. **`sync()` = PULL primeiro, depois MERGE 3-vias, depois PUSH** (ordem importa!): puxa as
+  linhas com `updated_at > cursor`, reconstrói o estado remoto e faz um **merge por linha** entre `base`
+  (último servidor confirmado = `lastSynced`), `local` (snapshot) e `remote`. Uma linha só é **empurrada**
+  quando difere da base (edição/inclusão/exclusão minha genuína) **E** o servidor NÃO a alterou; se o
+  servidor mudou, o **remoto vence** (inclui conflito). Deleções = tombstone na coluna `deleted`. Isso
+  substituiu o antigo *push-antes-de-pull* que empurrava valor local obsoleto por cima de um mais novo do
+  servidor com `updated_at` sempre fresco no upsert — o **"push fantasma"** que revertia dados no reload
+  sem o usuário ter editado nada (bug real: Loft `alocado 40000→37000`). O cursor **não** avança além dos
+  próprios writes (re-puxá-los é benigno; avançar poderia pular uma mudança concorrente de outro aparelho).
+  Lógica pura e testável: `_mergeRows`/`_modelToRows`/`_rowsToModel`. **Multi-usuário**: cada conta só vê
+  seus dados (RLS `user_id = auth.uid()`); o upsert usa
   `onConflict: "user_id,id"`. **PK é composta `(user_id, id)`** em todas as tabelas (migração
   `composite_pk_per_user`) — sem isso, os ids determinísticos de categoria (`c|tipo|nome`) colidiriam
   entre usuários numa PK global. O FK self de `categories` (parent) também é composto `(user_id, parent_id)`.
@@ -26,9 +34,9 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   (2) **cache por-usuário**: `loadSnapshot` descarta o snapshot se o `uid` gravado ≠ usuário logado,
   `saveSnapshot` carimba o `uid`, `signOut` limpa — senão, ao trocar de conta no mesmo navegador o novo
   usuário via os dados do anterior (era só local; o servidor sempre isolou via RLS); (3) **guarda
-  anti-corrida** no pull: se o snapshot local mudou durante o sync (edição não-enviada, ex.: arquivar),
-  NÃO sobrescreve com o servidor — compara a **forma canônica** (`modelToRows`, não o modelo cru, senão
-  um re-save benigno dá falso-positivo e atrasa dados novos); (4) **`SYNC_VERSION`** (const no `store.js`):
+  anti-corrida**: se o snapshot local mudou durante o sync (edição não-enviada, ex.: arquivar), NÃO aplica
+  o merge nem avança o cursor — compara a **forma canônica** (`modelToRows`, não o modelo cru, senão um
+  re-save benigno dá falso-positivo e atrasa dados novos) e reconcilia no próximo ciclo; (4) **`SYNC_VERSION`** (const no `store.js`):
   bump força descartar snapshot/cursor/lastSynced e re-puxar tudo (usado quando um bug de sync exige
   limpar o cache de todos). Testes desses casos ficam em node (fake-indexeddb + stub Supabase).
 - **`app.js`** — o app usa o modelo em memória (`accounts` / `catTree` / `state.tx` / `state.dashOrder`).
