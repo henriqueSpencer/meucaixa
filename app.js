@@ -173,6 +173,7 @@ const fmtNum = (n) => Math.abs(numOr0(n)).toLocaleString("pt-BR", { minimumFract
 const TODAY_ISO = new Date().toISOString().slice(0, 10); // data real de hoje (default de nova transação, chips Hoje/Ontem)
 const parseValor = (s) => parseFloat(String(s || "").replace(/\./g, "").replace(",", ".")) || 0;
 const dataBR = (iso) => { const [, m, d] = (iso || TODAY_ISO).split("-"); return `${d}/${m}`; };
+const dataFullBR = (iso) => { const p = String(iso || "").split("-"); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : ""; };
 const isoPlusDays = (iso, n) => { const d = new Date((iso || TODAY_ISO) + "T12:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
 
 const ICON = {
@@ -743,7 +744,7 @@ function viewConciliacao() {
     const list = files.length
       ? `<div class="imp-file-list">${files.map((f, i) => `<div class="imp-file-row"><span class="imp-file-ic">${ic("receipt", 18)}</span><div class="imp-drop-txt"><b>${f.name}</b><span>${fileSub(f)}</span></div><button class="imp-file-x" data-imp-clear="${i}" title="Remover">${ic("x", 15)}</button></div>`).join("")}</div>`
       : "";
-    const doneBanner = state.reconDone ? `<div class="recon-done-banner card">${ic("check", 16)} Conciliação salva — <b>${state.reconDone.criados}</b> ${state.reconDone.criados === 1 ? "novo lançamento criado" : "novos lançamentos criados"}${state.reconDone.conciliados > state.reconDone.criados ? ` · ${state.reconDone.conciliados - state.reconDone.criados} já existentes conciliados` : ""}.<button class="rdb-x" data-recon-done-x title="Fechar">${ic("x", 14)}</button></div>` : "";
+    const doneBanner = state.reconDone ? `<div class="recon-done-banner card">${ic("check", 16)} Conciliação salva — <b>${state.reconDone.criados}</b> ${state.reconDone.criados === 1 ? "lançamento criado" : "lançamentos criados"}${state.reconDone.dup ? ` · ${state.reconDone.dup} ${state.reconDone.dup === 1 ? "tinha" : "tinham"} correspondência e ${state.reconDone.dup === 1 ? "foi lançado" : "foram lançados"} mesmo assim` : ""}.<button class="rdb-x" data-recon-done-x title="Fechar">${ic("x", 14)}</button></div>` : "";
     const drop = `<div class="import-drop" data-imp-drop><input type="file" data-imp-file accept=".ofx,.csv,.pdf,.xls,.xlsx,.qif,.txt" multiple hidden><span class="imp-file-ic">${ic("upload", 22)}</span><div class="imp-drop-txt"><b>${files.length ? "Adicionar outro arquivo" : "Arraste o(s) arquivo(s) aqui"}</b><span>${files.length ? "arraste ou clique para incluir mais" : "ou clique para escolher (pode ser mais de um)"}</span></div></div>`;
     return `${doneBanner}<div class="import-zone card">
       <h3>Importar extrato</h3>
@@ -777,8 +778,7 @@ function viewConciliacao() {
       <div class="rh-bal accent"><span>Saldo projetado (${contam.length})</span><b class="num" style="color:${saldoFuturo >= saldoAtual ? "var(--pos)" : "var(--neg)"}">${fmt(saldoFuturo)}</b></div>
     </div>
   </div>`;
-  const novosCount = state.recon.filter((r) => r.status === "conciliado" && !r.match).length;
-  const saveLabel = novosCount ? `Salvar ${novosCount} lançamento${novosCount > 1 ? "s" : ""}` : conc ? "Salvar conciliação" : "Nada para salvar";
+  const saveLabel = conc ? `Salvar ${conc} lançamento${conc > 1 ? "s" : ""}` : "Nada para salvar";
   // resumo honesto do que veio no arquivo: quantos são novos e quantos já existiam. Sem isso, um
   // extrato inteiramente já lançado (reimportação) aparecia só como "0 de 0 conciliados" + botão
   // desabilitado — parecia que a importação tinha falhado.
@@ -788,11 +788,22 @@ function viewConciliacao() {
   const novosTot = state.recon.filter((r) => !r.match && !r.pulado).length;
   const pend = state.recon.filter((r) => r.status === "pendente").length;
   const resumo = `<div class="recon-sum"><b>${nLidos}</b> ${nLidos === 1 ? "lançamento lido" : "lançamentos lidos"} · <b>${novosTot}</b> ${novosTot === 1 ? "novo" : "novos"} · <b>${jaExistem}</b> já ${jaExistem === 1 ? "existia" : "existiam"} no MeuCaixa${puladas ? ` · <b>${puladas}</b> ${puladas === 1 ? "parcela pulada" : "parcelas puladas"}` : ""}</div>`;
-  const nadaNovo = novosTot === 0 && nLidos > 0
-    ? `<div class="card recon-nothing">${ic("check", 18)}<div><b>Nada novo neste extrato.</b><span>Os ${nLidos} lançamentos já estão no MeuCaixa${puladas ? ` (${puladas} ${puladas === 1 ? "é parcela seguinte, já lançada na 1ª" : "são parcelas seguintes, já lançadas na 1ª"})` : ""} — por isso vieram marcados com ✕. Se algum não bater, use <i>reativar</i> no item e aceite manualmente.</span></div></div>`
-    : "";
+  // aviso de extrato já importado: diz quantos já existem e de quando são, e dá a saída explícita
+  // (importar mesmo assim). O ✕ é só a proteção padrão — a decisão continua sendo do usuário.
+  const dupsAbertos = state.recon.filter((r) => r.match && r.status === "ignorado" && !r.pulado).length;
+  let jaImportado = "";
+  if (jaExistem) {
+    const isos = state.recon.filter((r) => r.match).map((r) => { const t = state.tx.find((x) => x.id === r.matchId); return (t && t.iso) || r.iso || ""; }).filter(Boolean).sort();
+    const periodo = isos.length ? (isos[0] === isos[isos.length - 1] ? `de ${dataFullBR(isos[0])}` : `de ${dataFullBR(isos[0])} a ${dataFullBR(isos[isos.length - 1])}`) : "";
+    const tudo = novosTot === 0;
+    jaImportado = `<div class="card recon-dup">${ic("circle-alert", 18)}<div>
+      <b>${tudo ? "Este extrato já foi importado." : "Parte deste extrato já foi importada."}</b>
+      <span><b>${jaExistem}</b> ${jaExistem === 1 ? "lançamento já existe" : `dos ${nLidos} lançamentos já existem`} no MeuCaixa ${periodo}${puladas ? ` · ${puladas} ${puladas === 1 ? "é parcela seguinte (o total entrou na 1ª)" : "são parcelas seguintes (o total entrou na 1ª)"}` : ""}. Vieram com ✕ pra não duplicar${tudo ? "" : `, e os ${novosTot} novos estão pendentes abaixo`}.</span>
+      ${dupsAbertos ? `<button class="mini-btn" data-recon-accept-dup>${ic("check", 14)} Importar mesmo assim os ${dupsAbertos} já existentes</button>` : ""}
+    </div></div>`;
+  }
   const acceptAll = pend ? `<button class="ghost" data-recon-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
-  const bar = head + nadaNovo + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
+  const bar = head + jaImportado + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
   const list = state.recon.map((r) => {
     const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
     const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
@@ -1542,16 +1553,23 @@ function reconAccept(id) {
 }
 // aceita de uma vez tudo que está pendente (o caminho normal quando o extrato traz muitos itens novos)
 function reconAcceptAll() { state.recon = state.recon.map((r) => (r.status === "pendente" ? { ...r, status: "conciliado" } : r)); state.editing = null; renderView(); }
+// "importar mesmo assim": aceita também os que vieram com ✕ por já existirem. Continua pulando as
+// parcelas n>1 (o total já entrou na 1ª — aceitá-las lançaria o valor em dobro de verdade).
+function reconAcceptDup() { state.recon = state.recon.map((r) => (r.status === "ignorado" && r.match && !r.pulado ? { ...r, status: "conciliado" } : r)); state.editing = null; renderView(); }
 function reconIgnore(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "ignorado" } : r)); state.editing = null; renderView(); }
 function reconReactivate(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "pendente" } : r)); state.editing = null; renderView(); }
-// grava de vez: cria os lançamentos aceitos (sem correspondência) e encerra a sessão
+// grava de vez: cria TODOS os lançamentos aceitos e encerra a sessão.
+// Item com correspondência já vem com ✕ (proteção contra duplicata), mas se o usuário reativou e
+// aceitou, ele QUER importar — antes o commit filtrava `!r.match` e simplesmente não criava nada,
+// então reimportar um extrato já lançado era impossível por qualquer caminho.
 function reconCommit() {
   const aceitos = state.recon.filter((r) => r.status === "conciliado");
   if (!aceitos.length) return;
-  const novos = aceitos.filter((r) => !r.match).map(reconToTx);
+  const novos = aceitos.map(reconToTx);
+  const dup = aceitos.filter((r) => r.match).length;
   if (novos.length) { novos.forEach((t) => applyTxToBalance(t, 1)); state.tx = [...novos, ...state.tx]; sortTx(); }
   state.recon = []; state.reconFiles = []; state.imported = false; state.reconAccount = null; state.editing = null;
-  state.reconDone = { criados: novos.length, conciliados: aceitos.length };
+  state.reconDone = { criados: novos.length, dup };
   refreshSideNet();
   renderView();
 }
@@ -1894,6 +1912,7 @@ function wire() {
     const dset = e.target.closest("[data-date-set]");
     if (dset) { state.form.data = isoPlusDays(TODAY_ISO, +dset.dataset.dateSet); renderModal(); return; }
     if (e.target.closest("[data-recon-accept-all]")) { reconAcceptAll(); return; }
+    if (e.target.closest("[data-recon-accept-dup]")) { reconAcceptDup(); return; }
     const acc = e.target.closest("[data-recon-accept]");
     if (acc) { reconAccept(acc.dataset.reconAccept); return; }
     const edt = e.target.closest("[data-recon-edit]");

@@ -169,14 +169,18 @@ extrato** — sem isso, duas compras idênticas no arquivo casavam ambas com o m
 **Pagamento de fatura** (cartão, `isPay`) vira transferência e **também procura `match`** — antes não
 procurava e reimportar o extrato duplicava o pagamento; a origem sugerida é a 1ª conta financeira não-cartão
 (antes era a string `"Pagamento"`, uma conta inexistente: o saldo entrava no cartão sem sair de lugar nenhum).
-**Resumo da importação** (`recon-sum`): "N lidos · X novos · Y já existiam · Z parcelas puladas", e quando
-`novosTot === 0` aparece o banner `.recon-nothing` ("Nada novo neste extrato") — reimportar um extrato já
-lançado antes só mostrava "0 de 0 conciliados" e o botão desabilitado, e parecia que a importação falhara.
-Botão **"Aceitar N pendentes"** (`reconAcceptAll`) evita clicar item a item. O **saldo projetado** conta **todos os
+**Reimportar um extrato já lançado tem que funcionar** (pedido explícito do usuário). O ✕ automático é
+só a proteção padrão — a decisão é do usuário. Por isso: (a) `reconCommit` cria **todos** os aceitos
+(antes filtrava `novos = aceitos.filter(!r.match)`, então aceitar um item correspondente não criava nada
+e reimportar era **impossível por qualquer caminho** — era esse o bug); (b) o banner `.recon-dup`
+("Este extrato já foi importado") diz quantos já existem e o período deles, com o botão **"Importar mesmo
+assim os N já existentes"** (`reconAcceptDup`, que **não** reativa as parcelas `pulado:true` — essas
+lançariam o valor em dobro de verdade); (c) o resumo `.recon-sum` mostra "N lidos · X novos · Y já
+existiam · Z parcelas puladas"; (d) botão **"Aceitar N pendentes"** (`reconAcceptAll`) evita clicar item
+a item. O rótulo do salvar conta **todos** os aceitos (`conc`), não só os sem correspondência. O **saldo projetado** conta **todos os
 itens não-ignorados** (`contam = recon.filter(r => r.status !== "ignorado")`, soma `reconEffect`); só o X
 tira do cálculo, então **reativar/aceitar** um correspondente faz ele voltar a somar (pedido do usuário).
-No salvar (`reconCommit`), item com `match` **nunca** vira lançamento novo (`novos = aceitos.filter(!r.match)`)
-— sem duplicata, mesmo aceito. Consequência: reativar um correspondente soma no projetado por cima do saldo
+Consequência: reativar um correspondente soma no projetado por cima do saldo
 que já o reflete (o projetado vira "total dos ativos", não previsão exata do saldo pós-save) — comportamento
 pedido explicitamente.
 
