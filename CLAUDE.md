@@ -113,6 +113,17 @@ Vieram do `base.bak` (export SQLite do **Orçamento Fácil**). `gerar_dados.py` 
 tag e limpe as tabelas.
 
 ## Convenções que SEMPRE importam
+- **`state.tx` é sempre ordenado por data desc** (`sortTx()`, chamado em `applyModel`/`saveTx`/
+  `reconCommit`). As linhas voltam do banco na ordem de `updated_at` (com empates = ordem física da
+  tabela), então sem ordenar a aba Transações mostrava 300 lançamentos arbitrários dizendo serem "os
+  mais recentes" e "Últimas transações" no dashboard mostrava lançamentos velhos. Se criar outro
+  caminho que insere em `state.tx`, chame `sortTx()`.
+- **`ordem` da conta é o que persiste** (`rowsToModel` ordena por ele). Mexer só na posição do array
+  `accounts` não grava nada — chame `reindexAccounts()` (feito em `moveAcct`/`saveAcctForm`).
+- **`fmt`/`fmtNum`/`fmtShort` toleram valor ausente** (`numOr0`): um campo nulo não pode derrubar a
+  view inteira (uma conta de patrimônio sem `alocado` deixava a aba Contas em branco).
+- **Texto do usuário dentro de atributo HTML passa por `attr()`** (`value="${attr(x)}"`); no corpo do
+  Histórico use `_esc`. Descrição/nome com aspas quebrava o input do modal.
 - **Reembolso** (`tipo:"reembolso"`) é um **crédito lançado numa categoria de DESPESA** (valor positivo,
   cat/sub de despesa — o modal usa `catTree.despesa` quando `reembolso`). Em **toda** visão de despesa ele
   **abate o total** (net), nunca soma: totais (`byCat`, `catTotals`, `monthFlow`), séries e listas
@@ -131,7 +142,12 @@ tag e limpe as tabelas.
   (`viewConfig()` etc.) ou dirigir o `sync()` injetando a corrida pelo stub; (3) **SQL via MCP do
   Supabase** pra checar o efeito real no banco (ex.: `arquivada` das contas, contagem por usuário).
   Limitação do jsdom: `const state`/`accounts`/`catTree`/`VIEWS` são de escopo léxico e **não** vêm via
-  `window.eval` (mas `function view*`/`Store` sim) — verifique pelo DOM ou chamando as funções globais.
+  `window.eval` **quando o app.js é injetado com `window.eval(fonte)`**. O jeito que funciona: jsdom com
+  `runScripts:"dangerously"`, carregar o `index.html` sem as tags de `vendor/supabase.js`+`store.js`,
+  pôr um `window.Store` stub (`init/onAuth/onStale/isAuthed/loadSnapshot/saveSnapshot/sync/
+  isRemoteEmpty/seed/fetchAudit/user`) e appendar o `app.js` como `<script>` inline — aí
+  `win.eval("state.tx")` e `win.eval("moveAcct('c5','up')")` funcionam e dá pra dirigir a UI de verdade
+  (`<input type=file>` com `Object.defineProperty(inp,"files",…)` + `dispatchEvent(new Event("change"))`).
 
 ## Importar extrato (tela Conciliação)
 Lê **OFX/CSV/TXT** (`parseOFX`/`parseCSV`, texto) e **PDF** do **Mercado Pago** (`parsePDF`→`mpParsePage`
@@ -144,10 +160,19 @@ Entradas−Saídas do extrato. **Não há mais "extrato de exemplo"** — sem ar
 desabilitado (removidos `initialRecon` e o fallback no action `import`).
 
 **Status dos itens e saldo projetado** (`buildRecon`/`viewConciliacao`): cada item tem `status`
-(`pendente`/`conciliado`/`ignorado`). `findReconMatch` (restrito à conta selecionada, `state.reconAccount`)
-detecta correspondência com um lançamento já existente — item correspondente **já vem `ignorado` (X) por
-padrão** (`if (match) status = "ignorado"` no `buildRecon`), aparece com tag "Ignorado" + botão *reativar*.
-Parcelas `n>1` também nascem ignoradas (o total já entrou na 1ª). O **saldo projetado** conta **todos os
+(`pendente`/`conciliado`/`ignorado`). `findReconMatch(p, used)` (restrito à conta selecionada,
+`state.reconAccount`) detecta correspondência com um lançamento já existente — item correspondente
+**já vem `ignorado` (X) por padrão** (`if (match) status = "ignorado"` no `buildRecon`), aparece com tag
+"Ignorado" + botão *reativar*. O `used` é obrigatório: **um lançamento existente só casa com UM item do
+extrato** — sem isso, duas compras idênticas no arquivo casavam ambas com o mesmo lançamento e a segunda
+(nova de verdade) era engolida. Parcelas `n>1` nascem ignoradas com `pulado:true` (o total já entrou na 1ª).
+**Pagamento de fatura** (cartão, `isPay`) vira transferência e **também procura `match`** — antes não
+procurava e reimportar o extrato duplicava o pagamento; a origem sugerida é a 1ª conta financeira não-cartão
+(antes era a string `"Pagamento"`, uma conta inexistente: o saldo entrava no cartão sem sair de lugar nenhum).
+**Resumo da importação** (`recon-sum`): "N lidos · X novos · Y já existiam · Z parcelas puladas", e quando
+`novosTot === 0` aparece o banner `.recon-nothing` ("Nada novo neste extrato") — reimportar um extrato já
+lançado antes só mostrava "0 de 0 conciliados" e o botão desabilitado, e parecia que a importação falhara.
+Botão **"Aceitar N pendentes"** (`reconAcceptAll`) evita clicar item a item. O **saldo projetado** conta **todos os
 itens não-ignorados** (`contam = recon.filter(r => r.status !== "ignorado")`, soma `reconEffect`); só o X
 tira do cálculo, então **reativar/aceitar** um correspondente faz ele voltar a somar (pedido do usuário).
 No salvar (`reconCommit`), item com `match` **nunca** vira lançamento novo (`novos = aceitos.filter(!r.match)`)

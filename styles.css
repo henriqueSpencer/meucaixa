@@ -226,6 +226,12 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .recon-prog-head{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px}
 .recon-prog-head strong{font-weight:600}
 .recon-prog-head span{color:var(--subtle)}
+.recon-sum{margin-top:8px;font-size:12px;color:var(--subtle)}
+.recon-sum b{font-weight:700;color:var(--sub)}
+.recon-nothing{display:flex;align-items:flex-start;gap:11px;padding:14px 16px;margin-bottom:16px;color:#1E6B4F;background:rgba(16,185,129,.12);border-color:#2E9E6B55}
+.recon-nothing b{display:block;font-size:13.5px;font-weight:700;margin-bottom:2px}
+.recon-nothing span{font-size:12.5px;line-height:1.5;opacity:.9}
+.recon-nothing i{font-style:normal;font-weight:600}
 .bar{height:7px;background:var(--hair);border-radius:4px;overflow:hidden}
 .bar>span{display:block;height:100%;background:linear-gradient(90deg,#2E9E6B,#A8823C);border-radius:4px;transition:.4s}
 .ghost{font-size:13px;font-weight:600;color:var(--sub);padding:8px 14px;border-radius:9px;border:1px solid var(--border);background:var(--card)}

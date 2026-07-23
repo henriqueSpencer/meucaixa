@@ -161,9 +161,15 @@ const PAGE = {
 const APP_VERSION = (() => { try { const s = [...document.scripts].find((x) => /app\.js/.test(x.src)); const m = s && s.src.match(/v=(\d+)/); return m ? m[1] : ""; } catch (e) { return ""; } })();
 
 /* ---------- 3. helpers ---------- */
-const fmt = (n) => n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const fmtShort = (n) => "R$ " + Math.abs(n).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-const fmtNum = (n) => Math.abs(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// nunca deixa um valor ausente/NaN derrubar a tela inteira (uma conta de patrimônio sem `alocado`
+// gravado, por exemplo, estourava `viewContas` e a aba Contas ficava em branco).
+// texto indo pra dentro de um atributo HTML (value="…"): sem escapar, uma descrição/nome com aspas
+// truncava o input e injetava markup no meio do modal.
+const attr = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const numOr0 = (n) => (typeof n === "number" && isFinite(n) ? n : (isFinite(parseFloat(n)) ? parseFloat(n) : 0));
+const fmt = (n) => numOr0(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtShort = (n) => "R$ " + Math.abs(numOr0(n)).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+const fmtNum = (n) => Math.abs(numOr0(n)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const TODAY_ISO = new Date().toISOString().slice(0, 10); // data real de hoje (default de nova transação, chips Hoje/Ontem)
 const parseValor = (s) => parseFloat(String(s || "").replace(/\./g, "").replace(",", ".")) || 0;
 const dataBR = (iso) => { const [, m, d] = (iso || TODAY_ISO).split("-"); return `${d}/${m}`; };
@@ -630,7 +636,7 @@ function acctMenuHTML(a) {
   </div>`;
 }
 function acctEditForm(a) {
-  return `<div class="acct-edit"><label class="fld-label">Nome da conta</label><input class="acct-edit-input" value="${a.nome}" data-acct-input="${a.id}"><div class="acct-edit-actions"><button class="mini-btn primary" data-acct-save="${a.id}">Salvar</button><button class="mini-btn" data-acct-cancel>Cancelar</button></div></div>`;
+  return `<div class="acct-edit"><label class="fld-label">Nome da conta</label><input class="acct-edit-input" value="${attr(a.nome)}" data-acct-input="${a.id}"><div class="acct-edit-actions"><button class="mini-btn primary" data-acct-save="${a.id}">Salvar</button><button class="mini-btn" data-acct-cancel>Cancelar</button></div></div>`;
 }
 function acctCard(a) {
   const kebab = `<button class="acct-kebab" data-acct-menu="${a.id}" title="Opções">${ic("more-vertical", 18)}</button>`;
@@ -773,7 +779,20 @@ function viewConciliacao() {
   </div>`;
   const novosCount = state.recon.filter((r) => r.status === "conciliado" && !r.match).length;
   const saveLabel = novosCount ? `Salvar ${novosCount} lançamento${novosCount > 1 ? "s" : ""}` : conc ? "Salvar conciliação" : "Nada para salvar";
-  const bar = head + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div></div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button><button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
+  // resumo honesto do que veio no arquivo: quantos são novos e quantos já existiam. Sem isso, um
+  // extrato inteiramente já lançado (reimportação) aparecia só como "0 de 0 conciliados" + botão
+  // desabilitado — parecia que a importação tinha falhado.
+  const nLidos = state.recon.filter((r) => !r.manual).length;
+  const jaExistem = state.recon.filter((r) => r.match).length;
+  const puladas = state.recon.filter((r) => !r.match && r.pulado).length;
+  const novosTot = state.recon.filter((r) => !r.match && !r.pulado).length;
+  const pend = state.recon.filter((r) => r.status === "pendente").length;
+  const resumo = `<div class="recon-sum"><b>${nLidos}</b> ${nLidos === 1 ? "lançamento lido" : "lançamentos lidos"} · <b>${novosTot}</b> ${novosTot === 1 ? "novo" : "novos"} · <b>${jaExistem}</b> já ${jaExistem === 1 ? "existia" : "existiam"} no MeuCaixa${puladas ? ` · <b>${puladas}</b> ${puladas === 1 ? "parcela pulada" : "parcelas puladas"}` : ""}</div>`;
+  const nadaNovo = novosTot === 0 && nLidos > 0
+    ? `<div class="card recon-nothing">${ic("check", 18)}<div><b>Nada novo neste extrato.</b><span>Os ${nLidos} lançamentos já estão no MeuCaixa${puladas ? ` (${puladas} ${puladas === 1 ? "é parcela seguinte, já lançada na 1ª" : "são parcelas seguintes, já lançadas na 1ª"})` : ""} — por isso vieram marcados com ✕. Se algum não bater, use <i>reativar</i> no item e aceite manualmente.</span></div></div>`
+    : "";
+  const acceptAll = pend ? `<button class="ghost" data-recon-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
+  const bar = head + nadaNovo + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
   const list = state.recon.map((r) => {
     const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
     const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
@@ -783,7 +802,7 @@ function viewConciliacao() {
     const sug = !isEdit
       ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat}${r.sug.sub ? ` <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span>` : ""} <span class="dot">·</span> ${r.sug.conta}</span>`}</div>`
       : `<div class="edit-body">
-          <input data-recon-field="desc" value="${(r.raw || "").replace(/"/g, "&quot;")}" placeholder="Descrição">
+          <input data-recon-field="desc" value="${attr(r.raw)}" placeholder="Descrição">
           <div class="edit-row"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><input type="date" data-recon-field="data" value="${r.iso || ""}"></div>
           ${r.sug.tipo === "transferencia"
             ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
@@ -956,8 +975,8 @@ function viewConfig() {
       <div class="cfg-head"><span class="cfg-ic">${ic("user", 17)}</span><h3>Perfil</h3></div>
       <div class="cfg-profile"><span class="cfg-avatar">${inicial}</span>
         <div class="cfg-fields">
-          <label class="fld"><span class="fld-label">Nome</span><input data-cfg-name value="${nome.replace(/"/g, "&quot;")}" placeholder="Seu nome" autocomplete="name"></label>
-          <label class="fld"><span class="fld-label">E-mail</span><input value="${email}" disabled></label>
+          <label class="fld"><span class="fld-label">Nome</span><input data-cfg-name value="${attr(nome)}" placeholder="Seu nome" autocomplete="name"></label>
+          <label class="fld"><span class="fld-label">E-mail</span><input value="${attr(email)}" disabled></label>
         </div>
       </div>
       <div class="cfg-actions"><button class="cta" data-config-save-name>Salvar nome</button><span class="cfg-msg" data-cfg-name-msg></span></div>
@@ -1085,7 +1104,7 @@ function modalHTML() {
       <div class="amount-block"><label class="amount-inline"><span class="amt-cur">R$</span><input class="amt-input" data-field="valor" value="${f.valor || ""}" placeholder="0,00" inputmode="decimal" autocomplete="off"></label></div>
       ${catBlock}
       <div class="form2">
-        <label class="fld"><span class="fld-label">Descrição</span><input data-field="desc" value="${f.desc || ""}" placeholder="Ex.: Mercado, cliente X, aporte…"></label>
+        <label class="fld"><span class="fld-label">Descrição</span><input data-field="desc" value="${attr(f.desc)}" placeholder="Ex.: Mercado, cliente X, aporte…"></label>
         <div class="fld-row">${contaField}<label class="fld"><span class="fld-label">Data</span><div class="date-wrap">${ic("calendar", 16)}<input type="date" data-field="data" value="${f.data || TODAY_ISO}"></div><div class="date-quick"><button class="date-chip ${(f.data || TODAY_ISO) === TODAY_ISO ? "on" : ""}" data-date-set="0" type="button">Hoje</button><button class="date-chip ${f.data === isoPlusDays(TODAY_ISO, -1) ? "on" : ""}" data-date-set="-1" type="button">Ontem</button></div></label></div>
       </div>
       <div class="tx-note" style="background:${t.cor}12;color:${t.cor}"><span class="tx-note-ic">${ic("circle-alert", 14)}</span><span>${note}</span></div>
@@ -1147,9 +1166,13 @@ function applyModel(m) {
   if (!m) return;
   if (Array.isArray(m.accounts)) { accounts.length = 0; m.accounts.forEach((a) => accounts.push(a)); }
   if (m.catTree) { ["receita", "despesa"].forEach((k) => { if (Array.isArray(m.catTree[k])) { catTree[k].length = 0; m.catTree[k].forEach((c) => catTree[k].push(c)); } }); }
-  if (Array.isArray(m.tx)) state.tx = m.tx;
+  if (Array.isArray(m.tx)) { state.tx = m.tx; sortTx(); }
   if (Array.isArray(m.dashOrder) && m.dashOrder.length) state.dashOrder = m.dashOrder;
 }
+// as linhas voltam do banco na ordem de `updated_at` (empates = ordem física da tabela), então sem
+// ordenar aqui a aba Transações e o bloco "Últimas transações" mostravam lançamentos arbitrários —
+// e o rodapé ainda dizia "os 300 mais recentes". Data desc; sem data vai pro fim.
+function sortTx() { state.tx.sort((a, b) => (b.iso || "").localeCompare(a.iso || "")); }
 let _saveT = null;
 function saveState() { if (window.Store && Store.isAuthed()) Store.saveSnapshot(currentModel()); }
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
@@ -1224,6 +1247,7 @@ function saveTx() {
   if (orig) applyTxToBalance(orig, -1); // reverte o efeito antigo (edição)
   applyTxToBalance(tx, 1);              // aplica o efeito novo no saldo das contas
   state.tx = state.editTx ? state.tx.map((t) => (t.id === state.editTx ? tx : t)) : [tx, ...state.tx];
+  sortTx();
   state.editTx = null;
   state.modal = false;
   refreshSideNet();
@@ -1265,8 +1289,12 @@ function moveAcct(id, dir) {
   if (!swap) return;
   const i = accounts.indexOf(a), j = accounts.indexOf(swap);
   accounts[i] = swap; accounts[j] = a;
+  reindexAccounts();
   renderView();
 }
+// `ordem` é o que o banco guarda (rowsToModel ordena por ele). Mexer só na posição do array não
+// persistia nada: no reload a ordem antiga voltava. Reindexa sempre que a lista muda.
+function reindexAccounts() { accounts.forEach((a, i) => { a.ordem = i; }); }
 function toggleArchive(id) { const a = acctById(id); if (a) a.arquivada = !a.arquivada; state.acctMenu = null; refreshSideNet(); renderView(); }
 /* dashboard */
 function moveDash(key, dir) {
@@ -1332,7 +1360,7 @@ function renderPop() {
     foot = `<button class="mini-btn" data-cat-detail="${tipo}|${p.cat}${p.sub ? "|" + p.sub : ""}">${ic("list", 14)} Ver todos os meses</button>`;
   } else if (p.kind === "catEdit") {
     title = "Editar categoria";
-    body = `<label class="fld"><span class="fld-label">Nome</span><input data-ce="nome" value="${p.curName != null ? p.curName : p.nome}" autocomplete="off"></label>
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-ce="nome" value="${attr(p.curName != null ? p.curName : p.nome)}" autocomplete="off"></label>
       <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ce-icon", p.editIcon)}</div>`;
     foot = `<button class="pop-danger" data-cat-del="${p.tipo}|${p.nome}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-cat-rename-save>Salvar</button>`;
   } else if (p.kind === "catDelete") {
@@ -1347,7 +1375,7 @@ function renderPop() {
   } else if (p.kind === "subEdit") {
     title = "Editar subcategoria";
     const seOpts = catTree[p.tipo].map((c) => `<option${c.nome === p.parent ? " selected" : ""}>${c.nome}</option>`).join("");
-    body = `<label class="fld"><span class="fld-label">Nome</span><input data-se="nome" value="${p.sub}" autocomplete="off"></label><label class="fld"><span class="fld-label">Categoria</span><select data-se="parent">${seOpts}</select></label>`;
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-se="nome" value="${attr(p.sub)}" autocomplete="off"></label><label class="fld"><span class="fld-label">Categoria</span><select data-se="parent">${seOpts}</select></label>`;
     foot = `<button class="pop-danger" data-sub-del-ask="${p.tipo}|${p.parent}|${p.sub}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-sub-rename-save>Salvar</button>`;
   } else if (p.kind === "subDelete") {
     const node = catTree[p.tipo].find((c) => c.nome === p.parent);
@@ -1358,7 +1386,7 @@ function renderPop() {
   } else if (p.kind === "acctEdit") {
     const a = acctById(p.id);
     title = "Editar conta";
-    body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${p.curName != null ? p.curName : (a ? a.nome : "")}" autocomplete="off"></label>
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${attr(p.curName != null ? p.curName : (a ? a.nome : ""))}" autocomplete="off"></label>
       <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ae-icon", p.editIcon)}</div>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-acct-edit-save="${p.id}">Salvar</button>`;
   }
@@ -1377,7 +1405,7 @@ function saveAcctForm() {
   const sub = { invest: "Investimento", cartao: "Cartão", patrimonio: "Patrimônio", dinheiro: "Dinheiro", banco: "Conta" }[tipo];
   const o = { id: "u" + Date.now(), nome, sub, tipo, saldo, grupo, arquivada: false };
   if (grupo === "pat") { o.alocado = saldo; o.custo = 0; }
-  accounts.push(o); refreshSideNet(); closePop(); renderView();
+  accounts.push(o); reindexAccounts(); refreshSideNet(); closePop(); renderView();
 }
 function openCatForm(tipo, parent) { state.pop = { kind: "catForm", tipo, parent: parent || null }; renderPop(); }
 function saveCatForm() {
@@ -1512,6 +1540,8 @@ function reconAccept(id) {
   state.recon = state.recon.map((r) => (r.id === id ? { ...r, ...patch, status: "conciliado" } : r));
   state.editing = null; renderView();
 }
+// aceita de uma vez tudo que está pendente (o caminho normal quando o extrato traz muitos itens novos)
+function reconAcceptAll() { state.recon = state.recon.map((r) => (r.status === "pendente" ? { ...r, status: "conciliado" } : r)); state.editing = null; renderView(); }
 function reconIgnore(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "ignorado" } : r)); state.editing = null; renderView(); }
 function reconReactivate(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "pendente" } : r)); state.editing = null; renderView(); }
 // grava de vez: cria os lançamentos aceitos (sem correspondência) e encerra a sessão
@@ -1519,7 +1549,7 @@ function reconCommit() {
   const aceitos = state.recon.filter((r) => r.status === "conciliado");
   if (!aceitos.length) return;
   const novos = aceitos.filter((r) => !r.match).map(reconToTx);
-  if (novos.length) { novos.forEach((t) => applyTxToBalance(t, 1)); state.tx = [...novos, ...state.tx]; }
+  if (novos.length) { novos.forEach((t) => applyTxToBalance(t, 1)); state.tx = [...novos, ...state.tx]; sortTx(); }
   state.recon = []; state.reconFiles = []; state.imported = false; state.reconAccount = null; state.editing = null;
   state.reconDone = { criados: novos.length, conciliados: aceitos.length };
   refreshSideNet();
@@ -1613,16 +1643,22 @@ const RECON_RULES = [
   { kw: ["aporte", "investimento", "aplicacao", "compra ativo"], cat: "Investimento", sub: "Investimento" },
   { kw: ["amazon", "mercado livre", "mercadolivre", "magazine", "aliexpress", "shopee", "loja", "roupa", "renner"], cat: "Compras", sub: "" },
 ];
-function findReconMatch(p) {
+// `used` = ids de lançamentos já casados por outro item deste mesmo extrato. Sem isso, duas compras
+// idênticas no extrato casavam as duas com o MESMO lançamento existente e a segunda (que é nova de
+// verdade) era silenciosamente engolida como duplicata.
+function findReconMatch(p, used) {
   if (!p.iso) return null;
   const acc = state.reconAccount;
   // só casa com lançamentos da MESMA conta que está sendo conciliada — senão uma compra do cartão
   // "casaria" falsamente com um lançamento de outra conta do mesmo valor e não seria criada no commit.
   return state.tx.find((t) => t.status !== "importado"
+    && !(used && used.has(t.id))
     && (t.conta === acc || t.origem === acc || t.destino === acc)
     && Math.abs(Math.abs(t.valor) - Math.abs(p.valor)) < 0.01
     && t.iso && Math.abs((new Date(t.iso) - new Date(p.iso)) / 864e5) <= 3) || null;
 }
+// ids já casados pelos itens atuais da conciliação (usado ao adicionar item manualmente)
+function reconUsedIds() { const s = new Set(); state.recon.forEach((r) => { if (r.matchId != null) s.add(r.matchId); }); return s; }
 function catExists(tipo, nome) { return catTree[tipo] && catTree[tipo].some((c) => c.nome === nome); }
 // detecta parcela "N/M" na descrição (com palavra parcela, ou N/M ao fim) — evita confundir com data
 function parseInstallment(desc) {
@@ -1645,16 +1681,23 @@ function buildRecon(parsed, account) {
     if (pos > neg) flip = -1;
   }
   const isPay = (d) => /pagamento\s*(recebido|de\s*fatura|fatura)?|pgto|pagto/i.test(d || "");
+  // conta de origem plausível pro pagamento da fatura (antes era a string "Pagamento", uma conta que
+  // não existe — o saldo entrava no cartão sem sair de lugar nenhum). O usuário confirma/edita.
+  const origemPad = (accounts.find((a) => !a.arquivada && a.grupo === "fin" && a.tipo !== "cartao" && a.nome !== account) || {}).nome || account;
+  const used = new Set(); // cada lançamento existente só casa com UM item do extrato
   return parsed.slice(0, 300).map((p, idx) => {
     // pagamento de fatura do cartão → transferência (não é receita/despesa do orçamento)
     if (acc && acc.tipo === "cartao" && isPay(p.desc) && p.valor * flip > 0) {
-      return { id: "imp" + idx, raw: p.desc, valor: Math.abs(p.valor), iso: p.iso, sug: { tipo: "transferencia", origem: "Pagamento", destino: account }, conf: 90, match: null, status: "pendente", note: "Pagamento de fatura — transferência, não entra no orçamento" };
+      // também procura correspondência: sem isso, reimportar o mesmo extrato duplicava o pagamento
+      const pm = findReconMatch({ iso: p.iso, valor: Math.abs(p.valor) }, used);
+      if (pm) used.add(pm.id);
+      return { id: "imp" + idx, raw: p.desc, valor: Math.abs(p.valor), iso: p.iso, sug: { tipo: "transferencia", origem: origemPad, destino: account }, conf: 90, match: pm ? `${pm.desc} · ${pm.data}` : null, matchId: pm ? pm.id : null, status: pm ? "ignorado" : "pendente", note: "Pagamento de fatura — transferência, não entra no orçamento (confira a conta de origem)" };
     }
     const inst = parseInstallment(p.desc);
-    let valor = p.valor * flip, status = "pendente", note = null;
+    let valor = p.valor * flip, status = "pendente", note = null, pulado = false;
     if (inst) {
       if (inst.n === 1) { valor = valor * inst.m; note = `Parcela 1/${inst.m} — importando o valor cheio (${inst.m}×)`; }
-      else { status = "ignorado"; note = `Parcela ${inst.n}/${inst.m} — o total já foi lançado na 1ª`; }
+      else { status = "ignorado"; pulado = true; note = `Parcela ${inst.n}/${inst.m} — o total já foi lançado na 1ª`; }
     }
     const isDesp = valor < 0;
     const rule = RECON_RULES.find((r) => r.kw.some((k) => (p.desc || "").toLowerCase().includes(k)));
@@ -1666,10 +1709,10 @@ function buildRecon(parsed, account) {
     // (ignora o fallback em que a única "sub" é o próprio nome da categoria)
     const firstSub = catObj ? (catObj.subs.find((s) => s !== catObj.nome) || "") : "";
     const sub = (rule && rule.sub && catObj && catObj.subs.includes(rule.sub)) ? rule.sub : firstSub;
-    const match = findReconMatch({ iso: p.iso, valor });
-    if (match) status = "ignorado"; // já existe um lançamento igual → vem marcado com X (reative p/ contar)
+    const match = findReconMatch({ iso: p.iso, valor }, used);
+    if (match) { used.add(match.id); status = "ignorado"; } // já existe um lançamento igual → vem marcado com X (reative p/ contar)
     const conf = Math.min((rule ? 85 : 55) + (match ? 12 : 0), 99);
-    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug: { tipo, cat, sub, conta: account }, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note };
+    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug: { tipo, cat, sub, conta: account }, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado };
   });
 }
 let _manSeq = 0;
@@ -1694,7 +1737,7 @@ function formToRecon() {
     return { id, raw, valor: sign * Math.abs(v), iso, sug: { tipo: "transferencia", origem, destino }, conf: 100, match: null, status: "pendente", manual: true };
   }
   const signed = tipo === "despesa" ? -Math.abs(v) : Math.abs(v);
-  const match = findReconMatch({ iso, valor: signed });
+  const match = findReconMatch({ iso, valor: signed }, reconUsedIds());
   return { id, raw, valor: signed, iso, sug: { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount }, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true };
 }
 function reconToTx(r) {
@@ -1850,6 +1893,7 @@ function wire() {
     if (ms) { pickSub(ms.dataset.modalSub); return; }
     const dset = e.target.closest("[data-date-set]");
     if (dset) { state.form.data = isoPlusDays(TODAY_ISO, +dset.dataset.dateSet); renderModal(); return; }
+    if (e.target.closest("[data-recon-accept-all]")) { reconAcceptAll(); return; }
     const acc = e.target.closest("[data-recon-accept]");
     if (acc) { reconAccept(acc.dataset.reconAccept); return; }
     const edt = e.target.closest("[data-recon-edit]");
@@ -2129,7 +2173,7 @@ function renderAuth() {
       <p>${signup ? "Crie sua conta — seus dados ficam privados e sincronizados entre aparelhos." : "Entre para acessar suas finanças, privadas e sincronizadas entre aparelhos."}</p>
       ${google}
       <form data-auth-form>
-        <input type="email" data-auth-email value="${s.email || ""}" placeholder="voce@email.com" autocomplete="email" required>
+        <input type="email" data-auth-email value="${attr(s.email)}" placeholder="voce@email.com" autocomplete="email" required>
         <input type="password" data-auth-pass placeholder="Senha" autocomplete="${signup ? "new-password" : "current-password"}" minlength="6" required>
         <button class="auth-btn" type="submit"${busy ? " disabled" : ""}>${busy ? "Aguarde…" : signup ? "Criar conta" : "Entrar"}</button>
       </form>
