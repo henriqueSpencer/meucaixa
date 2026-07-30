@@ -184,6 +184,18 @@ Consequência: reativar um correspondente soma no projetado por cima do saldo
 que já o reflete (o projetado vira "total dos ativos", não previsão exata do saldo pós-save) — comportamento
 pedido explicitamente.
 
+**Batimento com o banco** (`.recon-check`, card logo abaixo do `recon-head`): o usuário digita em
+**"Saldo no banco"** (`state.reconBank`, texto cru) o saldo que está vendo no app do banco e o MeuCaixa
+mostra **`banco − saldo projetado`**; **zero ⇒ "Bate na vírgula"**, senão mostra a diferença assinada + o
+lado que falta lançar (diff > 0 = falta entrada; diff < 0 = falta despesa). Peças: `parseSaldo` (aceita
+`1.234,56`, `1234,56`, `1234.56`, `R$ …`, negativo com `-` ou parênteses; `null` = vazio/inválido),
+`reconTotals()` (extraído da view justamente pra poder recalcular fora dela), `reconDiff`/`reconDiffHTML`
+e `refreshReconDiff`. O listener de `input` **não chama `renderView()`** — patcha só o `[data-recon-diff]`,
+senão o input é recriado a cada tecla e perde foco/cursor. O valor sobrevive aos re-renders porque a view
+lê de `state.reconBank`; zera no `import`/`reimport`/`reconCommit`. No commit, `reconCommit` guarda o
+batimento **pós-save** em `state.reconDone.bat` (saldo real da conta já com os lançamentos criados vs.
+banco) e o banner verde diz se bateu ou quanto ainda falta.
+
 ## Mapa de arquivos
 `index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `store.js` (persistência+sync) ·
 `styles.css` · `vendor/supabase.js` (UMD vendorizado) · `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`

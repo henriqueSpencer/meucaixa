@@ -734,6 +734,51 @@ function reconEffect(r) {
   if (r.sug.tipo === "transferencia") { if (r.sug.destino === state.reconAccount) return Math.abs(r.valor); if (r.sug.origem === state.reconAccount) return -Math.abs(r.valor); return 0; }
   return r.valor; // já assinado (despesa negativa, receita positiva)
 }
+// saldo digitado pelo usuário (copiado do app do banco): aceita "1.234,56", "1234,56", "1234.56",
+// "R$ 1.234,56", negativo com "-" ou entre parênteses. `null` = campo vazio/inválido (não confere nada).
+function parseSaldo(s) {
+  let t = String(s == null ? "" : s).replace(/[R$\s]/gi, "").replace(/[−–—]/g, "-");
+  if (!/\d/.test(t)) return null;
+  const neg = t.indexOf("-") >= 0 || (t.indexOf("(") >= 0 && t.indexOf(")") >= 0);
+  t = t.replace(/[()\-]/g, "");
+  t = /,\d{1,2}$/.test(t) ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
+  const n = parseFloat(t);
+  if (!isFinite(n)) return null;
+  return neg ? -n : n;
+}
+// totais da conta em conciliação. Fora da view porque o batimento (`recon-check`) recalcula a cada
+// tecla sem re-renderizar a tela (senão o input perderia o foco/cursor a cada dígito).
+function reconTotals() {
+  const acct = accounts.find((a) => a.nome === state.reconAccount);
+  const saldoAtual = acct ? numOr0(acct.saldo) : 0;
+  const contam = state.recon.filter((r) => r.status !== "ignorado");
+  let despTot = 0, credTot = 0;
+  contam.forEach((r) => { const e = reconEffect(r); if (e < 0) despTot += e; else credTot += e; });
+  return { acct, saldoAtual, contam, despTot, credTot, saldoFuturo: saldoAtual + despTot + credTot };
+}
+// diferença = saldo do banco − saldo projetado. Zero ⇒ bate na vírgula.
+function reconDiff() {
+  const banco = parseSaldo(state.reconBank);
+  const { saldoFuturo } = reconTotals();
+  if (banco === null) return { banco: null, saldoFuturo, diff: 0, ok: false };
+  const diff = Math.round((banco - saldoFuturo) * 100) / 100;
+  return { banco, saldoFuturo, diff, ok: diff === 0 };
+}
+function reconDiffHTML() {
+  const d = reconDiff();
+  if (d.banco === null) return `<span class="rc-idle">${ic("circle-alert", 14)} Informe o saldo do banco pra ver quanto falta.</span>`;
+  const conta = `<span class="rc-calc">banco ${fmt(d.banco)} − projetado ${fmt(d.saldoFuturo)}</span>`;
+  if (d.ok) return `<div class="rc-ok">${ic("check", 16)} <b>Bate na vírgula</b></div>${conta}`;
+  const tip = d.diff > 0
+    ? `falta lançar <b>${fmtNum(d.diff)}</b> de entrada nesta conta — o banco tem mais do que o MeuCaixa prevê`
+    : `falta lançar <b>${fmtNum(d.diff)}</b> de despesa nesta conta — o banco tem menos do que o MeuCaixa prevê`;
+  return `<div class="rc-diff"><span>Diferença</span><b class="num" style="color:${d.diff > 0 ? "var(--pos)" : "var(--neg)"}">${d.diff > 0 ? "+ " : "− "}${fmtNum(d.diff)}</b></div>${conta}<span class="rc-tip">${tip}</span>`;
+}
+// atualiza só o resultado do batimento, preservando o input (foco + cursor) durante a digitação
+function refreshReconDiff() {
+  const box = document.querySelector("[data-recon-diff]");
+  if (box) box.innerHTML = reconDiffHTML();
+}
 function viewConciliacao() {
   if (!state.imported) {
     if (!state.reconAccount) state.reconAccount = (accounts.find((a) => !a.arquivada) || {}).nome;
@@ -744,7 +789,13 @@ function viewConciliacao() {
     const list = files.length
       ? `<div class="imp-file-list">${files.map((f, i) => `<div class="imp-file-row"><span class="imp-file-ic">${ic("receipt", 18)}</span><div class="imp-drop-txt"><b>${f.name}</b><span>${fileSub(f)}</span></div><button class="imp-file-x" data-imp-clear="${i}" title="Remover">${ic("x", 15)}</button></div>`).join("")}</div>`
       : "";
-    const doneBanner = state.reconDone ? `<div class="recon-done-banner card">${ic("check", 16)} Conciliação salva — <b>${state.reconDone.criados}</b> ${state.reconDone.criados === 1 ? "lançamento criado" : "lançamentos criados"}${state.reconDone.dup ? ` · ${state.reconDone.dup} ${state.reconDone.dup === 1 ? "tinha" : "tinham"} correspondência e ${state.reconDone.dup === 1 ? "foi lançado" : "foram lançados"} mesmo assim` : ""}.<button class="rdb-x" data-recon-done-x title="Fechar">${ic("x", 14)}</button></div>` : "";
+    // se o usuário informou o saldo do banco, o banner fecha o batimento: saldo da conta agora
+    // (já com os lançamentos criados) vs. banco — zero significa tudo lançado
+    const bat = state.reconDone && state.reconDone.bat;
+    const batTxt = !bat ? "" : bat.falta === 0
+      ? ` <b class="rdb-ok">Bate na vírgula com o banco (${fmt(bat.banco)}).</b>`
+      : ` Ainda há <b class="rdb-off">${fmtNum(bat.falta)}</b> de diferença com o banco — falta lançar ${bat.falta > 0 ? "entrada" : "despesa"} (banco ${fmt(bat.banco)} · MeuCaixa ${fmt(bat.saldo)}).`;
+    const doneBanner = state.reconDone ? `<div class="recon-done-banner card">${ic("check", 16)} <div>Conciliação salva — <b>${state.reconDone.criados}</b> ${state.reconDone.criados === 1 ? "lançamento criado" : "lançamentos criados"}${state.reconDone.dup ? ` · ${state.reconDone.dup} ${state.reconDone.dup === 1 ? "tinha" : "tinham"} correspondência e ${state.reconDone.dup === 1 ? "foi lançado" : "foram lançados"} mesmo assim` : ""}.${batTxt}</div><button class="rdb-x" data-recon-done-x title="Fechar">${ic("x", 14)}</button></div>` : "";
     const drop = `<div class="import-drop" data-imp-drop><input type="file" data-imp-file accept=".ofx,.csv,.pdf,.xls,.xlsx,.qif,.txt" multiple hidden><span class="imp-file-ic">${ic("upload", 22)}</span><div class="imp-drop-txt"><b>${files.length ? "Adicionar outro arquivo" : "Arraste o(s) arquivo(s) aqui"}</b><span>${files.length ? "arraste ou clique para incluir mais" : "ou clique para escolher (pode ser mais de um)"}</span></div></div>`;
     return `${doneBanner}<div class="import-zone card">
       <h3>Importar extrato</h3>
@@ -760,15 +811,10 @@ function viewConciliacao() {
   const conc = state.recon.filter((r) => r.status === "conciliado").length;
   const totalR = state.recon.filter((r) => r.status !== "ignorado").length;
   const ign = state.recon.filter((r) => r.status === "ignorado").length;
-  const acct = accounts.find((a) => a.nome === state.reconAccount);
-  const saldoAtual = acct ? acct.saldo : 0;
   // saldo projetado = saldo atual + TODOS os itens não-ignorados. Os com correspondência a um lançamento
   // existente já vêm ignorados (X) por padrão — logo não somam por padrão —, mas se o usuário reativar
   // ou aceitar um deles, ele passa a contar. Só o X (ignorar) tira do projetado.
-  const contam = state.recon.filter((r) => r.status !== "ignorado");
-  let despTot = 0, credTot = 0;
-  contam.forEach((r) => { const e = reconEffect(r); if (e < 0) despTot += e; else credTot += e; });
-  const saldoFuturo = saldoAtual + despTot + credTot;
+  const { acct, saldoAtual, contam, despTot, credTot, saldoFuturo } = reconTotals();
   const head = `<div class="card recon-head">
     <div class="rh-l"><span class="acct-ic">${ic(acct ? acctIconOf(acct) : "wallet", 18)}</span><div><div class="rh-label">Conciliando</div><div class="rh-acct">${state.reconAccount || "—"}</div></div></div>
     <div class="rh-bals">
@@ -777,6 +823,17 @@ function viewConciliacao() {
       <div class="rh-bal"><span>Créditos / pagamentos</span><b class="num" style="color:var(--pos)">+ ${fmtNum(credTot)}</b></div>
       <div class="rh-bal accent"><span>Saldo projetado (${contam.length})</span><b class="num" style="color:${saldoFuturo >= saldoAtual ? "var(--pos)" : "var(--neg)"}">${fmt(saldoFuturo)}</b></div>
     </div>
+  </div>`;
+  // batimento: o usuário digita o saldo que o app do banco mostra e o MeuCaixa faz
+  // banco − projetado. Zero = está tudo lançado. O resultado se atualiza a cada tecla via
+  // refreshReconDiff (re-renderizar a view inteira mataria o foco no input).
+  const check = `<div class="card recon-check">
+    <div class="rc-in">
+      <label class="fld"><span class="fld-label">Saldo no banco</span><input inputmode="decimal" data-recon-bank value="${attr(state.reconBank || "")}" placeholder="ex.: 1.234,56"></label>
+      <span class="rc-hint">o saldo que você está vendo no app do banco</span>
+    </div>
+    <div class="rc-eq">${ic("arrow-right", 16)}</div>
+    <div class="rc-out" data-recon-diff>${reconDiffHTML()}</div>
   </div>`;
   const saveLabel = conc ? `Salvar ${conc} lançamento${conc > 1 ? "s" : ""}` : "Nada para salvar";
   // resumo honesto do que veio no arquivo: quantos são novos e quantos já existiam. Sem isso, um
@@ -803,7 +860,7 @@ function viewConciliacao() {
     </div></div>`;
   }
   const acceptAll = pend ? `<button class="ghost" data-recon-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
-  const bar = head + jaImportado + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
+  const bar = head + check + jaImportado + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
   const list = state.recon.map((r) => {
     const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
     const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
@@ -1132,6 +1189,7 @@ const state = {
   tx: initialTx.slice(),
   recon: [],
   imported: false, reconAccount: null, reconFiles: [], reconDone: null, modalRecon: false,
+  reconBank: "", // saldo real digitado do app do banco (batimento contra o projetado)
   filter: "todas",
   modal: false,
   modalTipo: "despesa",
@@ -1567,9 +1625,17 @@ function reconCommit() {
   if (!aceitos.length) return;
   const novos = aceitos.map(reconToTx);
   const dup = aceitos.filter((r) => r.match).length;
+  const banco = parseSaldo(state.reconBank), contaConc = state.reconAccount;
   if (novos.length) { novos.forEach((t) => applyTxToBalance(t, 1)); state.tx = [...novos, ...state.tx]; sortTx(); }
-  state.recon = []; state.reconFiles = []; state.imported = false; state.reconAccount = null; state.editing = null;
-  state.reconDone = { criados: novos.length, dup };
+  // batimento pós-save: agora os saldos já refletem os lançamentos criados, então compara o saldo
+  // real da conta com o que o usuário digitou do banco (0 = bateu na vírgula)
+  let bat = null;
+  if (banco !== null) {
+    const a = accounts.find((x) => x.nome === contaConc);
+    bat = { banco, saldo: numOr0(a && a.saldo), falta: Math.round((banco - numOr0(a && a.saldo)) * 100) / 100 };
+  }
+  state.recon = []; state.reconFiles = []; state.imported = false; state.reconAccount = null; state.editing = null; state.reconBank = "";
+  state.reconDone = { criados: novos.length, dup, bat };
   refreshSideNet();
   renderView();
 }
@@ -1790,7 +1856,7 @@ const ACTIONS = {
   "close-modal": closeModal,
   "save-tx": saveTx,
   "import": () => {
-    state.reconDone = null;
+    state.reconDone = null; state.reconBank = "";
     const sel = document.querySelector("[data-imp-acct]");
     state.reconAccount = sel ? sel.value : (accounts.find((a) => !a.arquivada) || {}).nome;
     const all = reconAllParsed();
@@ -1798,7 +1864,7 @@ const ACTIONS = {
     state.recon = buildRecon(all, state.reconAccount);
     state.imported = true; state.editing = null; renderView();
   },
-  "reimport": () => { state.imported = false; state.reconAccount = null; state.reconFiles = []; state.editing = null; renderView(); },
+  "reimport": () => { state.imported = false; state.reconAccount = null; state.reconFiles = []; state.editing = null; state.reconBank = ""; renderView(); },
 };
 
 function wire() {
@@ -2017,6 +2083,12 @@ function wire() {
     if (ia) { state.reconAccount = ia.value; return; } // mantém a conta escolhida ao re-renderizar
     const rf = e.target.closest("[data-recon-field]");
     if (rf) { const card = rf.closest("[data-recon-id]"); if (card) reconFieldChange(card.dataset.reconId, rf.dataset.reconField, rf.value); }
+  });
+  // batimento: a cada tecla guarda o saldo do banco e atualiza SÓ o resultado (não a view toda,
+  // senão o input é recriado e perde o foco no meio da digitação)
+  document.addEventListener("input", (e) => {
+    const rb = e.target.closest("[data-recon-bank]");
+    if (rb) { state.reconBank = rb.value; refreshReconDiff(); }
   });
   document.addEventListener("dragover", (e) => { const d = e.target.closest("[data-imp-drop]"); if (d) { e.preventDefault(); d.classList.add("drag"); } });
   document.addEventListener("dragleave", (e) => { const d = e.target.closest("[data-imp-drop]"); if (d && !(e.relatedTarget && d.contains(e.relatedTarget))) d.classList.remove("drag"); });
