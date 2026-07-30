@@ -199,6 +199,16 @@ lê de `state.reconBank`; zera no `import`/`reimport`/`reconCommit`. No commit, 
 batimento **pós-save** em `state.reconDone.bat` (saldo real da conta já com os lançamentos criados vs.
 banco) e o banner verde diz se bateu ou quanto ainda falta.
 
+**Conciliação é estado transitório × sync entre abas** (bug real): a sessão de conciliação (`state.recon`,
+`state.imported`, `state.reconBank`, `state.editing`) vive só em `state`, fora do modelo salvo. O handler
+`onStale` (app.js `init`) dispara a cada gravação de **outra aba** (via `BroadcastChannel`) e a cada sync;
+antes ele **re-renderizava** a tela — o que, durante a conciliação, matava o foco do input de saldo e
+redesenhava o item em edição, deixando a aba "impossível de editar" com uma segunda aba aberta. Correção:
+o `onStale` **sempre aplica o modelo novo** (`applyModel`, pra absorver o que a outra aba fez e não empurrar
+dado velho no `reconCommit` — o "push fantasma"), mas **só re-renderiza quando não há edição em curso**
+(`busy = state.modal || state.imported`). Ações do próprio usuário (aceitar/ignorar/editar) seguem
+re-renderizando normalmente — o guard é só no callback de stale.
+
 ## Mapa de arquivos
 `index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `store.js` (persistência+sync) ·
 `styles.css` · `vendor/supabase.js` (UMD vendorizado) · `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`

@@ -2167,7 +2167,15 @@ async function init() {
   // aba nunca ficar com estado velho (que poderia sobrescrever/apagar o que a outra aba fez).
   if (Store.onStale) Store.onStale(() => {
     if (!_booted) return;
-    Store.loadSnapshot().then((m) => { if (m) { applyModel(m); refreshDataLabels(); if (!state.modal) renderView(); } }).catch(() => {});
+    // Uma conciliação em andamento (arquivo já importado) é estado TRANSITÓRIO — vive só em `state`,
+    // fora do modelo. Recarregar o modelo não muda nada na tela dela, mas re-renderizar destruiria a
+    // edição em curso: o input de saldo perde o foco/cursor e um item sendo editado é redesenhado
+    // (com outra aba aberta, o BroadcastChannel dispara isso a cada gravação da outra aba, deixando a
+    // conciliação impossível de editar). Então: SEMPRE aplica o modelo (pra absorver o que a outra aba
+    // fez e não empurrar dado velho no reconCommit — o "push fantasma"), mas só re-renderiza quando
+    // não há edição em curso. Mesmo motivo do guard de `state.modal`.
+    const busy = state.modal || state.imported;
+    Store.loadSnapshot().then((m) => { if (m) { applyModel(m); refreshDataLabels(); if (!busy) renderView(); } }).catch(() => {});
   });
   Store.onAuth((authed) => { if (authed) boot(); else showLogin(); });
   if (Store.isAuthed()) boot(); else showLogin();
