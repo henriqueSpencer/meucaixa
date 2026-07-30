@@ -734,11 +734,52 @@ function reconEffect(r) {
   if (r.sug.tipo === "transferencia") { if (r.sug.destino === state.reconAccount) return Math.abs(r.valor); if (r.sug.origem === state.reconAccount) return -Math.abs(r.valor); return 0; }
   return r.valor; // já assinado (despesa negativa, receita positiva)
 }
+// avaliador aritmético seguro (só + − × ÷ e parênteses), SEM eval/Function. Recebe uma expressão
+// já normalizada (ponto = decimal). Descida recursiva; devolve `null` em qualquer coisa inválida
+// (token sobrando, operador solto, divisão que não converge). Usado pelo campo de saldo do banco,
+// pra dar poder de calculadora ao batimento ("100+50", "1.234,56-30", …).
+function evalArith(expr) {
+  const toks = expr.match(/\d+(?:\.\d+)?|\.\d+|[-+*/()]/g);
+  if (!toks) return null;
+  let i = 0;
+  const peek = () => toks[i], eat = () => toks[i++];
+  function factor() {
+    const t = peek();
+    if (t === "+" || t === "-") { eat(); const r = factor(); return r === null ? null : (t === "-" ? -r : r); }
+    if (t === "(") { eat(); const v = expr2(); if (v === null || peek() !== ")") return null; eat(); return v; }
+    if (t != null && /^[\d.]/.test(t)) { eat(); const n = parseFloat(t); return isFinite(n) ? n : null; }
+    return null;
+  }
+  function term() {
+    let v = factor();
+    if (v === null) return null;
+    while (peek() === "*" || peek() === "/") { const op = eat(); const r = factor(); if (r === null) return null; v = op === "*" ? v * r : v / r; }
+    return v;
+  }
+  function expr2() {
+    let v = term();
+    if (v === null) return null;
+    while (peek() === "+" || peek() === "-") { const op = eat(); const r = term(); if (r === null) return null; v = op === "+" ? v + r : v - r; }
+    return v;
+  }
+  const v = expr2();
+  if (v === null || i < toks.length) return null; // sobrou token ⇒ expressão malformada
+  return isFinite(v) ? v : null;
+}
 // saldo digitado pelo usuário (copiado do app do banco): aceita "1.234,56", "1234,56", "1234.56",
-// "R$ 1.234,56", negativo com "-" ou entre parênteses. `null` = campo vazio/inválido (não confere nada).
+// "R$ 1.234,56", negativo com "-" ou entre parênteses, E contas ("100+50", "1.234,56-30").
+// `null` = campo vazio/inválido (não confere nada).
 function parseSaldo(s) {
-  let t = String(s == null ? "" : s).replace(/[R$\s]/gi, "").replace(/[−–—]/g, "-");
+  let t = String(s == null ? "" : s).replace(/[R$\s]/gi, "").replace(/[−–—]/g, "-").replace(/[x×]/gi, "*").replace(/[÷]/g, "/");
   if (!/\d/.test(t)) return null;
+  // é uma conta? (tem operador além de um possível sinal inicial, ou parênteses de agrupamento)
+  const isExpr = /[+*/]/.test(t.replace(/^[+-]/, "")) || /\d\s*-/.test(t) || /\)\s*-/.test(t) || /\([^)]*[-+*/]/.test(t);
+  if (isExpr) {
+    // normaliza cada literal pro formato JS: vírgula decimal vira ponto (e some o ponto de milhar);
+    // sem vírgula, mantém o ponto como decimal. Operadores/parênteses passam intactos.
+    const norm = t.replace(/[\d.,]+/g, (m) => (m.indexOf(",") >= 0 ? m.replace(/\./g, "").replace(",", ".") : m));
+    return evalArith(norm);
+  }
   const neg = t.indexOf("-") >= 0 || (t.indexOf("(") >= 0 && t.indexOf(")") >= 0);
   t = t.replace(/[()\-]/g, "");
   t = /,\d{1,2}$/.test(t) ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, "");
@@ -829,8 +870,8 @@ function viewConciliacao() {
   // refreshReconDiff (re-renderizar a view inteira mataria o foco no input).
   const check = `<div class="card recon-check">
     <div class="rc-in">
-      <label class="fld"><span class="fld-label">Saldo no banco</span><input inputmode="decimal" data-recon-bank value="${attr(state.reconBank || "")}" placeholder="ex.: 1.234,56"></label>
-      <span class="rc-hint">o saldo que você está vendo no app do banco</span>
+      <label class="fld"><span class="fld-label">Saldo no banco</span><input inputmode="text" data-recon-bank value="${attr(state.reconBank || "")}" placeholder="ex.: 1.234,56 ou 100+50"></label>
+      <span class="rc-hint">o saldo que você vê no app do banco — pode digitar contas (ex.: 100+50)</span>
     </div>
     <div class="rc-eq">${ic("arrow-right", 16)}</div>
     <div class="rc-out" data-recon-diff>${reconDiffHTML()}</div>

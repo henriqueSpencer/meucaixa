@@ -189,7 +189,10 @@ pedido explicitamente.
 mostra **`banco − saldo projetado`**; **zero ⇒ "Bate na vírgula"**, senão mostra a diferença assinada + o
 lado que falta lançar (diff > 0 = falta entrada; diff < 0 = falta despesa). Peças: `parseSaldo` (aceita
 `1.234,56`, `1234,56`, `1234.56`, `R$ …`, negativo com `-` ou parênteses; `null` = vazio/inválido),
-`reconTotals()` (extraído da view justamente pra poder recalcular fora dela), `reconDiff`/`reconDiffHTML`
+`reconTotals()` (extraído da view justamente pra poder recalcular fora dela). O campo também aceita
+**continhas** (`100+50`, `1.234,56-30`, `(100+50)*2`, `3x4`) — `parseSaldo` detecta operador e delega a
+`evalArith`, um avaliador aritmético **sem `eval`/`Function`** (descida recursiva, `+ − * /` e parênteses,
+`null` em expressão malformada); número puro segue no caminho BR de sempre. Também `reconDiff`/`reconDiffHTML`
 e `refreshReconDiff`. O listener de `input` **não chama `renderView()`** — patcha só o `[data-recon-diff]`,
 senão o input é recriado a cada tecla e perde foco/cursor. O valor sobrevive aos re-renders porque a view
 lê de `state.reconBank`; zera no `import`/`reimport`/`reconCommit`. No commit, `reconCommit` guarda o
