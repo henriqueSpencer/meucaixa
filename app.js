@@ -102,7 +102,7 @@ const initialTx = OF ? OF.tx : [
 accounts.forEach((a, i) => { if (a.arquivada === undefined) a.arquivada = false; a.ordem = i; });
 // movimentos de ativos (compra/venda) das contas de investimento — a posição/preço-médio é derivada
 const assetMoves = [];
-const netWorth = () => accounts.filter((a) => !a.arquivada).reduce((s, a) => s + a.saldo, 0);
+const netWorth = () => accounts.filter((a) => !a.arquivada).reduce((s, a) => s + acctTotal(a), 0);
 const patrimonioLiquido = accounts.reduce((s, a) => s + a.saldo, 0);
 const receitasMes = OF ? OF.receitasMes : 15800;
 const despesasMes = OF ? OF.despesasMes : 8900;
@@ -130,7 +130,7 @@ async function fetchQuotes() {
 const assetPrice = (ticker) => { const p = QUOTES[String(ticker || "").toUpperCase()]; return typeof p === "number" && isFinite(p) ? p : null; };
 const CLASSE_LABEL = { acao: "Ação", etf: "ETF", fii: "FII", rf: "Renda fixa", caixa: "Caixa", outro: "Outro" };
 const hasHoldings = () => assetMoves.length > 0;
-const isCarteira = (a) => a && a.tipo === "invest" && assetMoves.some((m) => m.contaId === a.id);
+const temAtivos = (a) => a && assetMoves.some((m) => m.contaId === a.id);
 
 // Posição atual por ticker numa conta, derivada dos movimentos (custo médio ponderado).
 // compra: soma qtd e custo. venda: reduz qtd pelo PM atual (custo médio), realiza ganho.
@@ -162,15 +162,20 @@ function computePositions(contaId) {
   }).filter((o) => Math.abs(o.qtd) > 1e-9)
     .sort((a, b) => b.valor - a.valor);
 }
-// saldo das contas de investimento com ativos = valor de mercado da carteira (deriva do holdings,
-// substitui o lançamento manual de valorização). Contas invest SEM ativos mantêm o saldo manual.
-function recomputeInvestBalances() {
-  accounts.forEach((a) => {
-    if (a.tipo !== "invest" || !assetMoves.some((m) => m.contaId === a.id)) return;
-    const total = computePositions(a.id).reduce((s, p) => s + p.valor, 0);
-    a.saldo = Math.round(total * 100) / 100;
-  });
+// Conta de investimento = CAIXA + INVESTIDO (nada é sobrescrito; tudo derivado ao vivo):
+//   investido  = Σ valor de mercado dos ativos (qtd × cotação)
+//   cashDelta  = efeito das compras/vendas no caixa (compra sai −, venda entra +)
+//   caixa      = saldo transacional (aportes/saques) + cashDelta  → dinheiro parado na corretora
+//   total      = caixa + investido  → é o que vale a conta (entra no patrimônio)
+// Para conta sem ativos, investido e cashDelta são 0 ⇒ total == saldo (comportamento normal).
+function invInvestido(a) { return a ? computePositions(a.id).reduce((s, p) => s + p.valor, 0) : 0; }
+function invCashDelta(a) {
+  if (!a) return 0;
+  return assetMoves.filter((m) => m.contaId === a.id)
+    .reduce((s, m) => s + (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), 0);
 }
+const carteiraCaixa = (a) => numOr0(a && a.saldo) + invCashDelta(a);
+function acctTotal(a) { return a ? Math.round((numOr0(a.saldo) + invCashDelta(a) + invInvestido(a)) * 100) / 100 : 0; }
 
 /* helpers de conta / drill */
 const acctById = (id) => accounts.find((a) => a.id === id);
@@ -714,7 +719,14 @@ function acctCard(a) {
     const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="alloc-lines"><div><span>Valor alocado</span><b class="num">${fmt(a.alocado)}</b></div><div><span>Custos lançados</span><b class="num" style="color:${C.despesa}">${fmt(a.custo)}</b></div></div><div class="alloc-val"><span>Valor atual</span><strong class="num" style="color:${C.patrimonio}">${fmt(a.saldo)}</strong></div>`;
     return `<div class="card acct alloc-card"><div class="acct-top"><span class="acct-ic pat">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip patrimonio">patrimônio</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
   }
-  const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="acct-saldo num" style="color:${a.saldo < 0 ? C.despesa : "var(--ink)"}">${fmt(a.saldo)}</div>`;
+  if (temAtivos(a)) {
+    // carteira: total = caixa + investido (a mercado)
+    const caixa = carteiraCaixa(a), invest = invInvestido(a), total = acctTotal(a);
+    const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="alloc-lines"><div><span>Caixa</span><b class="num">${fmt(caixa)}</b></div><div><span>Investido (mercado)</span><b class="num">${fmt(invest)}</b></div></div><div class="alloc-val"><span>Total</span><strong class="num" style="color:${total < 0 ? C.despesa : "var(--ink)"}">${fmt(total)}</strong></div>`;
+    return `<div class="card acct"><div class="acct-top"><span class="acct-ic">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
+  }
+  const saldo = acctTotal(a);
+  const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="acct-saldo num" style="color:${saldo < 0 ? C.despesa : "var(--ink)"}">${fmt(saldo)}</div>`;
   return `<div class="card acct"><div class="acct-top"><span class="acct-ic">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
 }
 const MES_NOMES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
@@ -730,36 +742,53 @@ function acctTxRow(t, nome) {
   const tcor = t.tipo === "transferencia" ? C.transfer : (t.tipo === "despesa" ? C.despesa : C.receita);
   return `<div class="mini-row click txr" data-tx-open="${t.id}"><span class="tx-ic" style="background:${tcor}1A;color:${tcor}">${ic(txCatIcon(t), 16)}</span><div class="tx-mid"><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data} · ${contraparte}</div></div><span class="num" style="color:${v < 0 ? "var(--ink)" : "var(--pos)"};font-weight:600">${v < 0 ? "−" : "+"} ${fmtNum(Math.abs(v))}</span></div>`;
 }
+// linha de compra/venda de ativo no extrato da carteira (efeito no CAIXA: compra sai −, venda entra +)
+function acctAssetRow(m) {
+  const venda = m.tipo === "venda";
+  const eff = (venda ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco);
+  const cor = venda ? C.receita : C.transfer;
+  const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  return `<div class="mini-row txr"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic(venda ? "trending-up" : "invest", 16)}</span><div class="tx-mid"><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)}</div></div><span class="num" style="color:${eff < 0 ? "var(--ink)" : "var(--pos)"};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
+}
 function viewAcctDetail(nome) {
   const a = accounts.find((x) => x.nome === nome);
-  const txs = acctTx(nome).slice().sort((x, y) => (y.iso || y.data).localeCompare(x.iso || x.data));
+  const cart = temAtivos(a); // carteira de investimento: separa caixa × investido
+  // ledger unificado: transações + (se carteira) compras/vendas de ativo como linhas de caixa
+  const items = [];
+  acctTx(nome).forEach((t) => items.push({ iso: t.iso || "", data: t.data || "", eff: txValorConta(t, nome), html: acctTxRow(t, nome) }));
+  if (cart) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => items.push({ iso: m.iso || "", data: m.iso ? dataBR(m.iso) : "", eff: (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), html: acctAssetRow(m) }));
+  items.sort((x, y) => String(y.iso || y.data).localeCompare(String(x.iso || x.data)));
   let entradas = 0, saidas = 0;
-  txs.forEach((t) => { const v = txValorConta(t, nome); if (v >= 0) entradas += v; else saidas += -v; });
-  // agrupa por mês (mais recente primeiro), com subtotal do mês
+  items.forEach((it) => { if (it.eff >= 0) entradas += it.eff; else saidas += -it.eff; });
   const groups = {};
-  txs.forEach((t) => { const k = (t.iso || "0000-00").slice(0, 7); (groups[k] = groups[k] || []).push(t); });
+  items.forEach((it) => { const k = (it.iso || "0000-00").slice(0, 7); (groups[k] = groups[k] || []).push(it); });
   const keys = Object.keys(groups).sort((x, y) => y.localeCompare(x));
-  // saldo ao FIM de cada mês: reconstruído do saldo atual descontando o que veio depois.
-  // Como os meses vêm do mais novo p/ o mais antigo, `after` acumula os movimentos já exibidos
-  // (todos posteriores ao mês corrente) → saldoFim(mês) = saldo atual − movimentos posteriores.
-  const saldoAtual = numOr0(a && a.saldo);
+  // saldo/caixa ao FIM de cada mês: âncora = saldo atual (conta normal) ou caixa atual (carteira),
+  // descontando os movimentos posteriores (os meses vêm do mais novo p/ o mais antigo).
+  const anchor = cart ? carteiraCaixa(a) : acctTotal(a);
+  const balLabel = cart ? "caixa" : "saldo";
   let after = 0;
-  const body = txs.length ? keys.map((k) => {
-    const list = groups[k], net = list.reduce((s, t) => s + txValorConta(t, nome), 0);
+  const body = items.length ? keys.map((k) => {
+    const list = groups[k], net = list.reduce((s, it) => s + it.eff, 0);
     const lbl = k === "0000-00" ? "Sem data" : monthLabel(k + "-01");
-    const saldoFim = Math.round((saldoAtual - after) * 100) / 100;
+    const fim = Math.round((anchor - after) * 100) / 100;
     after += net;
-    const balHTML = k === "0000-00" ? "" : `<span class="md-bal">saldo <b class="num">${fmt(saldoFim)}</b></span>`;
-    return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span>${balHTML}</div>${list.map((t) => acctTxRow(t, nome)).join("")}`;
+    const balHTML = k === "0000-00" ? "" : `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
+    return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span>${balHTML}</div>${list.map((it) => it.html).join("")}`;
   }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`;
   const iconName = acctIconOf(a);
+  const headVal = cart
+    ? `<div class="adh-cart"><div><span>Caixa</span><b class="num">${fmt(carteiraCaixa(a))}</b></div><div><span>Investido</span><b class="num">${fmt(invInvestido(a))}</b></div><div class="adh-cart-tot"><span>Total</span><strong class="num">${fmt(acctTotal(a))}</strong></div></div>`
+    : `<div class="adh-saldo num" style="color:${a && acctTotal(a) < 0 ? "var(--neg)" : "var(--ink)"}">${a ? fmt(acctTotal(a)) : ""}</div>`;
+  const cartHint = cart ? `<button class="mini-btn" data-tab="investimentos">${ic("invest", 13)} Ver ativos da carteira</button>` : "";
   return `
   <button class="back-btn" data-acct-back>${ic("arrow-left", 16)} Contas</button>
-  <div class="card acct-detail-head"><div class="adh-l"><span class="acct-ic big">${ic(iconName, 22)}</span><div><div class="adh-name">${nome}</div><div class="acct-sub">${a ? a.sub : ""}</div></div></div><div class="adh-saldo num" style="color:${a && a.saldo < 0 ? "var(--neg)" : "var(--ink)"}">${a ? fmt(a.saldo) : ""}</div></div>
+  <div class="card acct-detail-head"><div class="adh-l"><span class="acct-ic big">${ic(iconName, 22)}</span><div><div class="adh-name">${nome}</div><div class="acct-sub">${a ? a.sub : ""}</div></div></div>${headVal}</div>
+  ${cartHint}
   <div class="adh-stats">
     <div class="card adh-stat"><span>Entradas</span><b class="num" style="color:var(--pos)">${fmt(entradas)}</b></div>
     <div class="card adh-stat"><span>Saídas</span><b class="num" style="color:var(--neg)">${fmt(saidas)}</b></div>
-    <div class="card adh-stat"><span>Lançamentos</span><b class="num">${txs.length}</b></div>
+    <div class="card adh-stat"><span>Lançamentos</span><b class="num">${items.length}</b></div>
   </div>
   <div class="card table-card" style="padding:6px 18px"><div class="card-head" style="padding:12px 2px 4px"><h3>Lançamentos</h3></div><div class="mini-list">${body}</div></div>`;
 }
@@ -771,7 +800,7 @@ function viewContas() {
   const archived = accounts.filter((a) => a.arquivada);
   const archBlock = archived.length ? `
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:var(--subtle)">Arquivadas</span><p>Ocultas do dia a dia e fora do patrimônio. Reative quando quiser.</p></div></div>
-  <div class="archived-list">${archived.map((a) => `<div class="arch-row"><span class="acct-ic small">${ic(acctIconOf(a), 16)}</span><div class="arch-info"><div class="arch-name">${a.nome}</div><div class="acct-sub">${a.sub}</div></div><span class="num arch-saldo">${fmt(a.saldo)}</span><button class="mini-btn" data-acct-archive="${a.id}">${ic("archive", 13)} Desarquivar</button></div>`).join("")}</div>` : "";
+  <div class="archived-list">${archived.map((a) => `<div class="arch-row"><span class="acct-ic small">${ic(acctIconOf(a), 16)}</span><div class="arch-info"><div class="arch-name">${a.nome}</div><div class="acct-sub">${a.sub}</div></div><span class="num arch-saldo">${fmt(acctTotal(a))}</span><button class="mini-btn" data-acct-archive="${a.id}">${ic("archive", 13)} Desarquivar</button></div>`).join("")}</div>` : "";
   return `
   <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar o nome, reordenar ou arquivar.</p></div></div>
   <div class="acct-grid">${fin.map(acctCard).join("")}</div>
@@ -1440,7 +1469,6 @@ function applyModel(m) {
   if (Array.isArray(m.tx)) { state.tx = m.tx; sortTx(); }
   if (Array.isArray(m.assetMoves)) { assetMoves.length = 0; m.assetMoves.forEach((x) => assetMoves.push(x)); }
   if (Array.isArray(m.dashOrder) && m.dashOrder.length) state.dashOrder = m.dashOrder;
-  recomputeInvestBalances();
 }
 // as linhas voltam do banco na ordem de `updated_at` (empates = ordem física da tabela), então sem
 // ordenar aqui a aba Transações e o bloco "Últimas transações" mostravam lançamentos arbitrários —
@@ -1451,7 +1479,6 @@ function saveState() { if (window.Store && Store.isAuthed()) Store.saveSnapshot(
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
 
 function renderView() {
-  recomputeInvestBalances(); // saldo das carteiras = valor de mercado (cotação atual × qtd)
   document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   const meta = PAGE[state.tab];
   if (elTitle) elTitle.textContent = meta[0];
@@ -1728,7 +1755,7 @@ function saveAssetMove() {
     tipo: (state.pop && state.pop.tipo) === "venda" ? "venda" : "compra", qtd, preco,
   };
   assetMoves.push(move);
-  recomputeInvestBalances(); refreshSideNet(); closePop();
+  refreshSideNet(); closePop();
   scheduleSave(); renderView();
 }
 function delAssetMove(id) {
@@ -1736,14 +1763,14 @@ function delAssetMove(id) {
   if (i < 0) return;
   const contaId = assetMoves[i].contaId;
   assetMoves.splice(i, 1);
-  recomputeInvestBalances(); refreshSideNet();
+  refreshSideNet();
   if (state.pop && state.pop.kind === "assetMoves") { if (!assetMoves.some((m) => m.contaId === contaId)) closePop(); else renderPop(); }
   scheduleSave(); renderView();
 }
 function invRefreshQuotes() {
   const btn = document.querySelector("[data-inv-refresh]");
   if (btn) { btn.disabled = true; btn.textContent = "Atualizando…"; }
-  fetchQuotes().then((ok) => { recomputeInvestBalances(); refreshSideNet(); if (ok) scheduleSave(); renderView(); });
+  fetchQuotes().then((ok) => { refreshSideNet(); renderView(); });
 }
 function openCatForm(tipo, parent) { state.pop = { kind: "catForm", tipo, parent: parent || null }; renderPop(); }
 function saveCatForm() {
@@ -2238,7 +2265,7 @@ function wire() {
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "investimentos" && hasHoldings() && !quotesTs) fetchQuotes().then((ok) => { if (ok) { recomputeInvestBalances(); refreshSideNet(); renderView(); } }); return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "investimentos" && hasHoldings() && !quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     const hday = e.target.closest("[data-hist-day]");
     if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
@@ -2526,13 +2553,13 @@ async function boot() {
   }
   applyModel(model);
   ensureSeeded(); // self-heal: injeta categorias/contas padrão se o usuário ficou sem nenhuma
-  loadQuotesCache(); recomputeInvestBalances(); // valor das carteiras já sai certo no 1º render
+  loadQuotesCache(); // cotações em cache → valor de mercado já sai no 1º render
   refreshDataLabels();
   hideAuth(); // remove o "carregando", se estava
   if (!_wired) { wire(); _wired = true; }
   renderView(); renderModal(); renderPop();
   // cotações frescas em segundo plano (só se houver ativos lançados)
-  if (hasHoldings()) fetchQuotes().then((ok) => { if (ok) { recomputeInvestBalances(); refreshSideNet(); renderView(); } });
+  if (hasHoldings()) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } });
   // pull em segundo plano: se outro aparelho mudou, atualiza a tela
   Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); renderView(); } }).catch(() => {});
 }
