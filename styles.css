@@ -852,3 +852,5 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .am-tipo{display:flex;gap:6px;background:var(--card-2);padding:4px;border-radius:10px;margin-bottom:4px}
 .am-tab{flex:1;padding:8px;border:none;border-radius:7px;background:transparent;color:var(--sub);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
 .am-tab.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.md-bal{font-size:11.5px;color:var(--subtle);white-space:nowrap;margin-left:12px}
+.md-bal b{color:var(--ink);font-weight:700}

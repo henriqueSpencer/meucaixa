@@ -739,10 +739,18 @@ function viewAcctDetail(nome) {
   const groups = {};
   txs.forEach((t) => { const k = (t.iso || "0000-00").slice(0, 7); (groups[k] = groups[k] || []).push(t); });
   const keys = Object.keys(groups).sort((x, y) => y.localeCompare(x));
+  // saldo ao FIM de cada mês: reconstruído do saldo atual descontando o que veio depois.
+  // Como os meses vêm do mais novo p/ o mais antigo, `after` acumula os movimentos já exibidos
+  // (todos posteriores ao mês corrente) → saldoFim(mês) = saldo atual − movimentos posteriores.
+  const saldoAtual = numOr0(a && a.saldo);
+  let after = 0;
   const body = txs.length ? keys.map((k) => {
     const list = groups[k], net = list.reduce((s, t) => s + txValorConta(t, nome), 0);
     const lbl = k === "0000-00" ? "Sem data" : monthLabel(k + "-01");
-    return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span></div>${list.map((t) => acctTxRow(t, nome)).join("")}`;
+    const saldoFim = Math.round((saldoAtual - after) * 100) / 100;
+    after += net;
+    const balHTML = k === "0000-00" ? "" : `<span class="md-bal">saldo <b class="num">${fmt(saldoFim)}</b></span>`;
+    return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span>${balHTML}</div>${list.map((t) => acctTxRow(t, nome)).join("")}`;
   }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`;
   const iconName = acctIconOf(a);
   return `
