@@ -846,6 +846,7 @@ function viewConciliacao() {
         <div class="fld"><span class="fld-label">Arquivos${files.length ? ` (${files.length})` : ""}</span>${list}${drop}</div>
       </div>
       <button class="cta big" data-action="import" ${totalN > 0 ? "" : "disabled"}>${ic("sparkles", 16)} ${totalN > 0 ? `Importar ${totalN} lançamentos${files.length > 1 ? ` de ${files.length} arquivos` : ""}` : "Adicione um arquivo para importar"}</button>
+      <button class="recon-skip-file" data-action="recon-empty">${ic("arrow-right", 14)} Prosseguir sem arquivo — só conferir o saldo ou lançar à mão</button>
       <span class="import-formats">Mercado Pago · Nubank · Caixa · Itaú · Bradesco · Inter · e outros</span>
     </div>`;
   }
@@ -885,7 +886,13 @@ function viewConciliacao() {
   const puladas = state.recon.filter((r) => !r.match && r.pulado).length;
   const novosTot = state.recon.filter((r) => !r.match && !r.pulado).length;
   const pend = state.recon.filter((r) => r.status === "pendente").length;
-  const resumo = `<div class="recon-sum"><b>${nLidos}</b> ${nLidos === 1 ? "lançamento lido" : "lançamentos lidos"} · <b>${novosTot}</b> ${novosTot === 1 ? "novo" : "novos"} · <b>${jaExistem}</b> já ${jaExistem === 1 ? "existia" : "existiam"} no MeuCaixa${puladas ? ` · <b>${puladas}</b> ${puladas === 1 ? "parcela pulada" : "parcelas puladas"}` : ""}</div>`;
+  const nManuais = state.recon.filter((r) => r.manual).length;
+  // "sem arquivo": entrou pra conferir saldo / lançar à mão (nenhum extrato lido). Não faz sentido
+  // "0 lançamentos lidos" nem "0 de 0 conciliados" — mostra um texto próprio.
+  const semArquivo = nLidos === 0;
+  const resumo = semArquivo
+    ? `<div class="recon-sum">Confira o saldo no banco acima e adicione o que estiver faltando${nManuais ? ` · <b>${nManuais}</b> ${nManuais === 1 ? "lançamento manual" : "lançamentos manuais"}` : ""}.</div>`
+    : `<div class="recon-sum"><b>${nLidos}</b> ${nLidos === 1 ? "lançamento lido" : "lançamentos lidos"} · <b>${novosTot}</b> ${novosTot === 1 ? "novo" : "novos"} · <b>${jaExistem}</b> já ${jaExistem === 1 ? "existia" : "existiam"} no MeuCaixa${puladas ? ` · <b>${puladas}</b> ${puladas === 1 ? "parcela pulada" : "parcelas puladas"}` : ""}</div>`;
   // aviso de extrato já importado: diz quantos já existem e de quando são, e dá a saída explícita
   // (importar mesmo assim). O ✕ é só a proteção padrão — a decisão continua sendo do usuário.
   const dupsAbertos = state.recon.filter((r) => r.match && r.status === "ignorado" && !r.pulado).length;
@@ -901,7 +908,11 @@ function viewConciliacao() {
     </div></div>`;
   }
   const acceptAll = pend ? `<button class="ghost" data-recon-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
-  const bar = head + check + jaImportado + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">Reimportar</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
+  const progHead = state.recon.length === 0
+    ? `<strong>Conferência de saldo</strong><span>sem arquivo</span>`
+    : `<strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span>`;
+  const voltarLabel = semArquivo ? "Importar arquivo" : "Reimportar";
+  const bar = head + check + jaImportado + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head">${progHead}</div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">${voltarLabel}</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
   const list = state.recon.map((r) => {
     const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
     const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
@@ -1903,6 +1914,15 @@ const ACTIONS = {
     const all = reconAllParsed();
     if (!all.length) return; // sem arquivos lidos não há o que importar (botão fica desabilitado)
     state.recon = buildRecon(all, state.reconAccount);
+    state.imported = true; state.editing = null; renderView();
+  },
+  // prosseguir SEM arquivo: entra na conciliação com a lista vazia — pra conferir o saldo do banco
+  // (batimento) e/ou lançar à mão. Mesmo destino do `import`, só que sem extrato lido.
+  "recon-empty": () => {
+    state.reconDone = null; state.reconBank = "";
+    const sel = document.querySelector("[data-imp-acct]");
+    state.reconAccount = sel ? sel.value : (accounts.find((a) => !a.arquivada) || {}).nome;
+    state.recon = []; state.reconFiles = [];
     state.imported = true; state.editing = null; renderView();
   },
   "reimport": () => { state.imported = false; state.reconAccount = null; state.reconFiles = []; state.editing = null; state.reconBank = ""; renderView(); },

@@ -209,6 +209,12 @@ dado velho no `reconCommit` — o "push fantasma"), mas **só re-renderiza quand
 (`busy = state.modal || state.imported`). Ações do próprio usuário (aceitar/ignorar/editar) seguem
 re-renderizando normalmente — o guard é só no callback de stale.
 
+**Prosseguir sem arquivo** (`recon-empty`): na tela de importação, além do CTA de importar, há o link
+**"Prosseguir sem arquivo"** — entra na conciliação com `state.recon = []` (mesmo destino do `import`,
+sem extrato lido), pra usar o **batimento de saldo** e/ou **lançar à mão** (`data-recon-add`). Quando
+`nLidos === 0` (nenhum extrato lido), a barra troca "N lançamentos lidos"/"0 de 0 conciliados" por
+"Conferência de saldo · sem arquivo" + texto próprio, e o botão "Reimportar" vira "Importar arquivo".
+
 ## Mapa de arquivos
 `index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `store.js` (persistência+sync) ·
 `styles.css` · `vendor/supabase.js` (UMD vendorizado) · `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`
