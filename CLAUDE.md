@@ -199,6 +199,14 @@ lê de `state.reconBank`; zera no `import`/`reimport`/`reconCommit`. No commit, 
 batimento **pós-save** em `state.reconDone.bat` (saldo real da conta já com os lançamentos criados vs.
 banco) e o banner verde diz se bateu ou quanto ainda falta.
 
+**Lançar a diferença (plug)** (`reconPlug`, botão `.rc-plug` dentro de `[data-recon-diff]`): quando há
+diferença, aparece um botão que cria um **lançamento de ajuste do valor exato da diferença** como item
+**pendente** (aceitar/editar/ignorar, igual aos do extrato). `valor = diff` (positivo ⇒ **receita**,
+negativo ⇒ **despesa**), categoria default = a 1ª do tipo (editável antes de aceitar), `raw = "Ajuste de
+saldo (conciliação)"`, `manual:true, ajuste:true`. Como o item entra no projetado, a diferença **zera na
+hora** e o botão some (self-limiting — não dá pra criar dois). O botão vive dentro do bloco patchado por
+`refreshReconDiff`, mas o clique funciona por delegação (`data-recon-plug`).
+
 **Conciliação é estado transitório × sync entre abas** (bug real): a sessão de conciliação (`state.recon`,
 `state.imported`, `state.reconBank`, `state.editing`) vive só em `state`, fora do modelo salvo. O handler
 `onStale` (app.js `init`) dispara a cada gravação de **outra aba** (via `BroadcastChannel`) e a cada sync;

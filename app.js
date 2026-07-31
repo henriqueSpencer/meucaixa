@@ -813,7 +813,10 @@ function reconDiffHTML() {
   const tip = d.diff > 0
     ? `falta lançar <b>${fmtNum(d.diff)}</b> de entrada nesta conta — o banco tem mais do que o MeuCaixa prevê`
     : `falta lançar <b>${fmtNum(d.diff)}</b> de despesa nesta conta — o banco tem menos do que o MeuCaixa prevê`;
-  return `<div class="rc-diff"><span>Diferença</span><b class="num" style="color:${d.diff > 0 ? "var(--pos)" : "var(--neg)"}">${d.diff > 0 ? "+ " : "− "}${fmtNum(d.diff)}</b></div>${conta}<span class="rc-tip">${tip}</span>`;
+  // atalho: cria um lançamento de ajuste (plug) exatamente do valor da diferença, pra aceitar ou
+  // não. Positivo ⇒ receita; negativo ⇒ despesa. Some assim que a diferença zera (self-limiting).
+  const plug = `<button class="rc-plug" data-recon-plug>${ic("plus", 14)} Lançar a diferença de ${fmtNum(d.diff)} como ${d.diff > 0 ? "receita" : "despesa"}</button>`;
+  return `<div class="rc-diff"><span>Diferença</span><b class="num" style="color:${d.diff > 0 ? "var(--pos)" : "var(--neg)"}">${d.diff > 0 ? "+ " : "− "}${fmtNum(d.diff)}</b></div>${conta}<span class="rc-tip">${tip}</span>${plug}`;
 }
 // atualiza só o resultado do batimento, preservando o input (foco + cursor) durante a digitação
 function refreshReconDiff() {
@@ -1876,6 +1879,24 @@ function formToRecon() {
   const match = findReconMatch({ iso, valor: signed }, reconUsedIds());
   return { id, raw, valor: signed, iso, sug: { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount }, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true };
 }
+// cria o lançamento de ajuste (plug) do valor exato da diferença com o banco, como item pendente
+// (aceitar/editar/ignorar). Positivo ⇒ receita; negativo ⇒ despesa. Categoria default = a 1ª do tipo
+// (editável antes de aceitar). Some da UI assim que a diferença zera.
+function reconPlug() {
+  const d = reconDiff();
+  if (d.banco === null || d.diff === 0) return;
+  const tipo = d.diff > 0 ? "receita" : "despesa";
+  const list = tipo === "receita" ? catTree.receita : catTree.despesa;
+  const catObj = list[0] || { nome: "", subs: [] };
+  const item = {
+    id: "man" + (_manSeq++), raw: "Ajuste de saldo (conciliação)", valor: d.diff, iso: TODAY_ISO,
+    sug: { tipo, cat: catObj.nome, sub: (catObj.subs && catObj.subs[0]) || "", conta: state.reconAccount },
+    conf: 100, match: null, matchId: null, status: "pendente", manual: true, ajuste: true,
+  };
+  state.recon = [item, ...state.recon];
+  state.editing = null;
+  renderView();
+}
 function reconToTx(r) {
   const iso = r.iso || TODAY_ISO, tipo = r.sug.tipo;
   const base = { id: Date.now() + (_txSeq++), data: dataBR(iso), iso, desc: r.raw || TIPOS[tipo].label, tipo, status: "conciliado" };
@@ -2051,6 +2072,7 @@ function wire() {
     if (e.target.closest("[data-recon-commit]")) { reconCommit(); return; }
     if (e.target.closest("[data-recon-done-x]")) { state.reconDone = null; renderView(); return; }
     if (e.target.closest("[data-recon-add]")) { openReconAdd(); return; }
+    if (e.target.closest("[data-recon-plug]")) { reconPlug(); return; }
     const act = e.target.closest("[data-action]");
     if (act && ACTIONS[act.dataset.action]) { ACTIONS[act.dataset.action](); return; }
     // clique fora fecha o menu de conta aberto
