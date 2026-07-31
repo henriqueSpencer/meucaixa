@@ -2230,7 +2230,7 @@ function wire() {
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "investimentos" && hasHoldings() && !quotesTs) fetchQuotes().then((ok) => { if (ok) { recomputeInvestBalances(); refreshSideNet(); renderView(); } }); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     const hday = e.target.closest("[data-hist-day]");
     if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
