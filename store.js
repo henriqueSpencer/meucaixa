@@ -8,7 +8,7 @@
   const SB_KEY = "sb_publishable_Yw6ISMmrN_ovWPbfIEpt-w_hPauW78Y";
   const DB_NAME = "meucaixa";
   const DB_VER = 1;
-  const TABLES = ["accounts", "categories", "transactions", "prefs"];
+  const TABLES = ["accounts", "categories", "transactions", "prefs", "asset_moves"];
 
   // ---------------------------------------------------------------- adaptadores puros (testáveis)
   // ids determinísticos p/ categorias (o app é todo keyed por nome; renomear = id novo + id velho vira tombstone)
@@ -17,7 +17,7 @@
 
   // modelo em memória → linhas por tabela (só o que existe; deleções vêm do diff)
   function modelToRows(model) {
-    const rows = { accounts: [], categories: [], transactions: [], prefs: [] };
+    const rows = { accounts: [], categories: [], transactions: [], prefs: [], asset_moves: [] };
     (model.accounts || []).forEach((a, i) => {
       rows.accounts.push({
         id: String(a.id), nome: a.nome, sub: a.sub || null, tipo: a.tipo || null,
@@ -41,6 +41,14 @@
         id: String(t.id), tipo: t.tipo, iso: t.iso || null, descricao: t.desc || null, valor: num(t.valor),
         cat: t.cat || null, sub: t.sub || null, conta: t.conta || null,
         origem: t.origem || null, destino: t.destino || null, status: t.status || null, deleted: false,
+      });
+    });
+    // movimentos de ativos (compra/venda) — a posição/preço-médio é DERIVADA disto no app
+    (model.assetMoves || []).forEach((m) => {
+      rows.asset_moves.push({
+        id: String(m.id), conta_id: m.contaId || null, iso: m.iso || null,
+        ticker: m.ticker || null, nome: m.nome || null, classe: m.classe || null,
+        tipo: m.tipo || "compra", qtd: num(m.qtd), preco: num(m.preco), deleted: false,
       });
     });
     const prefs = model.prefs || {};
@@ -78,8 +86,13 @@
       else { o.cat = t.cat || ""; o.sub = t.sub || ""; o.conta = t.conta || ""; }
       return o;
     });
+    const assetMoves = live(rows.asset_moves).map((m) => ({
+      id: idFix(m.id), contaId: m.conta_id || "", iso: m.iso || "",
+      ticker: m.ticker || "", nome: m.nome || "", classe: m.classe || "",
+      tipo: m.tipo || "compra", qtd: num(m.qtd), preco: num(m.preco),
+    }));
     const prefs = {}; live(rows.prefs).forEach((p) => { prefs[p.id] = p.value; });
-    const model = { accounts, catTree, tx, prefs };
+    const model = { accounts, catTree, tx, prefs, assetMoves };
     if (prefs.dashOrder) model.dashOrder = prefs.dashOrder;
     return model;
   }
@@ -300,7 +313,7 @@
     syncing = true;
     try {
       const model = await loadSnapshot();
-      const localRows = model ? modelToRows(model) : { accounts: [], categories: [], transactions: [], prefs: [] };
+      const localRows = model ? modelToRows(model) : { accounts: [], categories: [], transactions: [], prefs: [], asset_moves: [] };
       const base = (await kvGet("lastSynced")) || {};
 
       // 1) PULL incremental (paginado): descobre se o servidor mudou desde o cursor.

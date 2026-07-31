@@ -100,10 +100,77 @@ const initialTx = OF ? OF.tx : [
 ];
 
 accounts.forEach((a, i) => { if (a.arquivada === undefined) a.arquivada = false; a.ordem = i; });
+// movimentos de ativos (compra/venda) das contas de investimento — a posição/preço-médio é derivada
+const assetMoves = [];
 const netWorth = () => accounts.filter((a) => !a.arquivada).reduce((s, a) => s + a.saldo, 0);
 const patrimonioLiquido = accounts.reduce((s, a) => s + a.saldo, 0);
 const receitasMes = OF ? OF.receitasMes : 15800;
 const despesasMes = OF ? OF.despesasMes : 8900;
+
+/* ---------- investimentos: cotações (brapi) + posições derivadas dos movimentos ---------- */
+// Preço da B3 direto do navegador: brapi.dev/api/quote/list responde com CORS liberado e sem token
+// (1 request devolve {stock, close} de ~toda a B3 — ações, ETFs e FIIs). Cache em localStorage p/
+// funcionar offline; nunca inventa preço (ticker ausente → posição fica sem cotação = usa o custo).
+const QUOTES = {}; // { TICKER: preço }
+let quotesTs = 0;  // epoch ms da última atualização bem-sucedida
+function loadQuotesCache() {
+  try { const j = JSON.parse(localStorage.getItem("mc_quotes") || "null"); if (j && j.map) { Object.assign(QUOTES, j.map); quotesTs = j.ts || 0; } } catch (e) {}
+}
+async function fetchQuotes() {
+  try {
+    const r = await fetch("https://brapi.dev/api/quote/list?limit=10000");
+    if (!r.ok) return false;
+    const j = await r.json();
+    (j.stocks || []).forEach((s) => { if (s && s.stock && s.close != null) QUOTES[String(s.stock).toUpperCase()] = Math.round(s.close * 100) / 100; });
+    quotesTs = Date.now();
+    try { localStorage.setItem("mc_quotes", JSON.stringify({ ts: quotesTs, map: QUOTES })); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
+}
+const assetPrice = (ticker) => { const p = QUOTES[String(ticker || "").toUpperCase()]; return typeof p === "number" && isFinite(p) ? p : null; };
+const CLASSE_LABEL = { acao: "Ação", etf: "ETF", fii: "FII", rf: "Renda fixa", caixa: "Caixa", outro: "Outro" };
+const hasHoldings = () => assetMoves.length > 0;
+const isCarteira = (a) => a && a.tipo === "invest" && assetMoves.some((m) => m.contaId === a.id);
+
+// Posição atual por ticker numa conta, derivada dos movimentos (custo médio ponderado).
+// compra: soma qtd e custo. venda: reduz qtd pelo PM atual (custo médio), realiza ganho.
+function computePositions(contaId) {
+  const moves = assetMoves.filter((m) => m.contaId === contaId)
+    .slice().sort((a, b) => String(a.iso || "").localeCompare(String(b.iso || "")));
+  const pos = {};
+  moves.forEach((m) => {
+    const k = String(m.ticker || "?").toUpperCase();
+    const o = pos[k] || (pos[k] = { ticker: k, nome: m.nome || "", classe: m.classe || "", qtd: 0, custo: 0, realizado: 0 });
+    if (m.nome) o.nome = m.nome;
+    if (m.classe) o.classe = m.classe;
+    const q = numOr0(m.qtd), pr = numOr0(m.preco);
+    if (m.tipo === "venda") {
+      const pm = o.qtd > 0 ? o.custo / o.qtd : 0;
+      const qv = Math.min(q, o.qtd); // não vende mais do que tem
+      o.custo -= pm * qv; o.qtd -= qv; o.realizado += (pr - pm) * qv;
+    } else {
+      o.qtd += q; o.custo += pr * q;
+    }
+  });
+  return Object.values(pos).map((o) => {
+    const pm = o.qtd > 0 ? o.custo / o.qtd : 0;
+    const price = assetPrice(o.ticker);
+    const cot = price != null ? price : pm; // sem cotação → vale o custo (ganho 0)
+    const valor = o.qtd * cot;
+    const ganho = valor - o.custo;
+    return Object.assign({}, o, { pm, cotacao: price, valor, ganho, ganhoPct: o.custo > 0 ? (ganho / o.custo) * 100 : 0, semCotacao: price == null });
+  }).filter((o) => Math.abs(o.qtd) > 1e-9)
+    .sort((a, b) => b.valor - a.valor);
+}
+// saldo das contas de investimento com ativos = valor de mercado da carteira (deriva do holdings,
+// substitui o lançamento manual de valorização). Contas invest SEM ativos mantêm o saldo manual.
+function recomputeInvestBalances() {
+  accounts.forEach((a) => {
+    if (a.tipo !== "invest" || !assetMoves.some((m) => m.contaId === a.id)) return;
+    const total = computePositions(a.id).reduce((s, p) => s + p.valor, 0);
+    a.saldo = Math.round(total * 100) / 100;
+  });
+}
 
 /* helpers de conta / drill */
 const acctById = (id) => accounts.find((a) => a.id === id);
@@ -152,6 +219,7 @@ const ACCT_ICON = { banco: "landmark", cartao: "credit-card", dinheiro: "banknot
 const PAGE = {
   dashboard: ["Visão geral", "Como está seu dinheiro em Julho de 2026"],
   contas: ["Contas", "Saldos e alocações de patrimônio"],
+  investimentos: ["Investimentos", "Ativos das suas carteiras — ações, ETFs e FIIs, marcados a mercado"],
   transacoes: ["Transações", "Receitas, despesas, transferências e reembolsos"],
   conciliacao: ["Conciliação", "Importe o extrato e confirme as sugestões"],
   categorias: ["Categorias", "Estrutura de receitas e despesas"],
@@ -704,6 +772,76 @@ function viewContas() {
   ${archBlock}`;
 }
 
+/* ---------- Investimentos: carteiras de ativos (marcação a mercado) ---------- */
+function invQuoteLabel() {
+  if (!quotesTs) return "cotações ainda não atualizadas";
+  const d = new Date(quotesTs), hoje = d.toISOString().slice(0, 10) === TODAY_ISO;
+  const hh = String(d.getHours()).padStart(2, "0"), mm = String(d.getMinutes()).padStart(2, "0");
+  return `cotações de ${hoje ? "hoje" : dataBR(d.toISOString().slice(0, 10))} às ${hh}:${mm}`;
+}
+function invGanhoHTML(g, pct, big) {
+  const cor = g >= 0 ? "var(--pos)" : "var(--neg)", sig = g >= 0 ? "+" : "−";
+  const p = pct != null && isFinite(pct) ? ` <span class="inv-pct">${g >= 0 ? "+" : ""}${pct.toFixed(1)}%</span>` : "";
+  return `<span class="num${big ? " inv-big" : ""}" style="color:${cor};font-weight:600">${sig} ${fmtNum(Math.abs(g))}${p}</span>`;
+}
+function invPosRow(p) {
+  const cot = p.semCotacao ? `<span class="inv-nocot" title="Sem cotação na fonte — usando o custo">—</span>` : fmtNum(p.cotacao);
+  const qtd = (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  return `<tr>
+    <td><div class="inv-ativo"><span class="inv-tkr">${_esc(p.ticker)}</span>${p.nome ? `<span class="inv-nome">${_esc(p.nome)}</span>` : ""}</div>${p.classe ? `<span class="inv-classe">${CLASSE_LABEL[p.classe] || p.classe}</span>` : ""}</td>
+    <td class="num">${qtd}</td>
+    <td class="num">${fmtNum(p.pm)}</td>
+    <td class="num">${cot}</td>
+    <td class="num">${fmtNum(p.valor)}</td>
+    <td class="num" style="text-align:right">${invGanhoHTML(p.ganho, p.ganhoPct)}</td>
+  </tr>`;
+}
+function invCarteiraCard(a) {
+  const pos = computePositions(a.id);
+  const custo = pos.reduce((s, p) => s + p.custo, 0);
+  const valor = pos.reduce((s, p) => s + p.valor, 0);
+  const ganho = valor - custo;
+  const pct = custo > 0 ? (ganho / custo) * 100 : 0;
+  const table = pos.length ? `
+    <div class="inv-tbl-wrap"><table class="inv-tbl">
+      <thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num">PM</th><th class="num">Cotação</th><th class="num">Valor</th><th class="num" style="text-align:right">Ganho</th></tr></thead>
+      <tbody>${pos.map(invPosRow).join("")}</tbody>
+    </table></div>` : `<div class="empty-mini">Nenhum ativo lançado nesta carteira ainda.</div>`;
+  return `<div class="card inv-cart">
+    <div class="inv-cart-head">
+      <div><span class="acct-ic">${ic(acctIconOf(a), 18)}</span></div>
+      <div class="inv-cart-id"><div class="acct-name">${_esc(a.nome)}</div><div class="acct-sub">${pos.length} ${pos.length === 1 ? "ativo" : "ativos"} · custo ${fmt(custo)}</div></div>
+      <div class="inv-cart-val"><div class="num inv-big">${fmt(valor)}</div>${pos.length ? invGanhoHTML(ganho, pct) : ""}</div>
+    </div>
+    ${table}
+    <div class="inv-cart-actions">
+      <button class="mini-btn primary" data-inv-add="${a.id}">${ic("plus", 14)} Lançar ativo</button>
+      ${pos.length ? `<button class="mini-btn" data-inv-moves="${a.id}">${ic("list", 14)} Lançamentos</button>` : ""}
+    </div>
+  </div>`;
+}
+function viewInvestimentos() {
+  const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
+  if (!carteiras.length) {
+    return `<div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Carteiras</span><p>Você ainda não tem nenhuma conta do tipo <b>Investimento</b>. Crie uma na aba Contas (ex.: BTG, corretora) e volte aqui pra lançar os ativos dentro dela.</p></div></div>
+    <button class="mini-btn primary" data-tab="contas">${ic("arrow-right", 14)} Ir para Contas</button>`;
+  }
+  let custo = 0, valor = 0;
+  carteiras.forEach((a) => computePositions(a.id).forEach((p) => { custo += p.custo; valor += p.valor; }));
+  const ganho = valor - custo, pct = custo > 0 ? (ganho / custo) * 100 : 0;
+  const resumo = `<div class="inv-summary">
+    <div class="card inv-kpi"><span>Valor de mercado</span><b class="num">${fmt(valor)}</b></div>
+    <div class="card inv-kpi"><span>Custo investido</span><b class="num">${fmt(custo)}</b></div>
+    <div class="card inv-kpi"><span>Rentabilidade</span><b>${invGanhoHTML(ganho, pct)}</b></div>
+  </div>`;
+  return `
+  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Carteiras</span><p>Cada compra/venda é um lançamento — o preço médio é calculado pelo sistema. O saldo da conta segue a cotação (não precisa mais lançar valorização à mão).</p></div>
+    <div class="inv-quote"><span class="inv-quote-lbl">${invQuoteLabel()}</span><button class="mini-btn" data-inv-refresh>${ic("undo", 13)} Atualizar cotações</button></div>
+  </div>
+  ${resumo}
+  <div class="inv-carts">${carteiras.map(invCarteiraCard).join("")}</div>`;
+}
+
 function viewTransacoes() {
   const chips = ["todas", "receita", "despesa", "transferencia", "reembolso"];
   const CAP = 300;
@@ -1144,7 +1282,7 @@ function exportBackup() {
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const VIEWS = { dashboard: viewDashboard, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
+const VIEWS = { dashboard: viewDashboard, contas: viewContas, investimentos: viewInvestimentos, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
 
 /* ---------- drill-down do gráfico Receitas × Despesas ---------- */
 function renderDrill() {
@@ -1284,6 +1422,7 @@ function currentModel() {
     accounts: accounts.map((a) => Object.assign({}, a)),
     catTree: { receita: catTree.receita.map(cloneCat), despesa: catTree.despesa.map(cloneCat) },
     tx: state.tx.slice(), dashOrder: state.dashOrder.slice(), prefs: {},
+    assetMoves: assetMoves.map((m) => Object.assign({}, m)),
   };
 }
 function applyModel(m) {
@@ -1291,7 +1430,9 @@ function applyModel(m) {
   if (Array.isArray(m.accounts)) { accounts.length = 0; m.accounts.forEach((a) => accounts.push(a)); }
   if (m.catTree) { ["receita", "despesa"].forEach((k) => { if (Array.isArray(m.catTree[k])) { catTree[k].length = 0; m.catTree[k].forEach((c) => catTree[k].push(c)); } }); }
   if (Array.isArray(m.tx)) { state.tx = m.tx; sortTx(); }
+  if (Array.isArray(m.assetMoves)) { assetMoves.length = 0; m.assetMoves.forEach((x) => assetMoves.push(x)); }
   if (Array.isArray(m.dashOrder) && m.dashOrder.length) state.dashOrder = m.dashOrder;
+  recomputeInvestBalances();
 }
 // as linhas voltam do banco na ordem de `updated_at` (empates = ordem física da tabela), então sem
 // ordenar aqui a aba Transações e o bloco "Últimas transações" mostravam lançamentos arbitrários —
@@ -1302,6 +1443,7 @@ function saveState() { if (window.Store && Store.isAuthed()) Store.saveSnapshot(
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
 
 function renderView() {
+  recomputeInvestBalances(); // saldo das carteiras = valor de mercado (cotação atual × qtd)
   document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   const meta = PAGE[state.tab];
   if (elTitle) elTitle.textContent = meta[0];
@@ -1513,6 +1655,31 @@ function renderPop() {
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${attr(p.curName != null ? p.curName : (a ? a.nome : ""))}" autocomplete="off"></label>
       <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ae-icon", p.editIcon)}</div>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-acct-edit-save="${p.id}">Salvar</button>`;
+  } else if (p.kind === "assetMove") {
+    const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
+    const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === p.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
+    const classeOpts = Object.keys(CLASSE_LABEL).map((k) => `<option value="${k}"${k === (p.classe || "acao") ? " selected" : ""}>${CLASSE_LABEL[k]}</option>`).join("");
+    title = "Lançar ativo";
+    body = `<div class="am-tipo">
+        <button type="button" class="am-tab ${(p.tipo || "compra") === "compra" ? "on" : ""}" data-am-tipo="compra">Compra</button>
+        <button type="button" class="am-tab ${p.tipo === "venda" ? "on" : ""}" data-am-tipo="venda">Venda</button>
+      </div>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Carteira</span><select data-am="conta">${contaOpts}</select></label><label class="fld"><span class="fld-label">Data</span><input type="date" data-am="data" value="${attr(p.data || TODAY_ISO)}"></label></div>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Ticker</span><input data-am="ticker" placeholder="Ex.: HGLG11" autocomplete="off" style="text-transform:uppercase" value="${attr(p.ticker || "")}"></label><label class="fld"><span class="fld-label">Classe</span><select data-am="classe">${classeOpts}</select></label></div>
+      <label class="fld"><span class="fld-label">Nome (opcional)</span><input data-am="nome" placeholder="Ex.: CSHG Logística" autocomplete="off" value="${attr(p.nome || "")}"></label>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Quantidade</span><input data-am="qtd" inputmode="decimal" placeholder="0" autocomplete="off" value="${attr(p.qtd || "")}"></label><label class="fld"><span class="fld-label">Preço unitário</span><input data-am="preco" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.preco || "")}"></label></div>
+      <p class="pop-hint">O preço médio é calculado pelo sistema a partir dos seus lançamentos.</p>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-inv-save>Salvar lançamento</button>`;
+  } else if (p.kind === "assetMoves") {
+    const a = acctById(p.contaId);
+    title = a ? a.nome : "Lançamentos";
+    const moves = assetMoves.filter((m) => m.contaId === p.contaId).slice().sort((x, y) => String(y.iso || "").localeCompare(String(x.iso || "")));
+    body = `<div class="pop-cat-list">${moves.map((m) => {
+      const venda = m.tipo === "venda", cor = venda ? "var(--neg)" : "var(--pos)";
+      const total = numOr0(m.qtd) * numOr0(m.preco);
+      return `<div class="mini-row"><div class="mini-l"><div><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)}</div></div></div><div class="inv-move-r"><span class="num" style="color:${cor};font-weight:600">${fmtNum(total)}</span><button class="pop-danger sm" data-inv-del="${attr(m.id)}" title="Excluir">${ic("archive", 14)}</button></div></div>`;
+    }).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
+    foot = `<button class="mini-btn primary" data-inv-add="${attr(p.contaId)}">${ic("plus", 14)} Novo lançamento</button>`;
   }
   el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
   const first = el.querySelector("input"); if (first) first.focus();
@@ -1530,6 +1697,45 @@ function saveAcctForm() {
   const o = { id: "u" + Date.now(), nome, sub, tipo, saldo, grupo, arquivada: false };
   if (grupo === "pat") { o.alocado = saldo; o.custo = 0; }
   accounts.push(o); reindexAccounts(); refreshSideNet(); closePop(); renderView();
+}
+/* ---------- investimentos: ações ---------- */
+function invDefaultConta() { const c = accounts.filter((a) => !a.arquivada && a.tipo === "invest"); return c[0] ? c[0].id : null; }
+function openAssetMove(contaId) { state.pop = { kind: "assetMove", contaId: contaId || invDefaultConta(), tipo: "compra", data: TODAY_ISO }; renderPop(); }
+function openAssetMoves(contaId) { state.pop = { kind: "assetMoves", contaId }; renderPop(); }
+function invSetTipo(tipo) {
+  if (!state.pop || state.pop.kind !== "assetMove") return;
+  // preserva o que já foi digitado ao trocar compra⇄venda
+  const g = (s) => { const el = document.querySelector(`[data-am="${s}"]`); return el ? el.value : ""; };
+  Object.assign(state.pop, { tipo, conta: g("conta") || state.pop.contaId, data: g("data"), ticker: g("ticker"), nome: g("nome"), classe: g("classe"), qtd: g("qtd"), preco: g("preco"), contaId: g("conta") || state.pop.contaId });
+  renderPop();
+}
+function saveAssetMove() {
+  const g = (s) => { const el = document.querySelector(`[data-am="${s}"]`); return el ? el.value : ""; };
+  const contaId = g("conta"), ticker = g("ticker").trim().toUpperCase();
+  const qtd = parseValor(g("qtd")), preco = parseValor(g("preco"));
+  if (!contaId || !ticker || qtd <= 0 || preco <= 0) { const t = document.querySelector('[data-am="ticker"]'); if (t && !ticker) t.focus(); return; }
+  const move = {
+    id: "am" + Date.now(), contaId, iso: g("data") || TODAY_ISO,
+    ticker, nome: g("nome").trim(), classe: g("classe") || "acao",
+    tipo: (state.pop && state.pop.tipo) === "venda" ? "venda" : "compra", qtd, preco,
+  };
+  assetMoves.push(move);
+  recomputeInvestBalances(); refreshSideNet(); closePop();
+  scheduleSave(); renderView();
+}
+function delAssetMove(id) {
+  const i = assetMoves.findIndex((m) => String(m.id) === String(id));
+  if (i < 0) return;
+  const contaId = assetMoves[i].contaId;
+  assetMoves.splice(i, 1);
+  recomputeInvestBalances(); refreshSideNet();
+  if (state.pop && state.pop.kind === "assetMoves") { if (!assetMoves.some((m) => m.contaId === contaId)) closePop(); else renderPop(); }
+  scheduleSave(); renderView();
+}
+function invRefreshQuotes() {
+  const btn = document.querySelector("[data-inv-refresh]");
+  if (btn) { btn.disabled = true; btn.textContent = "Atualizando…"; }
+  fetchQuotes().then((ok) => { recomputeInvestBalances(); refreshSideNet(); if (ok) scheduleSave(); renderView(); });
 }
 function openCatForm(tipo, parent) { state.pop = { kind: "catForm", tipo, parent: parent || null }; renderPop(); }
 function saveCatForm() {
@@ -1963,6 +2169,17 @@ function wire() {
     if (txe) { openEditTx(txe.dataset.txEdit); return; }
     if (e.target.closest("[data-add-acct]")) { openAcctForm(); return; }
     if (e.target.closest("[data-acct-form-save]")) { saveAcctForm(); return; }
+    // investimentos
+    if (e.target.closest("[data-inv-refresh]")) { invRefreshQuotes(); return; }
+    const iAdd = e.target.closest("[data-inv-add]");
+    if (iAdd) { openAssetMove(iAdd.dataset.invAdd); return; }
+    const iMoves = e.target.closest("[data-inv-moves]");
+    if (iMoves) { openAssetMoves(iMoves.dataset.invMoves); return; }
+    const iTipo = e.target.closest("[data-am-tipo]");
+    if (iTipo) { invSetTipo(iTipo.dataset.amTipo); return; }
+    if (e.target.closest("[data-inv-save]")) { saveAssetMove(); return; }
+    const iDel = e.target.closest("[data-inv-del]");
+    if (iDel) { delAssetMove(iDel.dataset.invDel); return; }
     const adc = e.target.closest("[data-add-cat]");
     if (adc) { openCatForm(adc.dataset.addCat); return; }
     const ads = e.target.closest("[data-add-sub]");
@@ -2301,10 +2518,13 @@ async function boot() {
   }
   applyModel(model);
   ensureSeeded(); // self-heal: injeta categorias/contas padrão se o usuário ficou sem nenhuma
+  loadQuotesCache(); recomputeInvestBalances(); // valor das carteiras já sai certo no 1º render
   refreshDataLabels();
   hideAuth(); // remove o "carregando", se estava
   if (!_wired) { wire(); _wired = true; }
   renderView(); renderModal(); renderPop();
+  // cotações frescas em segundo plano (só se houver ativos lançados)
+  if (hasHoldings()) fetchQuotes().then((ok) => { if (ok) { recomputeInvestBalances(); refreshSideNet(); renderView(); } });
   // pull em segundo plano: se outro aparelho mudou, atualiza a tela
   Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); renderView(); } }).catch(() => {});
 }
