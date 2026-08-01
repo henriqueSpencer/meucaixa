@@ -223,6 +223,7 @@ const TIPOS = {
 const ACCT_ICON = { banco: "landmark", cartao: "credit-card", dinheiro: "banknote", invest: "invest", patrimonio: "car" };
 const PAGE = {
   dashboard: ["Visão geral", "Como está seu dinheiro em Julho de 2026"],
+  patrimonial: ["Visão patrimonial", "Cockpit · consolidado em BRL"],
   contas: ["Contas", "Saldos e alocações de patrimônio"],
   transacoes: ["Transações", "Receitas, despesas, transferências e reembolsos"],
   conciliacao: ["Conciliação", "Importe o extrato e confirme as sugestões"],
@@ -683,6 +684,138 @@ function statementBand() {
       </div>
     </div>
   </div>`;
+}
+
+/* ================= Visão patrimonial (cockpit) ================= */
+const PAT_CLASSES = [
+  { key: "acao", label: "Ações", cor: "#3E7CB1" },
+  { key: "etf", label: "ETFs", cor: "#5E9E7E" },
+  { key: "fii", label: "FIIs", cor: "#B0863A" },
+  { key: "rf", label: "Renda Fixa", cor: "#8A7A5C" },
+  { key: "caixa", label: "Caixa", cor: "#7C89A0" },
+  { key: "imovel", label: "Imóveis/Bens", cor: "#A65B4E" },
+  { key: "outro", label: "Outros", cor: "#9A9B8C" },
+];
+const patMetas = () => (state.prefs && state.prefs.patMetas) || {};
+const patSnaps = () => ((state.prefs && state.prefs.patSnaps) || []).slice().sort((a, b) => String(a.ym).localeCompare(String(b.ym)));
+const patPrem = () => (state.prefs && state.prefs.patPremissas) || {};
+// alocação por classe + bruto/passivos/líquido, tudo dos dados reais das contas/ativos
+function patAlloc() {
+  const val = { acao: 0, etf: 0, fii: 0, rf: 0, caixa: 0, imovel: 0, outro: 0 };
+  let passivos = 0;
+  accounts.filter((a) => !a.arquivada).forEach((a) => {
+    const t = acctTotal(a);
+    if (a.tipo === "patrimonio") { t >= 0 ? (val.imovel += t) : (passivos += -t); return; }
+    if (a.tipo === "invest") {
+      if (temAtivos(a)) {
+        const cx = carteiraCaixa(a); cx >= 0 ? (val.caixa += cx) : (passivos += -cx);
+        computePositions(a.id).forEach((p) => { const k = val[p.classe] != null ? p.classe : "outro"; val[k] += p.valor; });
+      } else { t >= 0 ? (val.rf += t) : (passivos += -t); } // investimento sem ativos detalhados → renda fixa
+      return;
+    }
+    t >= 0 ? (val.caixa += t) : (passivos += -t); // banco/dinheiro → caixa; cartão negativo → passivo
+  });
+  const bruto = Object.values(val).reduce((s, x) => s + x, 0);
+  return { val, bruto, passivos, liquido: bruto - passivos };
+}
+// posições consolidadas (todas as carteiras), com ganho e a conta de origem
+function patPositions() {
+  const out = [];
+  accounts.filter((a) => !a.arquivada && a.tipo === "invest").forEach((a) => computePositions(a.id).forEach((p) => out.push(Object.assign({ conta: a.nome }, p))));
+  return out.sort((x, y) => y.valor - x.valor);
+}
+// custo/valor/ganho agregados dos ativos (rentabilidade não realizada)
+function patRentab() {
+  const pos = patPositions();
+  const custo = pos.reduce((s, p) => s + p.custo, 0), valor = pos.reduce((s, p) => s + p.valor, 0);
+  return { custo, valor, ganho: valor - custo, pct: custo > 0 ? ((valor - custo) / custo) * 100 : 0 };
+}
+// proventos = receitas cuja categoria/sub casa com dividendo/provento/rendimento/JCP (dinheiro real)
+function patProventos() {
+  const re = /prov|divid|rendiment|jcp|juros s/i, per = {};
+  state.tx.forEach((t) => { if (t.tipo !== "receita") return; if (!re.test(`${t.cat || ""} ${t.sub || ""}`)) return; const k = (t.iso || "").slice(0, 7); if (k) per[k] = (per[k] || 0) + Math.abs(t.valor); });
+  const [Y, M] = TODAY_ISO.slice(0, 7).split("-").map(Number), months = [];
+  for (let i = 11; i >= 0; i--) { let mm = M - 1 - i, yy = Y; while (mm < 0) { mm += 12; yy--; } months.push(`${yy}-${String(mm + 1).padStart(2, "0")}`); }
+  const serie = months.map((k) => ({ ym: k, mes: mesAbbrev(k), valor: Math.round((per[k] || 0) * 100) / 100 }));
+  const total12 = serie.reduce((s, x) => s + x.valor, 0), media = total12 / 12;
+  return { serie, total12, media, proj: media * 12 };
+}
+// snapshots p/ a evolução: os registrados + o ponto de hoje (calculado) se ainda não registrado
+function patEvolucao() {
+  const snaps = patSnaps(), ym = TODAY_ISO.slice(0, 7);
+  const arr = snaps.map((x) => ({ ym: x.ym, valor: numOr0(x.liquido) }));
+  if (!arr.some((x) => x.ym === ym)) arr.push({ ym, valor: patAlloc().liquido });
+  return arr.map((x) => ({ ym: x.ym, mes: mesAbbrev(x.ym), valor: Math.round(x.valor * 100) / 100 }));
+}
+function registrarMes() {
+  const ym = TODAY_ISO.slice(0, 7), a = patAlloc();
+  const snaps = ((state.prefs.patSnaps || []).filter((x) => x.ym !== ym));
+  snaps.push({ ym, liquido: a.liquido, bruto: a.bruto, passivos: a.passivos });
+  state.prefs.patSnaps = snaps.sort((x, y) => String(x.ym).localeCompare(String(y.ym)));
+  scheduleSave(); renderView();
+}
+function pctDeltaMes() {
+  const snaps = patSnaps(), ym = TODAY_ISO.slice(0, 7), atual = patAlloc().liquido;
+  const prev = snaps.filter((x) => x.ym < ym).pop();
+  if (!prev || !numOr0(prev.liquido)) return null;
+  return ((atual - numOr0(prev.liquido)) / numOr0(prev.liquido)) * 100;
+}
+const patDelta = (g) => { const cor = g >= 0 ? "var(--pos)" : "var(--neg)"; return `<span style="color:${cor};font-weight:600">${g >= 0 ? "+" : ""}${g.toFixed(1)}%</span>`; };
+function viewPatrimonial() {
+  const { val, bruto, passivos, liquido } = patAlloc();
+  const rent = patRentab(), prov = patProventos(), prem = patPrem();
+  const dMes = pctDeltaMes();
+  const metas = patMetas();
+  // hero
+  const hero = `<div class="card pat-hero">
+    <div class="pat-hero-l"><span class="pat-eyebrow">Patrimônio líquido</span><div class="pat-big num">${fmt(liquido)}</div>
+      <div class="pat-hero-sub">${dMes != null ? `${patDelta(dMes)} no mês` : `<span class="pat-muted">registre um mês pra ver a variação</span>`}${prem.ipca ? ` · <span class="pat-muted">real ${patDelta(dMes != null ? dMes - numOr0(prem.ipca) / 12 : 0)} vs IPCA</span>` : ""}</div>
+    </div>
+    <button class="mini-btn primary" data-pat-reg>${ic("plus", 14)} Registrar mês</button>
+  </div>`;
+  // kpis
+  const kpis = `<div class="pat-kpis">
+    <div class="card pat-kpi"><span>Patrimônio bruto</span><b class="num">${fmt(bruto)}</b></div>
+    <div class="card pat-kpi"><span>Passivos</span><b class="num" style="color:var(--neg)">${fmt(passivos)}</b></div>
+    <div class="card pat-kpi"><span>Ganho acumulado</span><b class="num" style="color:${rent.ganho >= 0 ? "var(--pos)" : "var(--neg)"}">${rent.ganho >= 0 ? "+" : "−"} ${fmtNum(Math.abs(rent.ganho))}</b></div>
+    <div class="card pat-kpi"><span>Rentabilidade (ativos)</span><b>${patDelta(rent.pct)}</b></div>
+  </div>`;
+  // alocação
+  const allocRows = PAT_CLASSES.filter((c) => val[c.key] > 0 || numOr0(metas[c.key]) > 0).map((c) => {
+    const v = val[c.key], atual = bruto > 0 ? (v / bruto) * 100 : 0, meta = numOr0(metas[c.key]);
+    const d = atual - meta;
+    return `<div class="pat-alloc-row">
+      <div class="pat-alloc-top"><span class="pat-dot" style="background:${c.cor}"></span><span class="pat-alloc-name">${c.label}</span><span class="pat-alloc-val num">${fmt(v)}</span></div>
+      <div class="pat-bar"><div class="pat-bar-fill" style="width:${Math.min(100, atual).toFixed(1)}%;background:${c.cor}"></div>${meta > 0 ? `<div class="pat-bar-meta" style="left:${Math.min(100, meta).toFixed(1)}%"></div>` : ""}</div>
+      <div class="pat-alloc-pct"><b>${atual.toFixed(1)}%</b>${meta > 0 ? ` <span class="pat-muted">(${d >= 0 ? "+" : ""}${d.toFixed(1)}% vs meta ${meta.toFixed(0)}%)</span>` : ""}</div>
+    </div>`;
+  }).join("");
+  const alloc = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Alocação</h3><span class="card-sub">atual vs. meta · bruto ${fmt(bruto)}</span></div><button class="mini-btn" data-pat-metas>${ic("pencil", 13)} Editar metas</button></div>${allocRows || `<div class="empty-mini">Sem ativos ainda.</div>`}<p class="pat-foot">Traço = meta. Renda Fixa inclui contas de investimento sem ativos detalhados; Caixa = contas correntes + caixa das carteiras; Imóveis/Bens = contas de patrimônio.</p></div>`;
+  // evolução
+  const ev = patEvolucao();
+  const evolucao = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Evolução patrimonial</h3><span class="card-sub">patrimônio líquido · ${ev.length} ${ev.length === 1 ? "ponto" : "pontos"}</span></div></div>${ev.length >= 2 ? `<div class="pat-chart">${areaChartSVG(ev)}</div>` : `<div class="empty-mini">Clique em “Registrar mês” ao longo do tempo pra montar a curva (hoje: ${fmt(liquido)}).</div>`}</div>`;
+  // proventos
+  const provMax = Math.max(1, ...prov.serie.map((x) => x.valor));
+  const provBars = prov.serie.map((x) => `<div class="pat-pbar" title="${x.mes}: ${fmt(x.valor)}"><div class="pat-pbar-fill" style="height:${(x.valor / provMax * 100).toFixed(1)}%"></div><span>${x.mes.slice(0, 3)}</span></div>`).join("");
+  const dy = bruto > 0 ? (prov.proj / bruto) * 100 : 0;
+  const proventos = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Proventos recebidos</h3><span class="card-sub">renda passiva · 12 meses (de receitas marcadas como dividendo/provento)</span></div></div>
+    <div class="pat-prov-kpis"><div><span>Média mensal</span><b class="num">${fmt(prov.media)}</b></div><div><span>Projeção 12m</span><b class="num">${fmt(prov.proj)}</b></div><div><span>DY da carteira</span><b>${patDelta(dy)}</b></div></div>
+    ${prov.total12 > 0 ? `<div class="pat-pbars">${provBars}</div>` : `<div class="empty-mini">Nenhum provento detectado. Lance dividendos/rendimentos como receita numa categoria com “provento”/“dividendo” no nome.</div>`}</div>`;
+  // rentabilidade real vs IPCA/CDI (premissas opcionais)
+  const nominal = rent.pct;
+  const realRows = prem.ipca || prem.cdi ? `<div class="pat-rent-grid">
+      <div><span>Nominal (ativos)</span><b>${patDelta(nominal)}</b></div>
+      ${prem.ipca ? `<div><span>IPCA (12m)</span><b class="pat-muted">${numOr0(prem.ipca).toFixed(1)}%</b></div><div><span>Retorno real</span><b>${patDelta(nominal - numOr0(prem.ipca))}</b></div>` : ""}
+      ${prem.cdi ? `<div><span>CDI (12m)</span><b class="pat-muted">${numOr0(prem.cdi).toFixed(1)}%</b></div><div><span>Excesso sobre o CDI</span><b>${patDelta(nominal - numOr0(prem.cdi))}</b></div>` : ""}
+    </div>` : `<div class="empty-mini">Informe o IPCA e o CDI acumulados (12m) pra ver o retorno real e o excesso sobre o CDI.</div>`;
+  const rentab = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Rentabilidade</h3><span class="card-sub">ativos · ganho ${rent.ganho >= 0 ? "+" : "−"}${fmtNum(Math.abs(rent.ganho))} (mercado − custo)</span></div><button class="mini-btn" data-pat-prem>${ic("pencil", 13)} Premissas</button></div>${realRows}</div>`;
+  // posições consolidadas
+  const pos = patPositions();
+  const posRows = pos.map((p) => `<tr data-acct-open="${attr(p.conta)}" class="click"><td><div class="inv-ativo"><span class="inv-tkr">${_esc(p.ticker)}</span><span class="inv-nome">${_esc(p.conta)}</span></div>${p.classe ? `<span class="inv-classe">${CLASSE_LABEL[p.classe] || p.classe}</span>` : ""}</td><td class="num">${(Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })}</td><td class="num">${fmtNum(p.pm)}</td><td class="num">${p.semCotacao ? "—" : fmtNum(p.cotacao)}</td><td class="num">${fmtNum(p.valor)}</td><td class="num" style="text-align:right">${invGanhoHTML(p.ganho, p.ganhoPct)}</td></tr>`).join("");
+  const posicoes = pos.length ? `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Posições consolidadas</h3><span class="card-sub">${pos.length} ${pos.length === 1 ? "ativo" : "ativos"} · valor ${fmt(rent.valor)} · custo ${fmt(rent.custo)}</span></div></div>
+    <div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num">PM</th><th class="num">Atual</th><th class="num">Valor</th><th class="num" style="text-align:right">Result.</th></tr></thead><tbody>${posRows}</tbody></table></div>
+    <p class="pat-foot">Clique numa linha pra abrir a conta do ativo.</p></div>` : "";
+  return `${hero}${kpis}${alloc}<div class="pat-2col">${evolucao}${proventos}</div>${rentab}${posicoes}`;
 }
 
 function viewDashboard() {
@@ -1334,7 +1467,7 @@ function exportBackup() {
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const VIEWS = { dashboard: viewDashboard, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
+const VIEWS = { dashboard: viewDashboard, patrimonial: viewPatrimonial, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
 
 /* ---------- drill-down do gráfico Receitas × Despesas ---------- */
 function renderDrill() {
@@ -1431,6 +1564,7 @@ function modalHTML() {
 /* ---------- 8. estado, render e eventos ---------- */
 const state = {
   tab: "dashboard",
+  prefs: {}, // preferências sincronizadas (metas de alocação, snapshots de patrimônio, premissas IPCA/CDI)
   tx: initialTx.slice(),
   recon: [],
   imported: false, reconAccount: null, reconFiles: [], reconDone: null, modalRecon: false,
@@ -1473,7 +1607,7 @@ function currentModel() {
   return {
     accounts: accounts.map((a) => Object.assign({}, a)),
     catTree: { receita: catTree.receita.map(cloneCat), despesa: catTree.despesa.map(cloneCat) },
-    tx: state.tx.slice(), dashOrder: state.dashOrder.slice(), prefs: {},
+    tx: state.tx.slice(), dashOrder: state.dashOrder.slice(), prefs: Object.assign({}, state.prefs),
     assetMoves: assetMoves.map((m) => Object.assign({}, m)),
   };
 }
@@ -1483,6 +1617,7 @@ function applyModel(m) {
   if (m.catTree) { ["receita", "despesa"].forEach((k) => { if (Array.isArray(m.catTree[k])) { catTree[k].length = 0; m.catTree[k].forEach((c) => catTree[k].push(c)); } }); }
   if (Array.isArray(m.tx)) { state.tx = m.tx; sortTx(); }
   if (Array.isArray(m.assetMoves)) { assetMoves.length = 0; m.assetMoves.forEach((x) => assetMoves.push(x)); }
+  if (m.prefs && typeof m.prefs === "object") state.prefs = m.prefs;
   if (Array.isArray(m.dashOrder) && m.dashOrder.length) state.dashOrder = m.dashOrder;
 }
 // as linhas voltam do banco na ordem de `updated_at` (empates = ordem física da tabela), então sem
@@ -1573,7 +1708,7 @@ function saveTx() {
 /* contas */
 function refreshSideNet() { const el = document.getElementById("side-net-val"); if (el) el.textContent = fmt(netWorth()); }
 function openAcct(nome) {
-  state.acctDetail = nome; state.acctMenu = null; renderView();
+  state.tab = "contas"; state.acctDetail = nome; state.acctMenu = null; renderView();
   const a = acctByName(nome); // carteira: busca cotações ao abrir (se ainda não tem)
   if (a && a.tipo === "invest" && hasHoldings() && !quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } });
 }
@@ -1742,6 +1877,18 @@ function renderPop() {
     body = `<p class="pop-hint">Valor da conta <b>antes do primeiro lançamento</b>. Ajuste se o histórico importado estiver incompleto — assim a reconstrução para de mostrar mês com saldo negativo. Mudar isso re-baseia o saldo atual (sobe/desce tudo junto).</p>
       <label class="fld"><span class="fld-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><input data-abertura-inp inputmode="decimal" value="${attr(p.cur != null ? p.cur : "")}" autocomplete="off"></label>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-abertura-save="${attr(p.nome)}">Salvar</button>`;
+  } else if (p.kind === "metas") {
+    const m = patMetas();
+    title = "Metas de alocação";
+    body = `<p class="pop-hint">Percentual-alvo de cada classe sobre o patrimônio bruto. Não precisa somar 100%.</p>
+      ${PAT_CLASSES.map((c) => `<label class="fld fld-inline"><span class="fld-label"><span class="pat-dot" style="background:${c.cor}"></span>${c.label}</span><input data-meta="${c.key}" inputmode="decimal" placeholder="0" autocomplete="off" value="${attr(m[c.key] != null ? m[c.key] : "")}"><span class="fld-suffix">%</span></label>`).join("")}`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-metas-save>Salvar metas</button>`;
+  } else if (p.kind === "premissas") {
+    const pr = patPrem();
+    title = "Premissas (IPCA / CDI)";
+    body = `<p class="pop-hint">Índices acumulados nos últimos 12 meses (%). Usados pra calcular retorno real e excesso sobre o CDI.</p>
+      <div class="fld-row"><label class="fld"><span class="fld-label">IPCA 12m</span><input data-prem="ipca" inputmode="decimal" placeholder="0,0" autocomplete="off" value="${attr(pr.ipca != null ? pr.ipca : "")}"></label><label class="fld"><span class="fld-label">CDI 12m</span><input data-prem="cdi" inputmode="decimal" placeholder="0,0" autocomplete="off" value="${attr(pr.cdi != null ? pr.cdi : "")}"></label></div>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-prem-save>Salvar</button>`;
   }
   el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
   const first = el.querySelector("input"); if (first) first.focus();
@@ -1774,6 +1921,18 @@ function saveAbertura(nome) {
   const delta = novo - aberturaAtual(a);
   a.saldo = Math.round((numOr0(a.saldo) + delta) * 100) / 100; // re-baseia: sobe/desce a reconstrução toda
   refreshSideNet(); closePop(); scheduleSave(); renderView();
+}
+/* ---------- visão patrimonial: metas de alocação e premissas ---------- */
+function openMetas() { state.pop = { kind: "metas" }; renderPop(); }
+function saveMetas() {
+  const m = {};
+  PAT_CLASSES.forEach((c) => { const el = document.querySelector(`[data-meta="${c.key}"]`); const v = parseValor(el ? el.value : ""); if (v) m[c.key] = v; });
+  state.prefs.patMetas = m; closePop(); scheduleSave(); renderView();
+}
+function openPremissas() { state.pop = { kind: "premissas" }; renderPop(); }
+function savePremissas() {
+  const g = (s) => { const el = document.querySelector(`[data-prem="${s}"]`); return parseValor(el ? el.value : ""); };
+  state.prefs.patPremissas = { ipca: g("ipca"), cdi: g("cdi") }; closePop(); scheduleSave(); renderView();
 }
 /* ---------- investimentos: ações ---------- */
 function invDefaultConta() { const c = accounts.filter((a) => !a.arquivada && a.tipo === "invest"); return c[0] ? c[0].id : null; }
@@ -2274,6 +2433,12 @@ function wire() {
     if (abt) { openAbertura(abt.dataset.abertura); return; }
     const abtS = e.target.closest("[data-abertura-save]");
     if (abtS) { saveAbertura(abtS.dataset.aberturaSave); return; }
+    // visão patrimonial
+    if (e.target.closest("[data-pat-reg]")) { registrarMes(); return; }
+    if (e.target.closest("[data-pat-metas]")) { openMetas(); return; }
+    if (e.target.closest("[data-metas-save]")) { saveMetas(); return; }
+    if (e.target.closest("[data-pat-prem]")) { openPremissas(); return; }
+    if (e.target.closest("[data-prem-save]")) { savePremissas(); return; }
     const adc = e.target.closest("[data-add-cat]");
     if (adc) { openCatForm(adc.dataset.addCat); return; }
     const ads = e.target.closest("[data-add-sub]");
