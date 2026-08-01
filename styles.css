@@ -867,3 +867,4 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .inv-sec-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
 .inv-sec-head h3{font-size:15px}
 .inv-sec-val{text-align:right;white-space:nowrap}
+.asset-tag{font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:5px;background:rgba(124,137,160,.16);color:#7C89A0;vertical-align:middle;margin-left:4px}

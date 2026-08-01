@@ -741,13 +741,16 @@ function acctTxRow(t, nome) {
   const tcor = t.tipo === "transferencia" ? C.transfer : (t.tipo === "despesa" ? C.despesa : C.receita);
   return `<div class="mini-row click txr" data-tx-open="${t.id}"><span class="tx-ic" style="background:${tcor}1A;color:${tcor}">${ic(txCatIcon(t), 16)}</span><div class="tx-mid"><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data} · ${contraparte}</div></div><span class="num" style="color:${v < 0 ? "var(--ink)" : "var(--pos)"};font-weight:600">${v < 0 ? "−" : "+"} ${fmtNum(Math.abs(v))}</span></div>`;
 }
-// linha de compra/venda de ativo no extrato da carteira (efeito no CAIXA: compra sai −, venda entra +)
+// linha de compra/venda de ativo no extrato: NÃO é despesa/receita — é reaplicação interna
+// (compra = caixa → investido; venda = investido → caixa). Cor de transferência + tag, nunca vermelho.
 function acctAssetRow(m) {
   const venda = m.tipo === "venda";
   const eff = (venda ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco);
-  const cor = venda ? C.receita : C.transfer;
+  const cor = C.transfer;
   const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
-  return `<div class="mini-row txr"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic(venda ? "trending-up" : "invest", 16)}</span><div class="tx-mid"><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)}</div></div><span class="num" style="color:${eff < 0 ? "var(--ink)" : "var(--pos)"};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
+  const dir = venda ? "investido → caixa" : "caixa → investido";
+  const tag = venda ? "resgate" : "aplicação";
+  return `<div class="mini-row txr"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic("transfer", 16)}</span><div class="tx-mid"><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")} <span class="asset-tag">${tag}</span></div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)} · ${dir}</div></div><span class="num" style="color:${cor};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
 }
 // Saldo inicial (abertura) da conta = valor ANTES do 1º lançamento, derivado como
 // (saldo/caixa atual − soma de todos os movimentos). É estável: adicionar/remover lançamento
@@ -782,11 +785,13 @@ function viewAcctDetail(nome) {
   const cart = temAtivos(a); // carteira de investimento: separa caixa × investido
   // ledger unificado: transações + (se carteira) compras/vendas de ativo como linhas de caixa
   const items = [];
-  acctTx(nome).forEach((t) => items.push({ iso: t.iso || "", data: t.data || "", eff: txValorConta(t, nome), html: acctTxRow(t, nome) }));
-  if (cart) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => items.push({ iso: m.iso || "", data: m.iso ? dataBR(m.iso) : "", eff: (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), html: acctAssetRow(m) }));
+  acctTx(nome).forEach((t) => items.push({ iso: t.iso || "", data: t.data || "", eff: txValorConta(t, nome), html: acctTxRow(t, nome), asset: false }));
+  if (cart) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => items.push({ iso: m.iso || "", data: m.iso ? dataBR(m.iso) : "", eff: (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), html: acctAssetRow(m), asset: true }));
   items.sort((x, y) => String(y.iso || y.data).localeCompare(String(x.iso || x.data)));
+  // Entradas/Saídas = só caixa real (aportes/saques/receitas/despesas). Compra/venda de ativo é
+  // reaplicação interna (caixa↔investido), não conta como entrada nem saída.
   let entradas = 0, saidas = 0;
-  items.forEach((it) => { if (it.eff >= 0) entradas += it.eff; else saidas += -it.eff; });
+  items.forEach((it) => { if (it.asset) return; if (it.eff >= 0) entradas += it.eff; else saidas += -it.eff; });
   const groups = {};
   items.forEach((it) => { const k = (it.iso || "0000-00").slice(0, 7); (groups[k] = groups[k] || []).push(it); });
   const keys = Object.keys(groups).sort((x, y) => y.localeCompare(x));
@@ -824,7 +829,7 @@ function viewAcctDetail(nome) {
     <div class="card adh-stat"><span>Saídas</span><b class="num" style="color:var(--neg)">${fmt(saidas)}</b></div>
     <div class="card adh-stat"><span>Lançamentos</span><b class="num">${items.length}</b></div>
   </div>
-  <div class="card table-card" style="padding:6px 18px"><div class="card-head" style="padding:12px 2px 4px"><h3>Lançamentos</h3></div><div class="mini-list">${body}</div></div>`;
+  <div class="card table-card" style="padding:6px 18px"><div class="card-head" style="padding:12px 2px 4px"><div><h3>Lançamentos</h3>${cart ? `<span class="card-sub">Compra/venda de ativo é reaplicação (caixa ↔ investido), não despesa/receita.</span>` : ""}</div></div><div class="mini-list">${body}</div></div>`;
 }
 function viewContas() {
   if (state.acctDetail) return viewAcctDetail(state.acctDetail);
