@@ -750,7 +750,7 @@ function acctAssetRow(m) {
   const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   const dir = venda ? "investido → caixa" : "caixa → investido";
   const tag = venda ? "resgate" : "aplicação";
-  return `<div class="mini-row txr"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic("transfer", 16)}</span><div class="tx-mid"><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")} <span class="asset-tag">${tag}</span></div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)} · ${dir}</div></div><span class="num" style="color:${cor};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
+  return `<div class="mini-row click txr" data-asset-open="${attr(m.id)}"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic("transfer", 16)}</span><div class="tx-mid"><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")} <span class="asset-tag">${tag}</span></div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)} · ${dir}</div></div><span class="num" style="color:${cor};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
 }
 // Saldo inicial (abertura) da conta = valor ANTES do 1º lançamento, derivado como
 // (saldo/caixa atual − soma de todos os movimentos). É estável: adicionar/remover lançamento
@@ -1713,7 +1713,7 @@ function renderPop() {
     const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
     const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === p.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
     const classeOpts = Object.keys(CLASSE_LABEL).map((k) => `<option value="${k}"${k === (p.classe || "acao") ? " selected" : ""}>${CLASSE_LABEL[k]}</option>`).join("");
-    title = "Lançar ativo";
+    title = p.id ? "Editar ativo" : "Lançar ativo";
     body = `<div class="am-tipo">
         <button type="button" class="am-tab ${(p.tipo || "compra") === "compra" ? "on" : ""}" data-am-tipo="compra">Compra</button>
         <button type="button" class="am-tab ${p.tipo === "venda" ? "on" : ""}" data-am-tipo="venda">Venda</button>
@@ -1723,7 +1723,9 @@ function renderPop() {
       <label class="fld"><span class="fld-label">Nome (opcional)</span><input data-am="nome" placeholder="Ex.: CSHG Logística" autocomplete="off" value="${attr(p.nome || "")}"></label>
       <div class="fld-row"><label class="fld"><span class="fld-label">Quantidade</span><input data-am="qtd" inputmode="decimal" placeholder="0" autocomplete="off" value="${attr(p.qtd || "")}"></label><label class="fld"><span class="fld-label">Preço unitário</span><input data-am="preco" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.preco || "")}"></label></div>
       <p class="pop-hint">O preço médio é calculado pelo sistema a partir dos seus lançamentos.</p>`;
-    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-inv-save>Salvar lançamento</button>`;
+    foot = p.id
+      ? `<button class="pop-danger" data-inv-del="${attr(p.id)}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-inv-save>Salvar</button>`
+      : `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-inv-save>Salvar lançamento</button>`;
   } else if (p.kind === "assetMoves") {
     const a = acctById(p.contaId);
     title = a ? a.nome : "Lançamentos";
@@ -1777,6 +1779,14 @@ function saveAbertura(nome) {
 function invDefaultConta() { const c = accounts.filter((a) => !a.arquivada && a.tipo === "invest"); return c[0] ? c[0].id : null; }
 function openAssetMove(contaId) { state.pop = { kind: "assetMove", contaId: contaId || invDefaultConta(), tipo: "compra", data: TODAY_ISO }; renderPop(); }
 function openAssetMoves(contaId) { state.pop = { kind: "assetMoves", contaId }; renderPop(); }
+// clicar numa compra/venda no extrato → abre o mesmo modal em modo EDIÇÃO (com excluir)
+function openAssetEdit(id) {
+  const m = assetMoves.find((x) => String(x.id) === String(id));
+  if (!m) return;
+  const br = (n) => String(numOr0(n)).replace(".", ","); // número BR pro input (vírgula decimal)
+  state.pop = { kind: "assetMove", id: m.id, contaId: m.contaId, tipo: m.tipo, data: m.iso || TODAY_ISO, ticker: m.ticker, nome: m.nome, classe: m.classe, qtd: br(m.qtd), preco: br(m.preco) };
+  renderPop();
+}
 function invSetTipo(tipo) {
   if (!state.pop || state.pop.kind !== "assetMove") return;
   // preserva o que já foi digitado ao trocar compra⇄venda
@@ -1789,12 +1799,13 @@ function saveAssetMove() {
   const contaId = g("conta"), ticker = g("ticker").trim().toUpperCase();
   const qtd = parseValor(g("qtd")), preco = parseValor(g("preco"));
   if (!contaId || !ticker || qtd <= 0 || preco <= 0) { const t = document.querySelector('[data-am="ticker"]'); if (t && !ticker) t.focus(); return; }
-  const move = {
-    id: "am" + Date.now(), contaId, iso: g("data") || TODAY_ISO,
-    ticker, nome: g("nome").trim(), classe: g("classe") || "acao",
-    tipo: (state.pop && state.pop.tipo) === "venda" ? "venda" : "compra", qtd, preco,
+  const p = state.pop || {};
+  const dados = {
+    contaId, iso: g("data") || TODAY_ISO, ticker, nome: g("nome").trim(),
+    classe: g("classe") || "acao", tipo: p.tipo === "venda" ? "venda" : "compra", qtd, preco,
   };
-  assetMoves.push(move);
+  if (p.id) { const m = assetMoves.find((x) => String(x.id) === String(p.id)); if (m) Object.assign(m, dados); } // edição
+  else assetMoves.push(Object.assign({ id: "am" + Date.now() }, dados)); // novo
   refreshSideNet(); closePop();
   scheduleSave(); renderView();
 }
@@ -1804,7 +1815,9 @@ function delAssetMove(id) {
   const contaId = assetMoves[i].contaId;
   assetMoves.splice(i, 1);
   refreshSideNet();
+  // lista de lançamentos: re-renderiza (ou fecha se esvaziou); modal de edição: fecha
   if (state.pop && state.pop.kind === "assetMoves") { if (!assetMoves.some((m) => m.contaId === contaId)) closePop(); else renderPop(); }
+  else closePop();
   scheduleSave(); renderView();
 }
 function invRefreshQuotes() {
@@ -2250,6 +2263,8 @@ function wire() {
     if (iAdd) { openAssetMove(iAdd.dataset.invAdd); return; }
     const iMoves = e.target.closest("[data-inv-moves]");
     if (iMoves) { openAssetMoves(iMoves.dataset.invMoves); return; }
+    const iOpen = e.target.closest("[data-asset-open]");
+    if (iOpen) { openAssetEdit(iOpen.dataset.assetOpen); return; }
     const iTipo = e.target.closest("[data-am-tipo]");
     if (iTipo) { invSetTipo(iTipo.dataset.amTipo); return; }
     if (e.target.closest("[data-inv-save]")) { saveAssetMove(); return; }
