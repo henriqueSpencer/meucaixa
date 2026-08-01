@@ -762,6 +762,21 @@ function acctMovSum(a) {
 }
 const acctAnchor = (a) => (temAtivos(a) ? carteiraCaixa(a) : acctTotal(a));
 const aberturaAtual = (a) => Math.round((acctAnchor(a) - acctMovSum(a)) * 100) / 100;
+// custo investido ao FIM do mês `ym` (YYYY-MM): processa as compras/vendas até ali (custo médio).
+// Sem cotação histórica, o "investido do mês" é o custo aplicado — coerente com o fallback do app.
+function investedCostAt(contaId, ym) {
+  const moves = assetMoves.filter((m) => m.contaId === contaId && String(m.iso || "").slice(0, 7) <= ym)
+    .slice().sort((a, b) => String(a.iso || "").localeCompare(String(b.iso || "")));
+  const pos = {};
+  moves.forEach((m) => {
+    const k = String(m.ticker || "?").toUpperCase();
+    const o = pos[k] || (pos[k] = { qtd: 0, custo: 0 });
+    const q = numOr0(m.qtd), pr = numOr0(m.preco);
+    if (m.tipo === "venda") { const pm = o.qtd > 0 ? o.custo / o.qtd : 0; const qv = Math.min(q, o.qtd); o.custo -= pm * qv; o.qtd -= qv; }
+    else { o.qtd += q; o.custo += pr * q; }
+  });
+  return Object.values(pos).reduce((s, o) => s + (o.qtd > 1e-9 ? o.custo : 0), 0);
+}
 function viewAcctDetail(nome) {
   const a = accounts.find((x) => x.nome === nome);
   const cart = temAtivos(a); // carteira de investimento: separa caixa × investido
@@ -787,7 +802,10 @@ function viewAcctDetail(nome) {
     const lbl = k === "0000-00" ? "Sem data" : monthLabel(k + "-01");
     const fim = Math.round((anchor - after) * 100) / 100;
     after += net;
-    const balHTML = k === "0000-00" ? "" : `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
+    const balHTML = k === "0000-00" ? ""
+      : cart
+        ? `<span class="md-bal">caixa <b class="num">${fmt(fim)}</b></span><span class="md-bal">investido <b class="num">${fmt(investedCostAt(a.id, k))}</b></span>`
+        : `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
     return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span>${balHTML}</div>${list.map((it) => it.html).join("")}`;
   }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`)
     // linha de abertura (saldo/caixa inicial), no rodapé — editável p/ fechar histórico incompleto
