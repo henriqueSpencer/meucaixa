@@ -224,7 +224,6 @@ const ACCT_ICON = { banco: "landmark", cartao: "credit-card", dinheiro: "banknot
 const PAGE = {
   dashboard: ["Visão geral", "Como está seu dinheiro em Julho de 2026"],
   contas: ["Contas", "Saldos e alocações de patrimônio"],
-  investimentos: ["Investimentos", "Ativos das suas carteiras — ações, ETFs e FIIs, marcados a mercado"],
   transacoes: ["Transações", "Receitas, despesas, transferências e reembolsos"],
   conciliacao: ["Conciliação", "Importe o extrato e confirme as sugestões"],
   categorias: ["Categorias", "Estrutura de receitas e despesas"],
@@ -797,11 +796,11 @@ function viewAcctDetail(nome) {
   const headVal = cart
     ? `<div class="adh-cart"><div><span>Caixa</span><b class="num">${fmt(carteiraCaixa(a))}</b></div><div><span>Investido</span><b class="num">${fmt(invInvestido(a))}</b></div><div class="adh-cart-tot"><span>Total</span><strong class="num">${fmt(acctTotal(a))}</strong></div></div>`
     : `<div class="adh-saldo num" style="color:${a && acctTotal(a) < 0 ? "var(--neg)" : "var(--ink)"}">${a ? fmt(acctTotal(a)) : ""}</div>`;
-  const cartHint = cart ? `<button class="mini-btn" data-tab="investimentos">${ic("invest", 13)} Ver ativos da carteira</button>` : "";
+  const ativos = (a && a.tipo === "invest") ? invAtivosSection(a) : ""; // ativos vivem na página da própria conta
   return `
   <button class="back-btn" data-acct-back>${ic("arrow-left", 16)} Contas</button>
   <div class="card acct-detail-head"><div class="adh-l"><span class="acct-ic big">${ic(iconName, 22)}</span><div><div class="adh-name">${nome}</div><div class="acct-sub">${a ? a.sub : ""}</div></div></div>${headVal}</div>
-  ${cartHint}
+  ${ativos}
   <div class="adh-stats">
     <div class="card adh-stat"><span>Entradas</span><b class="num" style="color:var(--pos)">${fmt(entradas)}</b></div>
     <div class="card adh-stat"><span>Saídas</span><b class="num" style="color:var(--neg)">${fmt(saidas)}</b></div>
@@ -850,50 +849,26 @@ function invPosRow(p) {
     <td class="num" style="text-align:right">${invGanhoHTML(p.ganho, p.ganhoPct)}</td>
   </tr>`;
 }
-function invCarteiraCard(a) {
+// Seção de ativos EMBUTIDA na página da própria conta (carteira). Posições + lançar + cotações.
+function invAtivosSection(a) {
   const pos = computePositions(a.id);
   const custo = pos.reduce((s, p) => s + p.custo, 0);
   const valor = pos.reduce((s, p) => s + p.valor, 0);
-  const ganho = valor - custo;
-  const pct = custo > 0 ? (ganho / custo) * 100 : 0;
+  const ganho = valor - custo, pct = custo > 0 ? (ganho / custo) * 100 : 0;
   const table = pos.length ? `
     <div class="inv-tbl-wrap"><table class="inv-tbl">
       <thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num">PM</th><th class="num">Cotação</th><th class="num">Valor</th><th class="num" style="text-align:right">Ganho</th></tr></thead>
       <tbody>${pos.map(invPosRow).join("")}</tbody>
-    </table></div>` : `<div class="empty-mini">Nenhum ativo lançado nesta carteira ainda.</div>`;
+    </table></div>` : `<div class="empty-mini">Nenhum ativo lançado ainda. Clique em “Lançar ativo” pra registrar o que está dentro desta conta.</div>`;
   return `<div class="card inv-cart">
-    <div class="inv-cart-head">
-      <div><span class="acct-ic">${ic(acctIconOf(a), 18)}</span></div>
-      <div class="inv-cart-id"><div class="acct-name">${_esc(a.nome)}</div><div class="acct-sub">${pos.length} ${pos.length === 1 ? "ativo" : "ativos"} · custo ${fmt(custo)}</div></div>
-      <div class="inv-cart-val"><div class="num inv-big">${fmt(valor)}</div>${pos.length ? invGanhoHTML(ganho, pct) : ""}</div>
-    </div>
+    <div class="inv-sec-head"><div><h3>Ativos</h3><span class="card-sub">${pos.length ? `${pos.length} ${pos.length === 1 ? "ativo" : "ativos"} · custo ${fmt(custo)} · ${invQuoteLabel()}` : invQuoteLabel()}</span></div>${pos.length ? `<div class="inv-sec-val"><div class="num inv-big">${fmt(valor)}</div>${invGanhoHTML(ganho, pct)}</div>` : ""}</div>
     ${table}
     <div class="inv-cart-actions">
       <button class="mini-btn primary" data-inv-add="${a.id}">${ic("plus", 14)} Lançar ativo</button>
       ${pos.length ? `<button class="mini-btn" data-inv-moves="${a.id}">${ic("list", 14)} Lançamentos</button>` : ""}
+      <button class="mini-btn" data-inv-refresh>${ic("undo", 13)} Atualizar cotações</button>
     </div>
   </div>`;
-}
-function viewInvestimentos() {
-  const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
-  if (!carteiras.length) {
-    return `<div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Carteiras</span><p>Você ainda não tem nenhuma conta do tipo <b>Investimento</b>. Crie uma na aba Contas (ex.: BTG, corretora) e volte aqui pra lançar os ativos dentro dela.</p></div></div>
-    <button class="mini-btn primary" data-tab="contas">${ic("arrow-right", 14)} Ir para Contas</button>`;
-  }
-  let custo = 0, valor = 0;
-  carteiras.forEach((a) => computePositions(a.id).forEach((p) => { custo += p.custo; valor += p.valor; }));
-  const ganho = valor - custo, pct = custo > 0 ? (ganho / custo) * 100 : 0;
-  const resumo = `<div class="inv-summary">
-    <div class="card inv-kpi"><span>Valor de mercado</span><b class="num">${fmt(valor)}</b></div>
-    <div class="card inv-kpi"><span>Custo investido</span><b class="num">${fmt(custo)}</b></div>
-    <div class="card inv-kpi"><span>Rentabilidade</span><b>${invGanhoHTML(ganho, pct)}</b></div>
-  </div>`;
-  return `
-  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Carteiras</span><p>Cada compra/venda é um lançamento — o preço médio é calculado pelo sistema. O saldo da conta segue a cotação (não precisa mais lançar valorização à mão).</p></div>
-    <div class="inv-quote"><span class="inv-quote-lbl">${invQuoteLabel()}</span><button class="mini-btn" data-inv-refresh>${ic("undo", 13)} Atualizar cotações</button></div>
-  </div>
-  ${resumo}
-  <div class="inv-carts">${carteiras.map(invCarteiraCard).join("")}</div>`;
 }
 
 function viewTransacoes() {
@@ -1336,7 +1311,7 @@ function exportBackup() {
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-const VIEWS = { dashboard: viewDashboard, contas: viewContas, investimentos: viewInvestimentos, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
+const VIEWS = { dashboard: viewDashboard, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
 
 /* ---------- drill-down do gráfico Receitas × Despesas ---------- */
 function renderDrill() {
@@ -1574,7 +1549,11 @@ function saveTx() {
 }
 /* contas */
 function refreshSideNet() { const el = document.getElementById("side-net-val"); if (el) el.textContent = fmt(netWorth()); }
-function openAcct(nome) { state.acctDetail = nome; state.acctMenu = null; renderView(); }
+function openAcct(nome) {
+  state.acctDetail = nome; state.acctMenu = null; renderView();
+  const a = acctByName(nome); // carteira: busca cotações ao abrir (se ainda não tem)
+  if (a && a.tipo === "invest" && hasHoldings() && !quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } });
+}
 function backAcct() { state.acctDetail = null; renderView(); }
 function toggleAcctMenu(id) { state.acctMenu = state.acctMenu === id ? null : id; renderView(); }
 function startEditAcct(id) { const a = acctById(id); if (!a) return; state.acctMenu = null; state.pop = { kind: "acctEdit", id, curName: a.nome, editIcon: acctIconOf(a) }; renderPop(); }
@@ -2307,7 +2286,7 @@ function wire() {
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "investimentos" && hasHoldings() && !quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     const hday = e.target.closest("[data-hist-day]");
     if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }

@@ -864,3 +864,6 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .abertura-row .md-bal b{color:var(--ink)}
 .ab-warn{color:var(--neg);font-weight:600}
 .mini-btn.xs{padding:3px 8px;font-size:11px}
+.inv-sec-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+.inv-sec-head h3{font-size:15px}
+.inv-sec-val{text-align:right;white-space:nowrap}
