@@ -750,6 +750,19 @@ function acctAssetRow(m) {
   const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   return `<div class="mini-row txr"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic(venda ? "trending-up" : "invest", 16)}</span><div class="tx-mid"><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)}</div></div><span class="num" style="color:${eff < 0 ? "var(--ink)" : "var(--pos)"};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
 }
+// Saldo inicial (abertura) da conta = valor ANTES do 1º lançamento, derivado como
+// (saldo/caixa atual − soma de todos os movimentos). É estável: adicionar/remover lançamento
+// mexe no saldo e na soma juntos, então a abertura não muda. Editá-la re-baseia o saldo (sobe a
+// reconstrução inteira), fechando meses negativos por histórico importado incompleto.
+function acctMovSum(a) {
+  if (!a) return 0;
+  let s = 0;
+  acctTx(a.nome).forEach((t) => { s += txValorConta(t, a.nome); });
+  if (temAtivos(a)) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => { s += (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco); });
+  return s;
+}
+const acctAnchor = (a) => (temAtivos(a) ? carteiraCaixa(a) : acctTotal(a));
+const aberturaAtual = (a) => Math.round((acctAnchor(a) - acctMovSum(a)) * 100) / 100;
 function viewAcctDetail(nome) {
   const a = accounts.find((x) => x.nome === nome);
   const cart = temAtivos(a); // carteira de investimento: separa caixa × investido
@@ -765,17 +778,21 @@ function viewAcctDetail(nome) {
   const keys = Object.keys(groups).sort((x, y) => y.localeCompare(x));
   // saldo/caixa ao FIM de cada mês: âncora = saldo atual (conta normal) ou caixa atual (carteira),
   // descontando os movimentos posteriores (os meses vêm do mais novo p/ o mais antigo).
-  const anchor = cart ? carteiraCaixa(a) : acctTotal(a);
+  const anchor = acctAnchor(a);
   const balLabel = cart ? "caixa" : "saldo";
+  const totalMov = items.reduce((s, it) => s + it.eff, 0);
+  const abertura = Math.round((anchor - totalMov) * 100) / 100;
   let after = 0;
-  const body = items.length ? keys.map((k) => {
+  const body = (items.length ? keys.map((k) => {
     const list = groups[k], net = list.reduce((s, it) => s + it.eff, 0);
     const lbl = k === "0000-00" ? "Sem data" : monthLabel(k + "-01");
     const fim = Math.round((anchor - after) * 100) / 100;
     after += net;
     const balHTML = k === "0000-00" ? "" : `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
     return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span>${balHTML}</div>${list.map((it) => it.html).join("")}`;
-  }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`;
+  }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`)
+    // linha de abertura (saldo/caixa inicial), no rodapé — editável p/ fechar histórico incompleto
+    + `<div class="month-div abertura-row"><span class="md-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><span class="md-count">antes do 1º lançamento${abertura < 0 ? ` · <span class="ab-warn">histórico incompleto?</span>` : ""}</span><span class="md-bal"><b class="num">${fmt(abertura)}</b></span><button class="mini-btn xs" data-abertura="${attr(nome)}">${ic("pencil", 11)} ajustar</button></div>`;
   const iconName = acctIconOf(a);
   const headVal = cart
     ? `<div class="adh-cart"><div><span>Caixa</span><b class="num">${fmt(carteiraCaixa(a))}</b></div><div><span>Investido</span><b class="num">${fmt(invInvestido(a))}</b></div><div class="adh-cart-tot"><span>Total</span><strong class="num">${fmt(acctTotal(a))}</strong></div></div>`
@@ -1715,6 +1732,12 @@ function renderPop() {
       return `<div class="mini-row"><div class="mini-l"><div><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)}</div></div></div><div class="inv-move-r"><span class="num" style="color:${cor};font-weight:600">${fmtNum(total)}</span><button class="pop-danger sm" data-inv-del="${attr(m.id)}" title="Excluir">${ic("archive", 14)}</button></div></div>`;
     }).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
     foot = `<button class="mini-btn primary" data-inv-add="${attr(p.contaId)}">${ic("plus", 14)} Novo lançamento</button>`;
+  } else if (p.kind === "abertura") {
+    const a = acctByName(p.nome), cart = temAtivos(a);
+    title = cart ? "Caixa inicial" : "Saldo inicial";
+    body = `<p class="pop-hint">Valor da conta <b>antes do primeiro lançamento</b>. Ajuste se o histórico importado estiver incompleto — assim a reconstrução para de mostrar mês com saldo negativo. Mudar isso re-baseia o saldo atual (sobe/desce tudo junto).</p>
+      <label class="fld"><span class="fld-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><input data-abertura-inp inputmode="decimal" value="${attr(p.cur != null ? p.cur : "")}" autocomplete="off"></label>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-abertura-save="${attr(p.nome)}">Salvar</button>`;
   }
   el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
   const first = el.querySelector("input"); if (first) first.focus();
@@ -1732,6 +1755,21 @@ function saveAcctForm() {
   const o = { id: "u" + Date.now(), nome, sub, tipo, saldo, grupo, arquivada: false };
   if (grupo === "pat") { o.alocado = saldo; o.custo = 0; }
   accounts.push(o); reindexAccounts(); refreshSideNet(); closePop(); renderView();
+}
+// saldo/caixa inicial da conta (abertura) — editar re-baseia o saldo pra fechar mês negativo
+function openAbertura(nome) {
+  const a = acctByName(nome); if (!a) return;
+  const cur = aberturaAtual(a).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  state.pop = { kind: "abertura", nome, cur };
+  renderPop();
+}
+function saveAbertura(nome) {
+  const a = acctByName(nome); if (!a) return;
+  const inp = document.querySelector("[data-abertura-inp]");
+  const novo = parseValor(inp ? inp.value : "");
+  const delta = novo - aberturaAtual(a);
+  a.saldo = Math.round((numOr0(a.saldo) + delta) * 100) / 100; // re-baseia: sobe/desce a reconstrução toda
+  refreshSideNet(); closePop(); scheduleSave(); renderView();
 }
 /* ---------- investimentos: ações ---------- */
 function invDefaultConta() { const c = accounts.filter((a) => !a.arquivada && a.tipo === "invest"); return c[0] ? c[0].id : null; }
@@ -2215,6 +2253,10 @@ function wire() {
     if (e.target.closest("[data-inv-save]")) { saveAssetMove(); return; }
     const iDel = e.target.closest("[data-inv-del]");
     if (iDel) { delAssetMove(iDel.dataset.invDel); return; }
+    const abt = e.target.closest("[data-abertura]");
+    if (abt) { openAbertura(abt.dataset.abertura); return; }
+    const abtS = e.target.closest("[data-abertura-save]");
+    if (abtS) { saveAbertura(abtS.dataset.aberturaSave); return; }
     const adc = e.target.closest("[data-add-cat]");
     if (adc) { openCatForm(adc.dataset.addCat); return; }
     const ads = e.target.closest("[data-add-sub]");
