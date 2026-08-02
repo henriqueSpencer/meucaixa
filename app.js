@@ -1478,9 +1478,17 @@ function viewAssetRecon() {
     const chg = Math.abs(p.proj - p.atual) > 1e-9;
     return `<div class="ar-proj-row"><span class="ar-proj-tkr">${_esc(p.ticker)}</span><span class="ar-proj-q">${chg ? `${q(p.atual)} <span class="ar-arrow">→</span> <b>${q(p.proj)}</b>` : q(p.proj)} ${p.isRF ? "" : "cotas"}</span></div>`;
   }).join("");
+  const t = assetReconProjTotals();
+  const totBlock = t ? `<div class="ar-tot">
+      <div><span>Caixa</span><b class="num">${fmt(t.caixa)}</b></div>
+      <div><span>Aplicado</span><b class="num">${fmt(t.aplicado)}</b></div>
+      <div><span>Mercado</span><b class="num">${fmt(t.mercado)}</b></div>
+      <div class="ar-tot-total"><span>Total</span><b class="num">${fmt(t.total)}</b></div>
+    </div>` : "";
   const check = `<div class="card recon-check ar-check">
-    <div class="ar-check-h"><b>Posição projetada</b><span>depois de aceitar — confira com sua corretora</span></div>
-    ${proj.length ? `<div class="ar-proj">${projRows}</div>` : `<div class="empty-mini">Aceite lançamentos pra ver a posição resultante.</div>`}
+    <div class="ar-check-h"><b>Como a carteira fica</b><span>projeção depois de aceitar — confira com sua corretora</span></div>
+    ${totBlock}
+    ${proj.length ? `<div class="ar-proj-lbl">Posição por ativo</div><div class="ar-proj">${projRows}</div>` : `<div class="empty-mini">Aceite lançamentos pra ver a posição resultante.</div>`}
     ${provAceitos.length ? `<div class="ar-prov-tot">${ic("trending-up", 14)} ${provAceitos.length} ${provAceitos.length === 1 ? "provento aceito" : "proventos aceitos"} · ${fmt(provTot)}</div>` : ""}
   </div>`;
   const resumo = `<div class="recon-sum"><b>${rows.length}</b> lidos · <b>${nov}</b> ${nov === 1 ? "novo" : "novos"} · <b>${dup}</b> já ${dup === 1 ? "existe" : "existem"} · ${kindLbl}</div>`;
@@ -2460,6 +2468,22 @@ function assetReconProjected() {
     o.proj += (r.tipo === "venda" ? -1 : 1) * numOr0(r.qtd);
   });
   return Object.values(pos).filter((o) => Math.abs(o.proj) > 1e-9 || Math.abs(o.atual) > 1e-9).sort((a, b) => String(a.ticker).localeCompare(b.ticker));
+}
+// projeta os 4 totais da conta (caixa · aplicado · mercado · total) COMO SE os aceitos fossem lançados.
+// Reaproveita a mesma lógica do cabeçalho da conta injetando os movimentos aceitos no ledger e desfazendo.
+function assetReconProjTotals() {
+  const ar = state.assetRecon; if (!ar) return null;
+  const a = acctById(ar.contaId); if (!a) return null;
+  const pseudo = ar.rows.filter((r) => r.status === "conciliado").map((r, i) => (
+    r.tipo === "provento"
+      ? { id: "__proj" + i, contaId: ar.contaId, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
+      : { id: "__proj" + i, contaId: ar.contaId, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) }
+  ));
+  const n0 = assetMoves.length;
+  pseudo.forEach((m) => assetMoves.push(m));
+  const out = { caixa: carteiraCaixa(a), aplicado: computePositions(a.id).reduce((s, p) => s + p.investido, 0), mercado: invInvestido(a), total: acctTotal(a) };
+  assetMoves.length = n0; // remove os pseudo-movimentos
+  return out;
 }
 function assetReconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
 function assetReconAccept(id) {
