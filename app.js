@@ -180,25 +180,34 @@ function computePositions(contaId) {
   const pos = {};
   moves.forEach((m) => {
     const k = String(m.ticker || "?").toUpperCase();
-    const o = pos[k] || (pos[k] = { ticker: k, nome: m.nome || "", classe: m.classe || "", qtd: 0, custo: 0, realizado: 0 });
+    const o = pos[k] || (pos[k] = { ticker: k, nome: m.nome || "", classe: m.classe || "", qtd: 0, custo: 0, realizado: 0, proventos: 0, aportado: 0 });
     if (m.nome) o.nome = m.nome;
     if (m.classe) o.classe = m.classe;
     const q = numOr0(m.qtd), pr = numOr0(m.preco);
-    if (m.tipo === "venda") {
+    if (m.tipo === "provento") {
+      o.proventos += q * pr; // provento: dinheiro recebido (qtd=1, preco=valor), não mexe em qtd/custo
+    } else if (m.tipo === "venda") {
       const pm = o.qtd > 0 ? o.custo / o.qtd : 0;
       const qv = Math.min(q, o.qtd); // não vende mais do que tem
       o.custo -= pm * qv; o.qtd -= qv; o.realizado += (pr - pm) * qv;
     } else {
-      o.qtd += q; o.custo += pr * q;
+      o.qtd += q; o.custo += pr * q; o.aportado += pr * q;
     }
   });
   return Object.values(pos).map((o) => {
-    const pm = o.qtd > 0 ? o.custo / o.qtd : 0;
+    const pm = o.qtd > 0 ? o.custo / o.qtd : 0;          // preço médio SEM proventos (custo puro)
+    const pmProv = o.qtd > 0 ? (o.custo - o.proventos) / o.qtd : 0; // PM ajustado pelos proventos recebidos
     const price = assetPrice(o.ticker);
     const cot = price != null ? price : pm; // sem cotação → vale o custo (ganho 0)
     const valor = o.qtd * cot;
-    const ganho = valor - o.custo;
-    return Object.assign({}, o, { pm, cotacao: price, valor, ganho, ganhoPct: o.custo > 0 ? (ganho / o.custo) * 100 : 0, semCotacao: price == null });
+    const ganho = valor - o.custo;                        // resultado SEM proventos (não-realizado)
+    const ganhoProv = ganho + o.proventos;                // resultado COM proventos
+    return Object.assign({}, o, {
+      pm, pmProv, cotacao: price, valor, investido: o.custo,
+      ganho, ganhoPct: o.custo > 0 ? (ganho / o.custo) * 100 : 0,
+      ganhoProv, ganhoProvPct: o.custo > 0 ? (ganhoProv / o.custo) * 100 : 0,
+      semCotacao: price == null,
+    });
   }).filter((o) => Math.abs(o.qtd) > 1e-9)
     .sort((a, b) => b.valor - a.valor);
 }
@@ -211,8 +220,9 @@ function computePositions(contaId) {
 function invInvestido(a) { return a ? computePositions(a.id).reduce((s, p) => s + p.valor, 0) : 0; }
 function invCashDelta(a) {
   if (!a) return 0;
+  // compra sai (−), venda e provento entram (+) no caixa da corretora
   return assetMoves.filter((m) => m.contaId === a.id)
-    .reduce((s, m) => s + (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), 0);
+    .reduce((s, m) => s + (m.tipo === "venda" || m.tipo === "provento" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), 0);
 }
 const carteiraCaixa = (a) => numOr0(a && a.saldo) + invCashDelta(a);
 function acctTotal(a) { return a ? Math.round((numOr0(a.saldo) + invCashDelta(a) + invInvestido(a)) * 100) / 100 : 0; }
@@ -779,10 +789,17 @@ function patRentab() {
   const custo = pos.reduce((s, p) => s + p.custo, 0), valor = pos.reduce((s, p) => s + p.valor, 0);
   return { custo, valor, ganho: valor - custo, pct: custo > 0 ? ((valor - custo) / custo) * 100 : 0 };
 }
-// proventos = receitas cuja categoria/sub casa com dividendo/provento/rendimento/JCP (dinheiro real)
+// proventos por mês. Fonte primária: os lançamentos de provento no ledger de ativos (tipo "provento").
+// Fallback (sem nenhum provento lançado): heurística antiga por receita marcada dividendo/rendimento.
 function patProventos() {
-  const re = /prov|divid|rendiment|jcp|juros s/i, per = {};
-  state.tx.forEach((t) => { if (t.tipo !== "receita") return; if (!re.test(`${t.cat || ""} ${t.sub || ""}`)) return; const k = (t.iso || "").slice(0, 7); if (k) per[k] = (per[k] || 0) + Math.abs(t.valor); });
+  const per = {};
+  const ledger = assetMoves.filter((m) => m.tipo === "provento");
+  if (ledger.length) {
+    ledger.forEach((m) => { const k = (m.iso || "").slice(0, 7); if (k) per[k] = (per[k] || 0) + numOr0(m.qtd) * numOr0(m.preco); });
+  } else {
+    const re = /prov|divid|rendiment|jcp|juros s/i;
+    state.tx.forEach((t) => { if (t.tipo !== "receita") return; if (!re.test(`${t.cat || ""} ${t.sub || ""}`)) return; const k = (t.iso || "").slice(0, 7); if (k) per[k] = (per[k] || 0) + Math.abs(t.valor); });
+  }
   const [Y, M] = TODAY_ISO.slice(0, 7).split("-").map(Number), months = [];
   for (let i = 11; i >= 0; i--) { let mm = M - 1 - i, yy = Y; while (mm < 0) { mm += 12; yy--; } months.push(`${yy}-${String(mm + 1).padStart(2, "0")}`); }
   const serie = months.map((k) => ({ ym: k, mes: mesAbbrev(k), valor: Math.round((per[k] || 0) * 100) / 100 }));
@@ -867,9 +884,10 @@ function viewPatrimonial() {
   const provMax = Math.max(1, ...prov.serie.map((x) => x.valor));
   const provBars = prov.serie.map((x) => `<div class="pat-pbar" title="${x.mes}: ${fmt(x.valor)}"><div class="pat-pbar-fill" style="height:${(x.valor / provMax * 100).toFixed(1)}%"></div><span>${x.mes.slice(0, 3)}</span></div>`).join("");
   const dy = bruto > 0 ? (prov.proj / bruto) * 100 : 0;
-  const proventos = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Proventos recebidos</h3><span class="card-sub">renda passiva · 12 meses (de receitas marcadas como dividendo/provento)</span></div></div>
+  const provFonte = assetMoves.some((m) => m.tipo === "provento") ? "dos proventos lançados nos ativos" : "de receitas marcadas como dividendo/provento";
+  const proventos = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Proventos recebidos</h3><span class="card-sub">renda passiva · 12 meses (${provFonte})</span></div></div>
     <div class="pat-prov-kpis"><div><span>Média mensal</span><b class="num">${fmt(prov.media)}</b></div><div><span>Projeção 12m</span><b class="num">${fmt(prov.proj)}</b></div><div><span>DY da carteira</span><b>${patDelta(dy)}</b></div></div>
-    ${prov.total12 > 0 ? `<div class="pat-pbars">${provBars}</div>` : `<div class="empty-mini">Nenhum provento detectado. Lance dividendos/rendimentos como receita numa categoria com “provento”/“dividendo” no nome.</div>`}</div>`;
+    ${prov.total12 > 0 ? `<div class="pat-pbars">${provBars}</div>` : `<div class="empty-mini">Nenhum provento detectado. Lance dividendos/rendimentos em cada ativo (botão “Lançar provento”) ou como receita numa categoria com “provento”/“dividendo” no nome.</div>`}</div>`;
   // rentabilidade real vs IPCA/CDI (premissas opcionais)
   const nominal = rent.pct;
   const realRows = prem.ipca || prem.cdi ? `<div class="pat-rent-grid">
@@ -949,13 +967,16 @@ function acctTxRow(t, nome) {
 // linha de compra/venda de ativo no extrato: NÃO é despesa/receita — é reaplicação interna
 // (compra = caixa → investido; venda = investido → caixa). Cor de transferência + tag, nunca vermelho.
 function acctAssetRow(m) {
-  const venda = m.tipo === "venda";
-  const eff = (venda ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco);
-  const cor = C.transfer;
+  const prov = m.tipo === "provento", venda = m.tipo === "venda";
+  // provento: dinheiro que entra na corretora (renda), cor positiva; compra/venda = reaplicação interna
+  const eff = (venda || prov ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco);
+  const cor = prov ? C.receita : C.transfer;
   const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
-  const dir = venda ? "investido → caixa" : "caixa → investido";
-  const tag = venda ? "resgate" : "aplicação";
-  return `<div class="mini-row click txr" data-asset-open="${attr(m.id)}"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic("transfer", 16)}</span><div class="tx-mid"><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")} <span class="asset-tag">${tag}</span></div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)} · ${dir}</div></div><span class="num" style="color:${cor};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
+  const titulo = prov ? `Provento · ${_esc(m.ticker || "?")}` : `${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}`;
+  const tag = prov ? "provento" : venda ? "resgate" : "aplicação";
+  const meta = prov ? `${m.iso ? dataBR(m.iso) : "—"} · recebido` : `${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)} · ${venda ? "investido → caixa" : "caixa → investido"}`;
+  const icone = prov ? "trending-up" : "transfer";
+  return `<div class="mini-row click txr" data-asset-open="${attr(m.id)}"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic(icone, 16)}</span><div class="tx-mid"><div class="mini-desc">${titulo} <span class="asset-tag">${tag}</span></div><div class="mini-meta">${meta}</div></div><span class="num" style="color:${cor};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
 }
 // Saldo inicial (abertura) da conta = valor ANTES do 1º lançamento, derivado como
 // (saldo/caixa atual − soma de todos os movimentos). É estável: adicionar/remover lançamento
@@ -965,7 +986,7 @@ function acctMovSum(a) {
   if (!a) return 0;
   let s = 0;
   acctTx(a.nome).forEach((t) => { s += txValorConta(t, a.nome); });
-  if (temAtivos(a)) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => { s += (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco); });
+  if (temAtivos(a)) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => { s += (m.tipo === "venda" || m.tipo === "provento" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco); });
   return s;
 }
 const acctAnchor = (a) => (temAtivos(a) ? carteiraCaixa(a) : acctTotal(a));
@@ -980,6 +1001,7 @@ function heldAt(contaId, ym) {
   moves.forEach((m) => {
     const k = String(m.ticker || "?").toUpperCase();
     const o = pos[k] || (pos[k] = { qtd: 0, custo: 0 });
+    if (m.tipo === "provento") return; // provento não altera quantidade/custo
     const q = numOr0(m.qtd), pr = numOr0(m.preco);
     if (m.tipo === "venda") { const pm = o.qtd > 0 ? o.custo / o.qtd : 0; const qv = Math.min(q, o.qtd); o.custo -= pm * qv; o.qtd -= qv; }
     else { o.qtd += q; o.custo += pr * q; }
@@ -1009,7 +1031,7 @@ function viewAcctDetail(nome) {
   // ledger unificado: transações + (se carteira) compras/vendas de ativo como linhas de caixa
   const items = [];
   acctTx(nome).forEach((t) => items.push({ iso: t.iso || "", data: t.data || "", eff: txValorConta(t, nome), html: acctTxRow(t, nome), asset: false }));
-  if (cart) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => items.push({ iso: m.iso || "", data: m.iso ? dataBR(m.iso) : "", eff: (m.tipo === "venda" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), html: acctAssetRow(m), asset: true }));
+  if (cart) assetMoves.filter((m) => m.contaId === a.id).forEach((m) => items.push({ iso: m.iso || "", data: m.iso ? dataBR(m.iso) : "", eff: (m.tipo === "venda" || m.tipo === "provento" ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco), html: acctAssetRow(m), asset: true }));
   items.sort((x, y) => String(y.iso || y.data).localeCompare(String(x.iso || x.data)));
   // Entradas/Saídas = só caixa real (aportes/saques/receitas/despesas). Compra/venda de ativo é
   // reaplicação interna (caixa↔investido), não conta como entrada nem saída.
@@ -1097,13 +1119,17 @@ function invPosRow(p, contaId) {
   const qtd = (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   const key = `${contaId}|${p.ticker}`;
   const open = !!(state.invExpand && state.invExpand[key]);
+  const prov = numOr0(p.proventos);
   const main = `<tr class="inv-pos-tr click${open ? " on" : ""}" data-pos-toggle="${attr(key)}">
     <td><div class="inv-ativo-row"><span class="inv-caret">${ic(open ? "chevron-down" : "arrow-right", 13)}</span><div class="inv-ativo"><span class="inv-tkr">${_esc(p.ticker)}</span>${p.nome ? `<span class="inv-nome">${_esc(p.nome)}</span>` : ""}</div>${p.classe ? `<span class="inv-classe">${CLASSE_LABEL[p.classe] || p.classe}</span>` : ""}</div></td>
     <td class="num">${qtd}</td>
     <td class="num">${fmtNum(p.pm)}</td>
+    <td class="num">${fmtNum(p.investido)}</td>
     <td class="num">${cot}</td>
     <td class="num">${fmtNum(p.valor)}</td>
-    <td class="num" style="text-align:right">${invGanhoHTML(p.ganho, p.ganhoPct)}</td>
+    <td class="num">${prov > 1e-6 ? `<span style="color:var(--pos)">${fmtNum(prov)}</span>` : "—"}</td>
+    <td class="num">${invGanhoHTML(p.ganho, p.ganhoPct)}</td>
+    <td class="num" style="text-align:right">${invGanhoHTML(p.ganhoProv, p.ganhoProvPct)}</td>
   </tr>`;
   return open ? main + invPosDetailRow(contaId, p) : main;
 }
@@ -1114,25 +1140,33 @@ function invPosDetailRow(contaId, p) {
   const moves = assetMoves.filter((m) => m.contaId === contaId && String(m.ticker || "").toUpperCase() === p.ticker)
     .slice().sort((a, b) => String(a.iso || "").localeCompare(String(b.iso || "")));
   const rows = moves.map((m) => {
-    const venda = m.tipo === "venda", cor = venda ? "var(--neg)" : "var(--pos)";
+    const prov = m.tipo === "provento", venda = m.tipo === "venda";
+    const cor = prov || venda ? "var(--pos)" : "var(--neg)"; // entra (+) = verde; compra sai (−) = vermelho
     const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
     const total = numOr0(m.qtd) * numOr0(m.preco);
+    const label = prov ? "Provento" : venda ? "Venda" : "Compra";
+    const qp = prov ? "recebido" : `${q} × ${fmtNum(m.preco)}`;
     return `<div class="inv-mv click" data-asset-open="${attr(m.id)}">
-      <span class="inv-mv-badge" style="background:${cor}1A;color:${cor}">${venda ? "Venda" : "Compra"}</span>
+      <span class="inv-mv-badge" style="background:${cor}1A;color:${cor}">${label}</span>
       <span class="inv-mv-date">${m.iso ? dataFullBR(m.iso) : "—"}</span>
-      <span class="inv-mv-qp">${q} × ${fmtNum(m.preco)}</span>
-      <span class="inv-mv-tot num" style="color:${cor}">${venda ? "+ " : "− "}${fmtNum(total)}</span>
+      <span class="inv-mv-qp">${qp}</span>
+      <span class="inv-mv-tot num" style="color:${cor}">${prov || venda ? "+ " : "− "}${fmtNum(total)}</span>
       <span class="inv-mv-edit">${ic("pencil", 13)}</span>
     </div>`;
   }).join("");
   const qtdStr = (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   const arg = attr(`${contaId}|${p.ticker}|${p.classe || "acao"}`);
-  return `<tr class="inv-detail-row"><td colspan="6"><div class="inv-detail">
-    <div class="inv-detail-head"><span>Movimentações consideradas</span><span class="inv-detail-sum">PM ${fmtNum(p.pm)} · ${qtdStr} un · custo ${fmt(p.custo)}${Math.abs(p.realizado) > 1e-6 ? ` · realizado ${p.realizado >= 0 ? "+" : "−"} ${fmtNum(Math.abs(p.realizado))}` : ""}</span></div>
+  const prov = numOr0(p.proventos);
+  const sum = `PM ${fmtNum(p.pm)} · ${qtdStr} un · investido ${fmt(p.investido)}`
+    + (prov > 1e-6 ? ` · proventos ${fmtNum(prov)} · PM c/ prov ${fmtNum(p.pmProv)}` : "")
+    + (Math.abs(p.realizado) > 1e-6 ? ` · realizado ${p.realizado >= 0 ? "+" : "−"} ${fmtNum(Math.abs(p.realizado))}` : "");
+  return `<tr class="inv-detail-row"><td colspan="9"><div class="inv-detail">
+    <div class="inv-detail-head"><span>Movimentações consideradas</span><span class="inv-detail-sum">${sum}</span></div>
     <div class="inv-mv-list">${rows}</div>
     <div class="inv-detail-actions">
       <button class="mini-btn primary" data-pos-buy="${arg}">${ic("plus", 13)} Comprar mais</button>
       <button class="mini-btn" data-pos-sell="${arg}">${ic("trending-down", 13)} Vender</button>
+      <button class="mini-btn" data-pos-prov="${arg}">${ic("trending-up", 13)} Lançar provento</button>
       <button class="mini-btn danger" data-pos-del="${attr(contaId + "|" + p.ticker)}">${ic("archive", 13)} Excluir ativo</button>
     </div>
   </div></td></tr>`;
@@ -1145,7 +1179,7 @@ function invAtivosSection(a) {
   const ganho = valor - custo, pct = custo > 0 ? (ganho / custo) * 100 : 0;
   const table = pos.length ? `
     <div class="inv-tbl-wrap"><table class="inv-tbl">
-      <thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num">PM</th><th class="num">Cotação</th><th class="num">Valor</th><th class="num" style="text-align:right">Ganho</th></tr></thead>
+      <thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num" title="Preço médio (custo, sem proventos)">PM</th><th class="num" title="Valor investido = custo da posição atual">Investido</th><th class="num">Cotação</th><th class="num">Valor</th><th class="num" title="Proventos recebidos nesta posição">Proventos</th><th class="num" title="Valor de mercado − investido (não-realizado)">Result. s/ prov</th><th class="num" style="text-align:right" title="Resultado incluindo os proventos recebidos">Result. c/ prov</th></tr></thead>
       <tbody>${pos.map((p) => invPosRow(p, a.id)).join("")}</tbody>
     </table></div>` : `<div class="empty-mini">Nenhum ativo lançado ainda. Clique em “Lançar ativo” pra registrar o que está dentro desta conta.</div>`;
   return `<div class="card inv-cart">
@@ -2022,16 +2056,21 @@ function renderPop() {
     const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
     const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === p.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
     const classeOpts = Object.keys(CLASSE_LABEL).map((k) => `<option value="${k}"${k === (p.classe || "acao") ? " selected" : ""}>${CLASSE_LABEL[k]}</option>`).join("");
-    title = p.id ? "Editar ativo" : "Lançar ativo";
+    const prov = p.tipo === "provento";
+    title = p.id ? "Editar lançamento" : prov ? "Lançar provento" : "Lançar ativo";
+    const valorFields = prov
+      ? `<label class="fld"><span class="fld-label">Valor recebido (R$)</span><input data-am="valor" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.valor || (p.preco && p.qtd ? "" : p.preco) || "")}"></label>`
+      : `<div class="fld-row"><label class="fld"><span class="fld-label">Quantidade</span><input data-am="qtd" inputmode="decimal" placeholder="0" autocomplete="off" value="${attr(p.qtd || "")}"></label><label class="fld"><span class="fld-label">Preço unitário</span><input data-am="preco" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.preco || "")}"></label></div>`;
     body = `<div class="am-tipo">
         <button type="button" class="am-tab ${(p.tipo || "compra") === "compra" ? "on" : ""}" data-am-tipo="compra">Compra</button>
         <button type="button" class="am-tab ${p.tipo === "venda" ? "on" : ""}" data-am-tipo="venda">Venda</button>
+        <button type="button" class="am-tab ${prov ? "on" : ""}" data-am-tipo="provento">Provento</button>
       </div>
       <div class="fld-row"><label class="fld"><span class="fld-label">Carteira</span><select data-am="conta">${contaOpts}</select></label><label class="fld"><span class="fld-label">Data</span><input type="date" data-am="data" value="${attr(p.data || TODAY_ISO)}"></label></div>
       <div class="fld-row"><label class="fld"><span class="fld-label">Ticker</span><input data-am="ticker" placeholder="Ex.: HGLG11" autocomplete="off" style="text-transform:uppercase" value="${attr(p.ticker || "")}"></label><label class="fld"><span class="fld-label">Classe</span><select data-am="classe">${classeOpts}</select></label></div>
       <label class="fld"><span class="fld-label">Nome (opcional)</span><input data-am="nome" placeholder="Ex.: CSHG Logística" autocomplete="off" value="${attr(p.nome || "")}"></label>
-      <div class="fld-row"><label class="fld"><span class="fld-label">Quantidade</span><input data-am="qtd" inputmode="decimal" placeholder="0" autocomplete="off" value="${attr(p.qtd || "")}"></label><label class="fld"><span class="fld-label">Preço unitário</span><input data-am="preco" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.preco || "")}"></label></div>
-      <p class="pop-hint">O preço médio é calculado pelo sistema a partir dos seus lançamentos.</p>`;
+      ${valorFields}
+      <p class="pop-hint">${prov ? "Dividendo/JCP/rendimento recebido nesta posição. Entra no caixa da corretora e aparece nos proventos da Visão patrimonial." : "O preço médio é calculado pelo sistema a partir dos seus lançamentos."}</p>`;
     foot = p.id
       ? `<button class="pop-danger" data-inv-del="${attr(p.id)}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-inv-save>Salvar</button>`
       : `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-inv-save>Salvar lançamento</button>`;
@@ -2040,9 +2079,11 @@ function renderPop() {
     title = a ? a.nome : "Lançamentos";
     const moves = assetMoves.filter((m) => m.contaId === p.contaId).slice().sort((x, y) => String(y.iso || "").localeCompare(String(x.iso || "")));
     body = `<div class="pop-cat-list">${moves.map((m) => {
-      const venda = m.tipo === "venda", cor = venda ? "var(--neg)" : "var(--pos)";
+      const prov = m.tipo === "provento", venda = m.tipo === "venda", cor = prov || venda ? "var(--pos)" : "var(--neg)";
       const total = numOr0(m.qtd) * numOr0(m.preco);
-      return `<div class="mini-row"><div class="mini-l"><div><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)}</div></div></div><div class="inv-move-r"><span class="num" style="color:${cor};font-weight:600">${fmtNum(total)}</span><button class="pop-danger sm" data-inv-del="${attr(m.id)}" title="Excluir">${ic("archive", 14)}</button></div></div>`;
+      const label = prov ? "Provento" : venda ? "Venda" : "Compra";
+      const meta = prov ? "recebido" : `${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)}`;
+      return `<div class="mini-row"><div class="mini-l"><div><div class="mini-desc">${label} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${meta}</div></div></div><div class="inv-move-r"><span class="num" style="color:${cor};font-weight:600">${fmtNum(total)}</span><button class="pop-danger sm" data-inv-del="${attr(m.id)}" title="Excluir">${ic("archive", 14)}</button></div></div>`;
     }).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
     foot = `<button class="mini-btn primary" data-inv-add="${attr(p.contaId)}">${ic("plus", 14)} Novo lançamento</button>`;
   } else if (p.kind === "confirmAssetDel") {
@@ -2131,7 +2172,8 @@ function openAssetMoves(contaId) { state.pop = { kind: "assetMoves", contaId }; 
 function openAssetMoveFor(contaId, ticker, classe, tipo) {
   const tk = String(ticker || "").toUpperCase();
   const ex = assetMoves.find((m) => m.contaId === contaId && String(m.ticker || "").toUpperCase() === tk);
-  state.pop = { kind: "assetMove", contaId, tipo: tipo === "venda" ? "venda" : "compra", data: TODAY_ISO, ticker: tk, classe: classe || (ex && ex.classe) || "acao", nome: (ex && ex.nome) || "" };
+  const t = tipo === "venda" || tipo === "provento" ? tipo : "compra";
+  state.pop = { kind: "assetMove", contaId, tipo: t, data: TODAY_ISO, ticker: tk, classe: classe || (ex && ex.classe) || "acao", nome: (ex && ex.nome) || "" };
   renderPop();
 }
 // excluir o ATIVO inteiro (todas as movimentações do ticker naquela conta) — com confirmação (tarefa 2)
@@ -2149,25 +2191,36 @@ function openAssetEdit(id) {
   const m = assetMoves.find((x) => String(x.id) === String(id));
   if (!m) return;
   const br = (n) => String(numOr0(n)).replace(".", ","); // número BR pro input (vírgula decimal)
-  state.pop = { kind: "assetMove", id: m.id, contaId: m.contaId, tipo: m.tipo, data: m.iso || TODAY_ISO, ticker: m.ticker, nome: m.nome, classe: m.classe, qtd: br(m.qtd), preco: br(m.preco) };
+  const base = { kind: "assetMove", id: m.id, contaId: m.contaId, tipo: m.tipo, data: m.iso || TODAY_ISO, ticker: m.ticker, nome: m.nome, classe: m.classe };
+  if (m.tipo === "provento") base.valor = br(numOr0(m.qtd) * numOr0(m.preco)); // provento: valor recebido = qtd×preco
+  else { base.qtd = br(m.qtd); base.preco = br(m.preco); }
+  state.pop = base;
   renderPop();
 }
 function invSetTipo(tipo) {
   if (!state.pop || state.pop.kind !== "assetMove") return;
-  // preserva o que já foi digitado ao trocar compra⇄venda
-  const g = (s) => { const el = document.querySelector(`[data-am="${s}"]`); return el ? el.value : ""; };
-  Object.assign(state.pop, { tipo, conta: g("conta") || state.pop.contaId, data: g("data"), ticker: g("ticker"), nome: g("nome"), classe: g("classe"), qtd: g("qtd"), preco: g("preco"), contaId: g("conta") || state.pop.contaId });
+  // preserva o que já foi digitado ao trocar compra⇄venda⇄provento
+  const g = (s) => { const el = document.querySelector(`[data-am="${s}"]`); return el ? el.value : undefined; };
+  const patch = { tipo, contaId: g("conta") || state.pop.contaId, data: g("data"), ticker: g("ticker"), nome: g("nome"), classe: g("classe") };
+  const q = g("qtd"), pr = g("preco"), vl = g("valor");
+  if (q !== undefined) patch.qtd = q;
+  if (pr !== undefined) patch.preco = pr;
+  if (vl !== undefined) patch.valor = vl;
+  Object.assign(state.pop, patch);
   renderPop();
 }
 function saveAssetMove() {
   const g = (s) => { const el = document.querySelector(`[data-am="${s}"]`); return el ? el.value : ""; };
-  const contaId = g("conta"), ticker = g("ticker").trim().toUpperCase();
-  const qtd = parseValor(g("qtd")), preco = parseValor(g("preco"));
-  if (!contaId || !ticker || qtd <= 0 || preco <= 0) { const t = document.querySelector('[data-am="ticker"]'); if (t && !ticker) t.focus(); return; }
   const p = state.pop || {};
+  const prov = p.tipo === "provento";
+  const contaId = g("conta"), ticker = g("ticker").trim().toUpperCase();
+  // provento: um único campo "valor recebido" (guardado como qtd=1 × preco=valor)
+  const qtd = prov ? 1 : parseValor(g("qtd"));
+  const preco = prov ? parseValor(g("valor")) : parseValor(g("preco"));
+  if (!contaId || !ticker || qtd <= 0 || preco <= 0) { const t = document.querySelector('[data-am="ticker"]'); if (t && !ticker) t.focus(); return; }
   const dados = {
     contaId, iso: g("data") || TODAY_ISO, ticker, nome: g("nome").trim(),
-    classe: g("classe") || "acao", tipo: p.tipo === "venda" ? "venda" : "compra", qtd, preco,
+    classe: g("classe") || "acao", tipo: prov ? "provento" : p.tipo === "venda" ? "venda" : "compra", qtd, preco,
   };
   if (p.id) { const m = assetMoves.find((x) => String(x.id) === String(p.id)); if (m) Object.assign(m, dados); } // edição
   else assetMoves.push(Object.assign({ id: "am" + Date.now() }, dados)); // novo
@@ -2645,6 +2698,8 @@ function wire() {
     if (pBuy) { const [c, t, cl] = pBuy.dataset.posBuy.split("|"); openAssetMoveFor(c, t, cl, "compra"); return; }
     const pSell = e.target.closest("[data-pos-sell]");
     if (pSell) { const [c, t, cl] = pSell.dataset.posSell.split("|"); openAssetMoveFor(c, t, cl, "venda"); return; }
+    const pProv = e.target.closest("[data-pos-prov]");
+    if (pProv) { const [c, t, cl] = pProv.dataset.posProv.split("|"); openAssetMoveFor(c, t, cl, "provento"); return; }
     const pDel = e.target.closest("[data-pos-del]");
     if (pDel) { const [c, t] = pDel.dataset.posDel.split("|"); openAssetDelConfirm(c, t); return; }
     const aDelC = e.target.closest("[data-asset-del-confirm]");
