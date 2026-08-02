@@ -1426,6 +1426,69 @@ function refreshReconDiff() {
   const box = document.querySelector("[data-recon-diff]");
   if (box) box.innerHTML = reconDiffHTML();
 }
+// TELA de conciliação de ativos importados da B3 — espelha a conciliação de extrato (cards editáveis,
+// aceitar/ignorar/reativar) + validação de posição projetada por ticker.
+function assetReconCard(r) {
+  const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
+  const prov = r.tipo === "provento";
+  const val = prov ? numOr0(r.valor) : numOr0(r.qtd) * numOr0(r.preco);
+  const eff = prov || r.tipo === "venda" ? val : -val; // compra sai (−); venda/provento entram (+)
+  const rawDate = r.iso ? r.iso.split("-").reverse().join("/") : "";
+  const tipoLabel = prov ? "Provento" : r.tipo === "venda" ? "Venda" : "Compra";
+  const qtxt = (Math.round(numOr0(r.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  const left = `<div class="recon-raw"><div class="raw-label">no arquivo${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${tipoLabel} · ${_esc(r.ticker)}${prov ? "" : ` · ${qtxt} × ${fmtNum(r.preco)}`}</div><div class="raw-val num" style="color:${eff < 0 ? "var(--neg)" : "var(--pos)"}">${eff < 0 ? "− " : "+ "}${fmtNum(Math.abs(eff))}</div></div>`;
+  const sug = !isEdit
+    ? `<div class="sug-body"><span class="inv-classe">${CLASSE_LABEL[r.classe] || r.classe}</span>${r.dup ? `<div class="recon-match">${ic("circle-alert", 12)} já existe nesta carteira</div>` : ""}</div>`
+    : `<div class="edit-body">
+        <div class="edit-row"><select data-arf="tipo">${[["compra", "Compra"], ["venda", "Venda"], ["provento", "Provento"]].map(([k, l]) => `<option value="${k}"${k === r.tipo ? " selected" : ""}>${l}</option>`).join("")}</select><input type="date" data-arf="data" value="${r.iso || ""}"></div>
+        <div class="edit-row"><input data-arf="ticker" value="${attr(r.ticker)}" placeholder="Ticker" style="text-transform:uppercase"><select data-arf="classe">${Object.keys(CLASSE_LABEL).map((k) => `<option value="${k}"${k === r.classe ? " selected" : ""}>${CLASSE_LABEL[k]}</option>`).join("")}</select></div>
+        ${prov
+          ? `<input data-arf="valor" inputmode="decimal" value="${attr(r.valor != null ? String(r.valor).replace(".", ",") : "")}" placeholder="Valor recebido">`
+          : `<div class="edit-row"><input data-arf="qtd" inputmode="decimal" value="${attr(String(numOr0(r.qtd)).replace(".", ","))}" placeholder="Quantidade"><input data-arf="preco" inputmode="decimal" value="${attr(String(numOr0(r.preco)).replace(".", ","))}" placeholder="Preço"></div>`}
+      </div>`;
+  const actions = isEdit
+    ? `<button class="act accept" data-ar-accept="${r.id}">${ic("check", 14)} Salvar</button><button class="act edit" data-ar-edit="${r.id}">${ic("x", 13)} Cancelar</button>`
+    : done
+      ? `<span class="conc-tag">${ic("check", 14)} Aceito</span><button class="act edit" data-ar-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-ar-ignore="${r.id}" title="Ignorar">${ic("x", 13)}</button>`
+      : skip
+        ? `<span class="skip-tag">${r.dup ? "Já existe" : "Ignorado"}</span><button class="act edit" data-ar-reactivate="${r.id}">reativar</button>`
+        : `<button class="act accept" data-ar-accept="${r.id}">${ic("check", 14)} Aceitar</button><button class="act edit" data-ar-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-ar-ignore="${r.id}">${ic("x", 13)}</button>`;
+  return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-ar-id="${r.id}"><div class="recon-main">${left}<div class="recon-arrow">${ic("arrow-right", 15)}</div><div class="recon-sug">${sug}</div></div><div class="recon-actions">${actions}</div></div>`;
+}
+function viewAssetRecon() {
+  const ar = state.assetRecon, conta = acctById(ar.contaId);
+  const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
+  const rows = ar.rows;
+  const conc = rows.filter((r) => r.status === "conciliado").length;
+  const totalR = rows.filter((r) => r.status !== "ignorado").length;
+  const ign = rows.filter((r) => r.status === "ignorado").length;
+  const nov = rows.filter((r) => !r.dup).length, dup = rows.length - nov, pend = rows.filter((r) => r.status === "pendente").length;
+  const kindLbl = ar.kind === "neg" ? "Negociação · compra/venda" : "Movimentação · proventos";
+  const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === ar.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
+  const head = `<div class="card recon-head">
+    <div class="rh-l"><span class="acct-ic">${ic(conta ? acctIconOf(conta) : "invest", 18)}</span><div><div class="rh-label">Importando da B3 · ${kindLbl}</div><div class="rh-acct">${_esc(ar.fileName || "")}</div></div></div>
+    <label class="fld ar-acct-fld"><span class="fld-label">Carteira de destino</span><select data-ar-acct>${contaOpts}</select></label>
+  </div>`;
+  // validação: posição projetada por ticker (o "saldo" de ativos) + total de proventos aceitos
+  const proj = assetReconProjected();
+  const provAceitos = rows.filter((r) => r.status === "conciliado" && r.tipo === "provento");
+  const provTot = provAceitos.reduce((s, r) => s + numOr0(r.valor), 0);
+  const q = (n) => (Math.round(n * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  const projRows = proj.map((p) => {
+    const chg = Math.abs(p.proj - p.atual) > 1e-9;
+    return `<div class="ar-proj-row"><span class="ar-proj-tkr">${_esc(p.ticker)}</span><span class="ar-proj-q">${chg ? `${q(p.atual)} <span class="ar-arrow">→</span> <b>${q(p.proj)}</b>` : q(p.proj)} ${p.isRF ? "" : "cotas"}</span></div>`;
+  }).join("");
+  const check = `<div class="card recon-check ar-check">
+    <div class="ar-check-h"><b>Posição projetada</b><span>depois de aceitar — confira com sua corretora</span></div>
+    ${proj.length ? `<div class="ar-proj">${projRows}</div>` : `<div class="empty-mini">Aceite lançamentos pra ver a posição resultante.</div>`}
+    ${provAceitos.length ? `<div class="ar-prov-tot">${ic("trending-up", 14)} ${provAceitos.length} ${provAceitos.length === 1 ? "provento aceito" : "proventos aceitos"} · ${fmt(provTot)}</div>` : ""}
+  </div>`;
+  const resumo = `<div class="recon-sum"><b>${rows.length}</b> lidos · <b>${nov}</b> ${nov === 1 ? "novo" : "novos"} · <b>${dup}</b> já ${dup === 1 ? "existe" : "existem"} · ${kindLbl}</div>`;
+  const acceptAll = pend ? `<button class="ghost" data-ar-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
+  const saveLabel = conc ? `Importar ${conc} lançamento${conc > 1 ? "s" : ""}` : "Nada para importar";
+  const bar = head + check + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} aceitos</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-ar-cancel>${ic("x", 14)} Cancelar</button>${acceptAll}<button class="recon-save" data-ar-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
+  return bar + `<div class="recon-list">${rows.map(assetReconCard).join("")}</div>`;
+}
 function viewConciliacao() {
   if (!state.imported) {
     if (!state.reconAccount) state.reconAccount = (accounts.find((a) => !a.arquivada) || {}).nome;
@@ -1859,6 +1922,7 @@ const state = {
   // investimentos: posições expandidas (chave "contaId|TICKER") mostrando as movimentações
   invExpand: {},
   compDim: "objetivo", // dimensão da pizza de composição na Visão patrimonial
+  assetRecon: null, // conciliação de ativos importados da B3 (tela cheia, cards editáveis)
   // detalhe de categoria/subcategoria (todos os lançamentos)
   catDetail: null,
   // dashboard
@@ -1918,7 +1982,8 @@ function renderView() {
   if (elSub) elSub.textContent = meta[1];
   const pend = state.recon.filter((r) => r.status === "pendente").length;
   if (elBadge) { elBadge.textContent = pend; elBadge.style.display = pend ? "grid" : "none"; }
-  elView.innerHTML = VIEWS[state.tab]();
+  // a conciliação de ativos toma a área de conteúdo inteira (como o detalhe de conta), fora do tab
+  elView.innerHTML = state.assetRecon ? viewAssetRecon() : VIEWS[state.tab]();
   scheduleSave();
 }
 function renderModal() {
@@ -2221,31 +2286,14 @@ function renderPop() {
       <p class="pop-hint">${m ? `${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)} em ${m.iso ? dataFullBR(m.iso) : "—"}. ` : ""}O preço médio e a quantidade da posição serão recalculados sem este lançamento.</p>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-move-del-confirm="${attr(p.id)}">${ic("archive", 15)} Excluir</button>`;
   } else if (p.kind === "assetImport") {
+    // só estados de leitura/erro — a lista (cards editáveis) é a TELA viewAssetRecon
     title = "Importar da B3";
-    const kindLbl = p.b3kind === "neg" ? "Negociação (compra/venda)" : p.b3kind === "mov" ? "Movimentação (proventos)" : "";
-    if (p.loading) {
-      body = `<div class="ai-loading">${ic("rotate", 18)} Lendo <b>${_esc(p.fileName || "")}</b>… isso pode levar alguns segundos.</div>`;
-      foot = `<button class="mini-btn" data-pop-close>Cancelar</button>`;
-    } else if (p.error) {
+    if (p.error) {
       body = `<p class="confirm-lead">${ic("circle-alert", 18)} ${_esc(p.error)}</p><p class="pop-hint">Na área do investidor da B3, baixe em PDF o <b>Extrato de Negociação - Detalhe</b> (compras/vendas) ou o <b>Extrato de Movimentação</b> (proventos).</p>`;
       foot = `<button class="mini-btn primary" data-pop-close>Entendi</button>`;
     } else {
-      const rows = p.rows || [];
-      const nov = rows.filter((r) => !r.dup).length, dup = rows.length - nov;
-      const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
-      const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === p.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
-      const list = rows.map((r) => {
-        const det = r.tipo === "provento" ? `provento ${fmtNum(r.valor)}` : `${r.tipo === "venda" ? "venda" : "compra"} ${(Math.round(r.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(r.preco)}`;
-        const cor = r.tipo === "venda" ? "var(--neg)" : r.tipo === "provento" ? "var(--pos)" : "var(--sub)";
-        return `<label class="ai-row${r.dup ? " dup" : ""}"><input type="checkbox" data-ai-row="${attr(r.key)}"${r.accept ? " checked" : ""}><span class="ai-date">${r.iso ? dataFullBR(r.iso) : "—"}</span><span class="ai-tkr">${_esc(r.ticker)}</span><span class="ai-cls">${CLASSE_LABEL[r.classe] || r.classe}</span><span class="ai-det" style="color:${cor}">${det}</span>${r.dup ? `<span class="ai-tag">já existe</span>` : ""}</label>`;
-      }).join("");
-      body = `<div class="ai-head">
-          <label class="fld"><span class="fld-label">Importar na carteira</span><select data-ai-acct>${contaOpts}</select></label>
-          <div class="ai-sum"><b>${rows.length}</b> lidos · <b style="color:var(--pos)">${nov}</b> novos · <b>${dup}</b> já existem<span class="ai-src"> · ${kindLbl}</span></div>
-        </div>
-        <div class="ai-list">${list || `<div class="empty-mini">Nada pra importar.</div>`}</div>
-        <p class="pop-hint">Já vêm marcados só os <b>novos</b> (os que já existem ficam desmarcados). A classe é um chute pelo ticker — dá pra reclassificar depois no ativo.</p>`;
-      foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-ai-commit>Importar selecionados</button>`;
+      body = `<div class="ai-loading">${ic("rotate", 18)} Lendo <b>${_esc(p.fileName || "")}</b>… isso pode levar alguns segundos.</div>`;
+      foot = `<button class="mini-btn" data-pop-close>Cancelar</button>`;
     }
   } else if (p.kind === "rfVal") {
     title = "Valor atual · " + _esc(p.ticker);
@@ -2378,8 +2426,7 @@ function invImportPick(contaId) {
       if (!state.pop || state.pop.kind !== "assetImport") return; // usuário fechou
       if (!kind) { state.pop.loading = false; state.pop.error = "Não reconheci este PDF como Extrato de Negociação ou de Movimentação da B3."; renderPop(); return; }
       if (!moves.length) { state.pop.loading = false; state.pop.error = "Não encontrei compras/vendas nem proventos neste arquivo."; renderPop(); return; }
-      Object.assign(state.pop, { loading: false, b3kind: kind, rows: assetImportDedup(contaId, moves) });
-      renderPop();
+      openAssetRecon(contaId, kind, f.name, moves); // abre a tela de conciliação (cards editáveis)
     } catch (e) {
       if (state.pop && state.pop.kind === "assetImport") { state.pop.loading = false; state.pop.error = "Falha ao ler o PDF: " + String(e).slice(0, 120); renderPop(); }
     }
@@ -2396,31 +2443,64 @@ function assetImportDedup(contaId, moves) {
     return Object.assign({ key: "imp" + i }, m, { dup, accept: !dup });
   });
 }
-function openAssetImport(contaId, kind, fileName, moves) {
-  state.pop = { kind: "assetImport", contaId, b3kind: kind, fileName, loading: false, rows: assetImportDedup(contaId, moves) };
-  renderPop();
+// abre a TELA de conciliação de ativos (página cheia, cards editáveis — igual à conciliação de extrato)
+function openAssetRecon(contaId, kind, fileName, moves) {
+  const dd = assetImportDedup(contaId, moves);
+  const rows = dd.map((m, i) => Object.assign({ id: "ar" + i, status: m.dup ? "ignorado" : "pendente" }, m));
+  state.assetRecon = { contaId, kind, fileName, rows };
+  state.editing = null; closePop(); renderView();
 }
-// troca a conta de destino → re-dedup contra os ativos daquela conta
-function assetImportSetConta(contaId) {
-  const p = state.pop; if (!p || p.kind !== "assetImport" || !p.rows) return;
-  p.contaId = contaId;
-  p.rows = assetImportDedup(contaId, p.rows); // re-marca dup/novo pela nova conta
-  renderPop();
-}
-function assetImportCommit() {
-  const p = state.pop; if (!p || p.kind !== "assetImport" || !p.rows) return;
-  // lê os checkboxes marcados (não re-renderiza a cada toggle p/ não perder a rolagem)
-  const checked = new Set([...document.querySelectorAll("[data-ai-row]:checked")].map((el) => el.dataset.aiRow));
-  const base = Date.now(); let n = 0;
-  p.rows.forEach((r, i) => {
-    if (!checked.has(r.key)) return;
-    const mv = r.tipo === "provento"
-      ? { id: "am" + (base + i), contaId: p.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: "provento", qtd: 1, preco: r.valor }
-      : { id: "am" + (base + i), contaId: p.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: r.tipo, qtd: r.qtd, preco: r.preco };
-    assetMoves.push(mv); n++;
+// posição resultante por ticker se os aceitos forem lançados (validação: confira com a corretora)
+function assetReconProjected() {
+  const ar = state.assetRecon; if (!ar) return [];
+  const pos = {};
+  computePositions(ar.contaId).forEach((p) => { pos[p.ticker] = { ticker: p.ticker, atual: p.qtd, proj: p.qtd, isRF: p.isRF }; });
+  ar.rows.filter((r) => r.status === "conciliado" && r.tipo !== "provento").forEach((r) => {
+    const o = pos[r.ticker] || (pos[r.ticker] = { ticker: r.ticker, atual: 0, proj: 0, isRF: semCotacaoClasse(r.classe) });
+    o.proj += (r.tipo === "venda" ? -1 : 1) * numOr0(r.qtd);
   });
-  closePop(); refreshSideNet(); scheduleSave(); renderView();
+  return Object.values(pos).filter((o) => Math.abs(o.proj) > 1e-9 || Math.abs(o.atual) > 1e-9).sort((a, b) => String(a.ticker).localeCompare(b.ticker));
 }
+function assetReconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
+function assetReconAccept(id) {
+  const ar = state.assetRecon; if (!ar) return;
+  const r = ar.rows.find((x) => x.id === id); if (!r) return;
+  if (state.editing === id) { // salvando a edição
+    const scope = document.querySelector(`[data-ar-id="${id}"]`);
+    const val = (f) => { const el = scope && scope.querySelector(`[data-arf="${f}"]`); return el ? el.value : null; };
+    const tipo = val("tipo"); if (tipo) r.tipo = tipo;
+    const dt = val("data"); if (dt != null) r.iso = dt;
+    const tk = val("ticker"); if (tk != null) r.ticker = tk.trim().toUpperCase();
+    const cl = val("classe"); if (cl) r.classe = cl;
+    if (r.tipo === "provento") { const v = val("valor"); if (v != null) r.valor = parseValor(v); }
+    else { const q = val("qtd"); if (q != null) r.qtd = parseValor(q); const p = val("preco"); if (p != null) r.preco = parseValor(p); }
+    state.editing = null;
+  }
+  r.status = "conciliado"; renderView();
+}
+function assetReconIgnore(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "ignorado"; state.editing = null; renderView(); }
+function assetReconReactivate(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "pendente"; state.editing = null; renderView(); }
+function assetReconAcceptAll() { state.assetRecon.rows.forEach((r) => { if (r.status === "pendente") r.status = "conciliado"; }); state.editing = null; renderView(); }
+function assetReconSetConta(contaId) {
+  const ar = state.assetRecon; if (!ar) return;
+  ar.contaId = contaId;
+  const ids = ar.rows.map((r) => r.id);
+  const dd = assetImportDedup(contaId, ar.rows.map((r) => Object.assign({}, r)));
+  ar.rows = dd.map((m, i) => Object.assign({}, m, { id: ids[i], status: m.dup ? "ignorado" : "pendente" }));
+  state.editing = null; renderView();
+}
+function assetReconCommit() {
+  const ar = state.assetRecon; if (!ar) return;
+  const base = Date.now();
+  ar.rows.filter((r) => r.status === "conciliado").forEach((r, i) => {
+    const mv = r.tipo === "provento"
+      ? { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
+      : { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) };
+    assetMoves.push(mv);
+  });
+  state.assetRecon = null; state.editing = null; refreshSideNet(); scheduleSave(); renderView();
+}
+function assetReconCancel() { state.assetRecon = null; state.editing = null; renderView(); }
 // renda fixa: atualizar o valor atual (marcação a mercado à mão), guardado em prefs por conta+ticker
 function openRfVal(contaId, ticker) {
   const tk = String(ticker || "").toUpperCase();
@@ -2741,8 +2821,10 @@ function b3Date(s) { const m = String(s).trim().match(/^(\d{1,2}) de ([a-zçã]+
 // ticker B3: 4–6 alfanum COM letra E dígito (evita casar "BANCO", "S/A", nomes)
 const b3IsTicker = (s) => /^[A-Z0-9]{4,6}$/.test(s) && /\d/.test(s) && /[A-Z]/.test(s);
 function b3Kind(firstPageItems) { const t = firstPageItems.map((i) => i.str).join(" "); if (/Extrato de Negocia/i.test(t)) return "neg"; if (/Extrato de Movimenta/i.test(t)) return "mov"; return null; }
-// classe default pelo ticker/mercado (o usuário reclassifica depois)
-const b3Classe = (ticker, rf) => rf ? "rf" : (/11$/.test(ticker) ? "fii" : "acao");
+// classe default pelo ticker/mercado (o usuário reclassifica depois). "Renda Fixa" da B3 (Tesouro/
+// LFTB11 etc.) vem COM quantidade → entra como ETF (ativo com qtd), não como RF-lump manual; o
+// agrupamento "renda fixa" fica no objetivo/liquidez (independente da classe).
+const b3Classe = (ticker, rf) => rf ? "etf" : (/11$/.test(ticker) ? "fii" : "acao");
 // agrupa items por linha (mesmo y) e ordena por x
 function b3Rows(items) {
   const rows = {};
@@ -3009,7 +3091,18 @@ function wire() {
     if (iMoves) { openAssetMoves(iMoves.dataset.invMoves); return; }
     const iImp = e.target.closest("[data-inv-import]");
     if (iImp) { invImportPick(iImp.dataset.invImport); return; }
-    if (e.target.closest("[data-ai-commit]")) { assetImportCommit(); return; }
+    // conciliação de ativos (tela cheia)
+    const arAcc = e.target.closest("[data-ar-accept]");
+    if (arAcc) { assetReconAccept(arAcc.dataset.arAccept); return; }
+    const arEd = e.target.closest("[data-ar-edit]");
+    if (arEd) { assetReconEdit(arEd.dataset.arEdit); return; }
+    const arIg = e.target.closest("[data-ar-ignore]");
+    if (arIg) { assetReconIgnore(arIg.dataset.arIgnore); return; }
+    const arRe = e.target.closest("[data-ar-reactivate]");
+    if (arRe) { assetReconReactivate(arRe.dataset.arReactivate); return; }
+    if (e.target.closest("[data-ar-accept-all]")) { assetReconAcceptAll(); return; }
+    if (e.target.closest("[data-ar-commit]")) { assetReconCommit(); return; }
+    if (e.target.closest("[data-ar-cancel]")) { assetReconCancel(); return; }
     const iOpen = e.target.closest("[data-asset-open]");
     if (iOpen) { openAssetEdit(iOpen.dataset.assetOpen); return; }
     const iTipo = e.target.closest("[data-am-tipo]");
@@ -3100,7 +3193,7 @@ function wire() {
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     const hday = e.target.closest("[data-hist-day]");
     if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
@@ -3265,9 +3358,9 @@ function wire() {
       if (q !== undefined) patch.qtd = q; if (pr !== undefined) patch.preco = pr; if (vl !== undefined) patch.valor = vl;
       Object.assign(state.pop, patch); renderPop();
     }
-    // importar da B3: trocar a carteira de destino → re-dedup
-    const aiA = e.target.closest("[data-ai-acct]");
-    if (aiA) { assetImportSetConta(aiA.value); return; }
+    // conciliação de ativos: trocar a carteira de destino → re-dedup
+    const arA = e.target.closest("[data-ar-acct]");
+    if (arA) { assetReconSetConta(arA.value); return; }
   });
   // batimento: a cada tecla guarda o saldo do banco e atualiza SÓ o resultado (não a view toda,
   // senão o input é recriado e perde o foco no meio da digitação)
