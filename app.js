@@ -128,6 +128,46 @@ async function fetchQuotes() {
   } catch (e) { return false; }
 }
 const assetPrice = (ticker) => { const p = QUOTES[String(ticker || "").toUpperCase()]; return typeof p === "number" && isFinite(p) ? p : null; };
+
+// Histórico de cotação (fechamento mensal) via /api/history/{ticker} — Function serverless que faz
+// proxy do Yahoo (o navegador não alcança direto: CORS/rate-limit). Mapa {TICKER: {ym: close}}.
+const PRICE_HIST = {}; // { TICKER: { "2026-01": 60.1, ... } }
+let histTs = 0;
+function loadHistCache() {
+  try { const j = JSON.parse(localStorage.getItem("mc_hist") || "null"); if (j && j.map) { Object.assign(PRICE_HIST, j.map); histTs = j.ts || 0; } } catch (e) {}
+}
+function saveHistCache() { try { localStorage.setItem("mc_hist", JSON.stringify({ ts: histTs, map: PRICE_HIST })); } catch (e) {} }
+// busca a série mensal de cada ticker em carteira (só os que faltam ou estão velhos). Falha silenciosa
+// por ticker — sem histórico, o cálculo cai no custo (nunca inventa preço).
+async function fetchHistory(force) {
+  const tickers = [...new Set(assetMoves.map((m) => String(m.ticker || "").toUpperCase()).filter(Boolean))];
+  const stale = Date.now() - histTs > 6 * 3600 * 1000;
+  const alvo = tickers.filter((t) => force || stale || !PRICE_HIST[t]);
+  if (!alvo.length) return false;
+  let ok = false;
+  await Promise.all(alvo.map(async (t) => {
+    try {
+      const r = await fetch(`/api/history/${encodeURIComponent(t)}?range=3y&interval=1mo`);
+      if (!r.ok) return;
+      const j = await r.json();
+      if (Array.isArray(j.series) && j.series.length) { const m = {}; j.series.forEach(([ym, close]) => { m[ym] = close; }); PRICE_HIST[t] = m; ok = true; }
+    } catch (e) {}
+  }));
+  if (ok) { histTs = Date.now(); saveHistCache(); }
+  return ok;
+}
+// cotação do ticker ao fim do mês `ym`: usa o fechamento daquele mês; se faltar, o mês anterior mais
+// próximo disponível; senão a cotação atual; retorna null se não há nada (aí o chamador usa o custo).
+function histPriceAt(ticker, ym) {
+  const h = PRICE_HIST[String(ticker || "").toUpperCase()];
+  if (h) {
+    if (h[ym] != null) return h[ym];
+    const keys = Object.keys(h).filter((k) => k <= ym).sort();
+    if (keys.length) return h[keys[keys.length - 1]];
+  }
+  const now = assetPrice(ticker);
+  return now != null ? now : null;
+}
 const CLASSE_LABEL = { acao: "Ação", etf: "ETF", fii: "FII", rf: "Renda fixa", caixa: "Caixa", outro: "Outro" };
 const hasHoldings = () => assetMoves.length > 0;
 const temAtivos = (a) => a && assetMoves.some((m) => m.contaId === a.id);
@@ -747,6 +787,24 @@ function patEvolucao() {
   if (!arr.some((x) => x.ym === ym)) arr.push({ ym, valor: patAlloc().liquido });
   return arr.map((x) => ({ ym: x.ym, mes: mesAbbrev(x.ym), valor: Math.round(x.valor * 100) / 100 }));
 }
+// últimos N meses (YYYY-MM), do mais antigo ao atual
+function ultimosMeses(n) {
+  const [Y, M] = TODAY_ISO.slice(0, 7).split("-").map(Number), out = [];
+  for (let i = n - 1; i >= 0; i--) { let mm = M - 1 - i, yy = Y; while (mm < 0) { mm += 12; yy--; } out.push(`${yy}-${String(mm + 1).padStart(2, "0")}`); }
+  return out;
+}
+// série da CARTEIRA a mercado (reconstruída do histórico): valor de mercado × custo × rentabilidade,
+// mês a mês. Começa no 1º mês com posição. Usada na evolução e na rentabilidade no tempo.
+function carteiraSerie(n) {
+  const primeiro = assetMoves.map((m) => String(m.iso || "").slice(0, 7)).filter(Boolean).sort()[0];
+  if (!primeiro) return [];
+  const meses = ultimosMeses(n || 12).filter((ym) => ym >= primeiro);
+  return meses.map((ym) => {
+    const market = Math.round(investedMarketAt(null, ym) * 100) / 100;
+    const cost = Math.round(investedCostAt(null, ym) * 100) / 100;
+    return { ym, mes: mesAbbrev(ym), valor: market, custo: cost, ganho: market - cost, pct: cost > 0 ? ((market - cost) / cost) * 100 : 0 };
+  });
+}
 function registrarMes() {
   const ym = TODAY_ISO.slice(0, 7), a = patAlloc();
   const snaps = ((state.prefs.patSnaps || []).filter((x) => x.ym !== ym));
@@ -791,9 +849,11 @@ function viewPatrimonial() {
     </div>`;
   }).join("");
   const alloc = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Alocação</h3><span class="card-sub">atual vs. meta · bruto ${fmt(bruto)}</span></div><button class="mini-btn" data-pat-metas>${ic("pencil", 13)} Editar metas</button></div>${allocRows || `<div class="empty-mini">Sem ativos ainda.</div>`}<p class="pat-foot">Traço = meta. Renda Fixa inclui contas de investimento sem ativos detalhados; Caixa = contas correntes + caixa das carteiras; Imóveis/Bens = contas de patrimônio.</p></div>`;
-  // evolução
+  // evolução do patrimônio líquido (snapshots) + evolução da CARTEIRA a mercado (histórico Yahoo)
   const ev = patEvolucao();
+  const cart12 = carteiraSerie(12);
   const evolucao = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Evolução patrimonial</h3><span class="card-sub">patrimônio líquido · ${ev.length} ${ev.length === 1 ? "ponto" : "pontos"}</span></div></div>${ev.length >= 2 ? `<div class="pat-chart">${areaChartSVG(ev)}</div>` : `<div class="empty-mini">Clique em “Registrar mês” ao longo do tempo pra montar a curva (hoje: ${fmt(liquido)}).</div>`}</div>`;
+  const carteira = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Carteira a mercado</h3><span class="card-sub">valor de mercado dos ativos · ${cart12.length ? `${cart12.length} ${cart12.length === 1 ? "mês" : "meses"} (histórico)` : "sem histórico"}</span></div></div>${cart12.length >= 2 ? `<div class="pat-chart">${areaChartSVG(cart12)}</div><p class="pat-foot">Reconstruído da cotação histórica de cada mês × o que você tinha em carteira. Sem histórico de um ticker, usa o custo.</p>` : `<div class="empty-mini">${hasHoldings() ? "Carregando histórico de cotações…" : "Lance ativos numa carteira pra ver a evolução a mercado."}</div>`}</div>`;
   // proventos
   const provMax = Math.max(1, ...prov.serie.map((x) => x.valor));
   const provBars = prov.serie.map((x) => `<div class="pat-pbar" title="${x.mes}: ${fmt(x.valor)}"><div class="pat-pbar-fill" style="height:${(x.valor / provMax * 100).toFixed(1)}%"></div><span>${x.mes.slice(0, 3)}</span></div>`).join("");
@@ -808,14 +868,17 @@ function viewPatrimonial() {
       ${prem.ipca ? `<div><span>IPCA (12m)</span><b class="pat-muted">${numOr0(prem.ipca).toFixed(1)}%</b></div><div><span>Retorno real</span><b>${patDelta(nominal - numOr0(prem.ipca))}</b></div>` : ""}
       ${prem.cdi ? `<div><span>CDI (12m)</span><b class="pat-muted">${numOr0(prem.cdi).toFixed(1)}%</b></div><div><span>Excesso sobre o CDI</span><b>${patDelta(nominal - numOr0(prem.cdi))}</b></div>` : ""}
     </div>` : `<div class="empty-mini">Informe o IPCA e o CDI acumulados (12m) pra ver o retorno real e o excesso sobre o CDI.</div>`;
-  const rentab = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Rentabilidade</h3><span class="card-sub">ativos · ganho ${rent.ganho >= 0 ? "+" : "−"}${fmtNum(Math.abs(rent.ganho))} (mercado − custo)</span></div><button class="mini-btn" data-pat-prem>${ic("pencil", 13)} Premissas</button></div>${realRows}</div>`;
+  // rentabilidade no tempo (nominal %/mês da carteira, do histórico)
+  const rMax = Math.max(1, ...cart12.map((x) => Math.abs(x.pct)));
+  const rentSerie = cart12.length >= 2 ? `<div class="pat-rbars">${cart12.map((x) => { const h = (Math.abs(x.pct) / rMax * 100).toFixed(1); const up = x.pct >= 0; return `<div class="pat-rbar" title="${x.mes}: ${x.pct >= 0 ? "+" : ""}${x.pct.toFixed(1)}%"><div class="pat-rbar-track"><div class="pat-rbar-fill ${up ? "up" : "down"}" style="height:${h}%;${up ? "bottom" : "top"}:50%"></div></div><span>${x.mes.slice(0, 3)}</span></div>`; }).join("")}</div><p class="pat-foot">Rentabilidade nominal acumulada (mercado − custo) da carteira em cada mês.</p>` : "";
+  const rentab = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Rentabilidade</h3><span class="card-sub">ativos · ganho ${rent.ganho >= 0 ? "+" : "−"}${fmtNum(Math.abs(rent.ganho))} (mercado − custo)</span></div><button class="mini-btn" data-pat-prem>${ic("pencil", 13)} Premissas</button></div>${realRows}${rentSerie}</div>`;
   // posições consolidadas
   const pos = patPositions();
   const posRows = pos.map((p) => `<tr data-acct-open="${attr(p.conta)}" class="click"><td><div class="inv-ativo"><span class="inv-tkr">${_esc(p.ticker)}</span><span class="inv-nome">${_esc(p.conta)}</span></div>${p.classe ? `<span class="inv-classe">${CLASSE_LABEL[p.classe] || p.classe}</span>` : ""}</td><td class="num">${(Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })}</td><td class="num">${fmtNum(p.pm)}</td><td class="num">${p.semCotacao ? "—" : fmtNum(p.cotacao)}</td><td class="num">${fmtNum(p.valor)}</td><td class="num" style="text-align:right">${invGanhoHTML(p.ganho, p.ganhoPct)}</td></tr>`).join("");
   const posicoes = pos.length ? `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Posições consolidadas</h3><span class="card-sub">${pos.length} ${pos.length === 1 ? "ativo" : "ativos"} · valor ${fmt(rent.valor)} · custo ${fmt(rent.custo)}</span></div></div>
     <div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num">PM</th><th class="num">Atual</th><th class="num">Valor</th><th class="num" style="text-align:right">Result.</th></tr></thead><tbody>${posRows}</tbody></table></div>
     <p class="pat-foot">Clique numa linha pra abrir a conta do ativo.</p></div>` : "";
-  return `${hero}${kpis}${alloc}<div class="pat-2col">${evolucao}${proventos}</div>${rentab}${posicoes}`;
+  return `${hero}${kpis}${alloc}<div class="pat-2col">${evolucao}${carteira}</div><div class="pat-2col">${proventos}${rentab}</div>${posicoes}`;
 }
 
 function viewDashboard() {
@@ -898,10 +961,11 @@ function acctMovSum(a) {
 }
 const acctAnchor = (a) => (temAtivos(a) ? carteiraCaixa(a) : acctTotal(a));
 const aberturaAtual = (a) => Math.round((acctAnchor(a) - acctMovSum(a)) * 100) / 100;
-// custo investido ao FIM do mês `ym` (YYYY-MM): processa as compras/vendas até ali (custo médio).
-// Sem cotação histórica, o "investido do mês" é o custo aplicado — coerente com o fallback do app.
-function investedCostAt(contaId, ym) {
-  const moves = assetMoves.filter((m) => m.contaId === contaId && String(m.iso || "").slice(0, 7) <= ym)
+// posições mantidas ao FIM do mês `ym` (YYYY-MM): replay das compras/vendas até ali. contaId=null ⇒
+// consolida todas as carteiras. Retorna { TICKER: {qtd, custo} } (só quem tem qtd > 0).
+function heldAt(contaId, ym) {
+  const moves = assetMoves
+    .filter((m) => (contaId == null || m.contaId === contaId) && String(m.iso || "").slice(0, 7) <= ym)
     .slice().sort((a, b) => String(a.iso || "").localeCompare(String(b.iso || "")));
   const pos = {};
   moves.forEach((m) => {
@@ -911,7 +975,24 @@ function investedCostAt(contaId, ym) {
     if (m.tipo === "venda") { const pm = o.qtd > 0 ? o.custo / o.qtd : 0; const qv = Math.min(q, o.qtd); o.custo -= pm * qv; o.qtd -= qv; }
     else { o.qtd += q; o.custo += pr * q; }
   });
-  return Object.values(pos).reduce((s, o) => s + (o.qtd > 1e-9 ? o.custo : 0), 0);
+  const out = {};
+  Object.keys(pos).forEach((k) => { if (pos[k].qtd > 1e-9) out[k] = pos[k]; });
+  return out;
+}
+// custo investido ao fim do mês (soma dos custos das posições mantidas).
+function investedCostAt(contaId, ym) {
+  const held = heldAt(contaId, ym);
+  return Object.values(held).reduce((s, o) => s + o.custo, 0);
+}
+// VALOR DE MERCADO investido ao fim do mês: qtd × cotação histórica daquele mês (histPriceAt).
+// Sem histórico p/ um ticker, cai no custo daquela posição (nunca inventa). contaId=null = tudo.
+function investedMarketAt(contaId, ym) {
+  const held = heldAt(contaId, ym);
+  return Object.keys(held).reduce((s, tk) => {
+    const o = held[tk], price = histPriceAt(tk, ym);
+    const pm = o.qtd > 0 ? o.custo / o.qtd : 0;
+    return s + o.qtd * (price != null ? price : pm);
+  }, 0);
 }
 function viewAcctDetail(nome) {
   const a = accounts.find((x) => x.nome === nome);
@@ -942,7 +1023,7 @@ function viewAcctDetail(nome) {
     after += net;
     const balHTML = k === "0000-00" ? ""
       : cart
-        ? `<span class="md-bal">caixa <b class="num">${fmt(fim)}</b></span><span class="md-bal">investido <b class="num">${fmt(investedCostAt(a.id, k))}</b></span>`
+        ? `<span class="md-bal">caixa <b class="num">${fmt(fim)}</b></span><span class="md-bal">investido <b class="num">${fmt(investedMarketAt(a.id, k))}</b></span>`
         : `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
     return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span>${balHTML}</div>${list.map((it) => it.html).join("")}`;
   }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`)
@@ -2489,7 +2570,7 @@ function wire() {
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     const hday = e.target.closest("[data-hist-day]");
     if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
@@ -2777,13 +2858,13 @@ async function boot() {
   }
   applyModel(model);
   ensureSeeded(); // self-heal: injeta categorias/contas padrão se o usuário ficou sem nenhuma
-  loadQuotesCache(); // cotações em cache → valor de mercado já sai no 1º render
+  loadQuotesCache(); loadHistCache(); // cotações e histórico em cache → valor de mercado já sai no 1º render
   refreshDataLabels();
   hideAuth(); // remove o "carregando", se estava
   if (!_wired) { wire(); _wired = true; }
   renderView(); renderModal(); renderPop();
   // cotações frescas em segundo plano (só se houver ativos lançados)
-  if (hasHoldings()) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } });
+  if (hasHoldings()) { fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); }
   // pull em segundo plano: se outro aparelho mudou, atualiza a tela
   Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); renderView(); } }).catch(() => {});
 }
