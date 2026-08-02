@@ -301,6 +301,7 @@ const ICON = {
   "layout": '<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
   "trash": '<path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>',
   "key": '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.5 12.5 8-8"/><path d="m16 4.5 3 3"/><path d="m13.5 7 2.5 2.5"/>',
+  "lock": '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   "settings": '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   "download": '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   "shield": '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
@@ -1966,12 +1967,18 @@ function renderPop() {
     if (curTipo === "dinheiro") tipoLista.splice(1, 0, ["dinheiro", "Dinheiro (legado)"]);
     const tipoOpts = tipoLista.map(([v, l]) => `<option value="${v}"${v === curTipo ? " selected" : ""}>${l}</option>`).join("");
     const cart = a && temAtivos(a);
+    const nAtivos = travaTipo ? computePositions(a.id).length : 0;
+    // campo Tipo: select normal, OU (com ativos) um campo travado explícito com cadeado
+    const tipoField = travaTipo
+      ? `<label class="fld"><span class="fld-label">Tipo</span><div class="fld-locked">${ic("invest", 15)}<span>${(TIPO_INFO[curTipo] || TIPO_INFO.invest).label}</span><span class="lock-badge">${ic("lock", 11)} travado</span></div></label>`
+      : `<label class="fld"><span class="fld-label">Tipo</span><select data-ae="tipo">${tipoOpts}</select></label>`;
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${attr(p.curName != null ? p.curName : (a ? a.nome : ""))}" autocomplete="off"></label>
-      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-ae="tipo"${travaTipo ? " disabled" : ""}>${tipoOpts}</select></label><label class="fld"><span class="fld-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><input data-ae="saldo" inputmode="decimal" value="${attr(curSaldo)}" autocomplete="off"></label></div>
-      ${tipoHintHTML(curTipo)}
+      <div class="fld-row">${tipoField}<label class="fld"><span class="fld-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><input data-ae="saldo" inputmode="decimal" value="${attr(curSaldo)}" autocomplete="off"></label></div>
+      ${travaTipo
+        ? `<div class="lock-note">${ic("lock", 14)}<div><b>Tipo travado:</b> esta conta é uma carteira com ${nAtivos} ${nAtivos === 1 ? "ativo lançado" : "ativos lançados"}. O tipo <b>Investimento</b> é o que faz os ativos existirem aqui, então não dá pra trocar sem esvaziá-la. Pra mudar o tipo, remova os ativos primeiro (na seção <b>Ativos</b> da conta).</div></div>`
+        : tipoHintHTML(curTipo)}
       <label class="fld"><span class="fld-label">Subtítulo</span><input data-ae="sub" value="${attr(curSub)}" placeholder="Ex.: Conta corrente, Reserva…" autocomplete="off"></label>
       <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ae-icon", p.editIcon)}</div>
-      ${travaTipo ? `<p class="pop-hint">O tipo fica travado porque esta conta tem ativos lançados (a classificação depende dele). Remova os ativos pra trocar o tipo.</p>` : ""}
       <p class="pop-hint">O ${cart ? "caixa" : "saldo"} inicial é o valor antes do 1º lançamento — mudar re-baseia o ${cart ? "caixa" : "saldo"} atual.</p>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-acct-edit-save="${p.id}">Salvar</button>`;
   } else if (p.kind === "assetMove") {
