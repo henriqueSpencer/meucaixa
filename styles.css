@@ -917,3 +917,4 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .pat-rbar-fill.up{background:var(--pos)}
 .pat-rbar-fill.down{background:var(--neg)}
 .pat-rbar span{font-size:9px;color:var(--subtle)}
+.md-bal-tot b{color:var(--brand)}

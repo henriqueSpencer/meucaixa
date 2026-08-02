@@ -1021,10 +1021,16 @@ function viewAcctDetail(nome) {
     const lbl = k === "0000-00" ? "Sem data" : monthLabel(k + "-01");
     const fim = Math.round((anchor - after) * 100) / 100;
     after += net;
-    const balHTML = k === "0000-00" ? ""
-      : cart
-        ? `<span class="md-bal">caixa <b class="num">${fmt(fim)}</b></span><span class="md-bal">investido <b class="num">${fmt(investedMarketAt(a.id, k))}</b></span>`
-        : `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
+    let balHTML = "";
+    if (k !== "0000-00") {
+      if (cart) {
+        const invM = investedMarketAt(a.id, k);
+        const totMes = Math.round((fim + invM) * 100) / 100; // total da conta no fim do mês = caixa + ativos a mercado
+        balHTML = `<span class="md-bal">caixa <b class="num">${fmt(fim)}</b></span><span class="md-bal">investido <b class="num">${fmt(invM)}</b></span><span class="md-bal md-bal-tot">total <b class="num">${fmt(totMes)}</b></span>`;
+      } else {
+        balHTML = `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
+      }
+    }
     return `<div class="month-div"><span class="md-label">${lbl}</span><span class="md-count">${list.length} ${list.length === 1 ? "lançamento" : "lançamentos"}</span><span class="md-net num" style="color:${net >= 0 ? "var(--pos)" : "var(--neg)"}">${net >= 0 ? "+" : "−"} ${fmtNum(net)}</span>${balHTML}</div>${list.map((it) => it.html).join("")}`;
   }).join("") : `<div class="empty-mini">Nenhum lançamento nesta conta ainda.</div>`)
     // linha de abertura (saldo/caixa inicial), no rodapé — editável p/ fechar histórico incompleto
