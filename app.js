@@ -263,10 +263,9 @@ const TIPOS = {
 const ACCT_ICON = { banco: "landmark", cartao: "credit-card", dinheiro: "banknote", invest: "invest", patrimonio: "car" };
 // descrição de cada tipo de conta (usada nos modais e na ajuda da aba Contas)
 const TIPO_INFO = {
-  banco: { label: "Conta / banco", desc: "Conta corrente, poupança ou banco digital. Saldo = soma dos seus lançamentos." },
+  banco: { label: "Conta / banco", desc: "Conta corrente, poupança, banco digital ou dinheiro em espécie. Saldo = soma dos seus lançamentos." },
   invest: { label: "Investimento", desc: "Corretora/carteira. Só aqui você lança ativos (ações, ETFs, FIIs): a conta passa a separar caixa e o valor a mercado dos ativos, sem precisar lançar valorização à mão." },
   cartao: { label: "Cartão de crédito", desc: "Fatura do cartão (costuma ficar negativa). Na conciliação, o pagamento da fatura vira transferência automática; saldo negativo conta como passivo no patrimônio." },
-  dinheiro: { label: "Dinheiro", desc: "Espécie na carteira. Hoje funciona igual a Conta/banco — muda só o ícone e o rótulo." },
   patrimonio: { label: "Patrimônio (bem)", desc: "Carro, imóvel, bens. Mostra Valor alocado · Custos · Valor atual. Comprar o bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio." },
 };
 const tipoHintHTML = (tipo) => `<p class="fld-hint" data-tipo-hint>${(TIPO_INFO[tipo] || TIPO_INFO.banco).desc}</p>`;
@@ -1909,12 +1908,12 @@ function renderPop() {
   } else if (p.kind === "acctForm") {
     title = "Nova conta";
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-af="nome" placeholder="Ex.: Conta corrente" autocomplete="off"></label>
-      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-af="tipo"><option value="banco">Conta / banco</option><option value="invest">Investimento</option><option value="cartao">Cartão de crédito</option><option value="dinheiro">Dinheiro</option><option value="patrimonio">Patrimônio (bem)</option></select></label><label class="fld"><span class="fld-label">Saldo inicial</span><input data-af="saldo" inputmode="decimal" placeholder="0,00" autocomplete="off"></label></div>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-af="tipo"><option value="banco">Conta / banco</option><option value="invest">Investimento</option><option value="cartao">Cartão de crédito</option><option value="patrimonio">Patrimônio (bem)</option></select></label><label class="fld"><span class="fld-label">Saldo inicial</span><input data-af="saldo" inputmode="decimal" placeholder="0,00" autocomplete="off"></label></div>
       ${tipoHintHTML("banco")}`;
     foot = `<button class="mini-btn primary" data-acct-form-save>Adicionar conta</button><button class="mini-btn" data-pop-close>Cancelar</button>`;
   } else if (p.kind === "tiposHelp") {
     title = "Tipos de conta";
-    body = `<div class="tipos-help">${["banco", "dinheiro", "cartao", "invest", "patrimonio"].map((k) => `<div class="tipo-help-row"><span class="acct-ic small">${ic(ACCT_ICON[k], 16)}</span><div><div class="tipo-help-name">${TIPO_INFO[k].label}</div><div class="tipo-help-desc">${TIPO_INFO[k].desc}</div></div></div>`).join("")}</div>`;
+    body = `<div class="tipos-help">${["banco", "cartao", "invest", "patrimonio"].map((k) => `<div class="tipo-help-row"><span class="acct-ic small">${ic(ACCT_ICON[k], 16)}</span><div><div class="tipo-help-name">${TIPO_INFO[k].label}</div><div class="tipo-help-desc">${TIPO_INFO[k].desc}</div></div></div>`).join("")}</div>`;
     foot = `<button class="mini-btn primary" data-pop-close>Entendi</button>`;
   } else if (p.kind === "catForm") {
     title = p.parent ? "Nova subcategoria" : `Nova categoria de ${p.tipo === "receita" ? "receita" : "despesa"}`;
@@ -1962,8 +1961,10 @@ function renderPop() {
     const curSub = p.curSub != null ? p.curSub : (a ? a.sub : "");
     const curSaldo = p.curSaldo != null ? p.curSaldo : (a ? numOr0(aberturaAtual(a)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
     const travaTipo = a && temAtivos(a); // com ativos lançados, o tipo fica travado (classificação depende dele)
-    const tipoOpts = [["banco", "Conta / banco"], ["invest", "Investimento"], ["cartao", "Cartão de crédito"], ["dinheiro", "Dinheiro"], ["patrimonio", "Patrimônio (bem)"]]
-      .map(([v, l]) => `<option value="${v}"${v === curTipo ? " selected" : ""}>${l}</option>`).join("");
+    // "dinheiro" foi unificado em "banco"; mantém a opção só se a conta ainda for do tipo antigo
+    const tipoLista = [["banco", "Conta / banco"], ["invest", "Investimento"], ["cartao", "Cartão de crédito"], ["patrimonio", "Patrimônio (bem)"]];
+    if (curTipo === "dinheiro") tipoLista.splice(1, 0, ["dinheiro", "Dinheiro (legado)"]);
+    const tipoOpts = tipoLista.map(([v, l]) => `<option value="${v}"${v === curTipo ? " selected" : ""}>${l}</option>`).join("");
     const cart = a && temAtivos(a);
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${attr(p.curName != null ? p.curName : (a ? a.nome : ""))}" autocomplete="off"></label>
       <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-ae="tipo"${travaTipo ? " disabled" : ""}>${tipoOpts}</select></label><label class="fld"><span class="fld-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><input data-ae="saldo" inputmode="decimal" value="${attr(curSaldo)}" autocomplete="off"></label></div>
@@ -2886,6 +2887,13 @@ function ensureSeeded() {
   if (!accounts.length) def.accounts.forEach((a) => accounts.push(a));
   saveState();
 }
+// "dinheiro" foi unificado em "banco". Converte contas antigas (preservando o ícone de cédula p/
+// não mudar a cara) e persiste só se houve mudança. Idempotente — usuário sem 'dinheiro' não faz nada.
+function normalizeAcctTipos() {
+  let mudou = false;
+  accounts.forEach((a) => { if (a.tipo === "dinheiro") { a.tipo = "banco"; a.grupo = a.grupo || "fin"; if (!a.icon) a.icon = "banknote"; mudou = true; } });
+  if (mudou) saveState();
+}
 
 // carrega os dados (do IndexedDB; puxa/semeia se preciso) e sobe o app
 async function boot() {
@@ -2910,6 +2918,7 @@ async function boot() {
   }
   applyModel(model);
   ensureSeeded(); // self-heal: injeta categorias/contas padrão se o usuário ficou sem nenhuma
+  normalizeAcctTipos(); // migra contas 'dinheiro' → 'banco' (tipo unificado)
   loadQuotesCache(); loadHistCache(); // cotações e histórico em cache → valor de mercado já sai no 1º render
   refreshDataLabels();
   hideAuth(); // remove o "carregando", se estava
