@@ -261,6 +261,15 @@ const TIPOS = {
   reembolso: { label: "Reembolso", cor: C.reembolso, icon: "undo" },
 };
 const ACCT_ICON = { banco: "landmark", cartao: "credit-card", dinheiro: "banknote", invest: "invest", patrimonio: "car" };
+// descrição de cada tipo de conta (usada nos modais e na ajuda da aba Contas)
+const TIPO_INFO = {
+  banco: { label: "Conta / banco", desc: "Conta corrente, poupança ou banco digital. Saldo = soma dos seus lançamentos." },
+  invest: { label: "Investimento", desc: "Corretora/carteira. Só aqui você lança ativos (ações, ETFs, FIIs): a conta passa a separar caixa e o valor a mercado dos ativos, sem precisar lançar valorização à mão." },
+  cartao: { label: "Cartão de crédito", desc: "Fatura do cartão (costuma ficar negativa). Na conciliação, o pagamento da fatura vira transferência automática; saldo negativo conta como passivo no patrimônio." },
+  dinheiro: { label: "Dinheiro", desc: "Espécie na carteira. Hoje funciona igual a Conta/banco — muda só o ícone e o rótulo." },
+  patrimonio: { label: "Patrimônio (bem)", desc: "Carro, imóvel, bens. Mostra Valor alocado · Custos · Valor atual. Comprar o bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio." },
+};
+const tipoHintHTML = (tipo) => `<p class="fld-hint" data-tipo-hint>${(TIPO_INFO[tipo] || TIPO_INFO.banco).desc}</p>`;
 const PAGE = {
   dashboard: ["Visão geral", "Como está seu dinheiro em Julho de 2026"],
   patrimonial: ["Visão patrimonial", "Cockpit · consolidado em BRL"],
@@ -1062,7 +1071,7 @@ function viewContas() {
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:var(--subtle)">Arquivadas</span><p>Ocultas do dia a dia e fora do patrimônio. Reative quando quiser.</p></div></div>
   <div class="archived-list">${archived.map((a) => `<div class="arch-row"><span class="acct-ic small">${ic(acctIconOf(a), 16)}</span><div class="arch-info"><div class="arch-name">${a.nome}</div><div class="acct-sub">${a.sub}</div></div><span class="num arch-saldo">${fmt(acctTotal(a))}</span><button class="mini-btn" data-acct-archive="${a.id}">${ic("archive", 13)} Desarquivar</button></div>`).join("")}</div>` : "";
   return `
-  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar o nome, reordenar ou arquivar.</p></div></div>
+  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar, reordenar ou arquivar.</p></div><button class="mini-btn" data-tipos-help>${ic("book", 13)} Sobre os tipos de conta</button></div>
   <div class="acct-grid">${fin.map(acctCard).join("")}</div>
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:${C.patrimonio}">Alocações de patrimônio</span><p>Comprar um bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio.</p></div></div>
   <div class="acct-grid">${pat.map(acctCard).join("")}<button class="card acct add-acct" data-add-acct>${ic("plus", 22)}<span>Nova conta ou alocação</span></button></div>
@@ -1900,8 +1909,13 @@ function renderPop() {
   } else if (p.kind === "acctForm") {
     title = "Nova conta";
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-af="nome" placeholder="Ex.: Conta corrente" autocomplete="off"></label>
-      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-af="tipo"><option value="banco">Conta / banco</option><option value="invest">Investimento</option><option value="cartao">Cartão de crédito</option><option value="dinheiro">Dinheiro</option><option value="patrimonio">Patrimônio (bem)</option></select></label><label class="fld"><span class="fld-label">Saldo inicial</span><input data-af="saldo" inputmode="decimal" placeholder="0,00" autocomplete="off"></label></div>`;
+      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-af="tipo"><option value="banco">Conta / banco</option><option value="invest">Investimento</option><option value="cartao">Cartão de crédito</option><option value="dinheiro">Dinheiro</option><option value="patrimonio">Patrimônio (bem)</option></select></label><label class="fld"><span class="fld-label">Saldo inicial</span><input data-af="saldo" inputmode="decimal" placeholder="0,00" autocomplete="off"></label></div>
+      ${tipoHintHTML("banco")}`;
     foot = `<button class="mini-btn primary" data-acct-form-save>Adicionar conta</button><button class="mini-btn" data-pop-close>Cancelar</button>`;
+  } else if (p.kind === "tiposHelp") {
+    title = "Tipos de conta";
+    body = `<div class="tipos-help">${["banco", "dinheiro", "cartao", "invest", "patrimonio"].map((k) => `<div class="tipo-help-row"><span class="acct-ic small">${ic(ACCT_ICON[k], 16)}</span><div><div class="tipo-help-name">${TIPO_INFO[k].label}</div><div class="tipo-help-desc">${TIPO_INFO[k].desc}</div></div></div>`).join("")}</div>`;
+    foot = `<button class="mini-btn primary" data-pop-close>Entendi</button>`;
   } else if (p.kind === "catForm") {
     title = p.parent ? "Nova subcategoria" : `Nova categoria de ${p.tipo === "receita" ? "receita" : "despesa"}`;
     body = `${p.parent ? `<p class="pop-hint">Dentro de <b>${p.parent}</b></p>` : ""}<label class="fld"><span class="fld-label">Nome</span><input data-cf="nome" placeholder="${p.parent ? "Ex.: Mercado" : "Ex.: Educação"}" autocomplete="off"></label>`;
@@ -1953,6 +1967,7 @@ function renderPop() {
     const cart = a && temAtivos(a);
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${attr(p.curName != null ? p.curName : (a ? a.nome : ""))}" autocomplete="off"></label>
       <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-ae="tipo"${travaTipo ? " disabled" : ""}>${tipoOpts}</select></label><label class="fld"><span class="fld-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><input data-ae="saldo" inputmode="decimal" value="${attr(curSaldo)}" autocomplete="off"></label></div>
+      ${tipoHintHTML(curTipo)}
       <label class="fld"><span class="fld-label">Subtítulo</span><input data-ae="sub" value="${attr(curSub)}" placeholder="Ex.: Conta corrente, Reserva…" autocomplete="off"></label>
       <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ae-icon", p.editIcon)}</div>
       ${travaTipo ? `<p class="pop-hint">O tipo fica travado porque esta conta tem ativos lançados (a classificação depende dele). Remova os ativos pra trocar o tipo.</p>` : ""}
@@ -2530,6 +2545,7 @@ function wire() {
     if (txe) { openEditTx(txe.dataset.txEdit); return; }
     if (e.target.closest("[data-add-acct]")) { openAcctForm(); return; }
     if (e.target.closest("[data-acct-form-save]")) { saveAcctForm(); return; }
+    if (e.target.closest("[data-tipos-help]")) { state.pop = { kind: "tiposHelp" }; renderPop(); return; }
     // investimentos
     if (e.target.closest("[data-inv-refresh]")) { invRefreshQuotes(); return; }
     const iAdd = e.target.closest("[data-inv-add]");
@@ -2756,6 +2772,9 @@ function wire() {
     if (ia) { state.reconAccount = ia.value; return; } // mantém a conta escolhida ao re-renderizar
     const rf = e.target.closest("[data-recon-field]");
     if (rf) { const card = rf.closest("[data-recon-id]"); if (card) reconFieldChange(card.dataset.reconId, rf.dataset.reconField, rf.value); }
+    // seletor de tipo de conta (nova conta / editar): atualiza só a descrição, sem re-render
+    const ts = e.target.closest('[data-af="tipo"], [data-ae="tipo"]');
+    if (ts) { const h = document.querySelector("[data-tipo-hint]"); if (h) h.textContent = (TIPO_INFO[ts.value] || TIPO_INFO.banco).desc; }
   });
   // batimento: a cada tecla guarda o saldo do banco e atualiza SÓ o resultado (não a view toda,
   // senão o input é recriado e perde o foco no meio da digitação)
