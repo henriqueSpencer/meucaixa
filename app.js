@@ -1046,8 +1046,10 @@ function viewAcctDetail(nome) {
     // linha de abertura (saldo/caixa inicial), no rodapé — editável p/ fechar histórico incompleto
     + `<div class="month-div abertura-row"><span class="md-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><span class="md-count">antes do 1º lançamento${abertura < 0 ? ` · <span class="ab-warn">histórico incompleto?</span>` : ""}</span><span class="md-bal"><b class="num">${fmt(abertura)}</b></span><button class="mini-btn xs" data-abertura="${attr(nome)}">${ic("pencil", 11)} ajustar</button></div>`;
   const iconName = acctIconOf(a);
+  // cabeçalho da carteira no MESMO padrão das linhas mensais: caixa · aplicado (custo) · mercado · total
+  const cartCusto = cart ? computePositions(a.id).reduce((s, p) => s + p.custo, 0) : 0;
   const headVal = cart
-    ? `<div class="adh-cart"><div><span>Caixa</span><b class="num">${fmt(carteiraCaixa(a))}</b></div><div><span>Investido</span><b class="num">${fmt(invInvestido(a))}</b></div><div class="adh-cart-tot"><span>Total</span><strong class="num">${fmt(acctTotal(a))}</strong></div></div>`
+    ? `<div class="adh-cart"><div><span>Caixa</span><b class="num">${fmt(carteiraCaixa(a))}</b></div><div><span>Aplicado</span><b class="num">${fmt(cartCusto)}</b></div><div><span>Mercado</span><b class="num">${fmt(invInvestido(a))}</b></div><div class="adh-cart-tot"><span>Total</span><strong class="num">${fmt(acctTotal(a))}</strong></div></div>`
     : `<div class="adh-saldo num" style="color:${a && acctTotal(a) < 0 ? "var(--neg)" : "var(--ink)"}">${a ? fmt(acctTotal(a)) : ""}</div>`;
   const ativos = (a && a.tipo === "invest") ? invAtivosSection(a) : ""; // ativos vivem na página da própria conta
   return `
