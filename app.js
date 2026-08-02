@@ -1805,13 +1805,28 @@ function toggleAcctMenu(id) { state.acctMenu = state.acctMenu === id ? null : id
 function startEditAcct(id) { const a = acctById(id); if (!a) return; state.acctMenu = null; state.pop = { kind: "acctEdit", id, curName: a.nome, editIcon: acctIconOf(a) }; renderPop(); }
 function cancelEditAcct() { state.acctEdit = null; renderView(); }
 function saveAcctEditForm(id) {
-  const a = acctById(id), inp = document.querySelector('[data-ae="nome"]');
+  const a = acctById(id);
   if (a) {
+    const g = (s) => { const el = document.querySelector(`[data-ae="${s}"]`); return el ? el.value : null; };
     a.icon = state.pop.editIcon;
-    const nv = inp ? inp.value.trim() : "";
+    // nome (propaga pras transações que referenciam por nome)
+    const nv = (g("nome") || "").trim();
     if (nv && nv !== a.nome) { const old = a.nome; a.nome = nv; state.tx.forEach((t) => { if (t.conta === old) t.conta = nv; if (t.origem === old) t.origem = nv; if (t.destino === old) t.destino = nv; }); if (state.acctDetail === old) state.acctDetail = nv; }
+    // subtítulo
+    const sub = g("sub"); if (sub != null) a.sub = sub.trim();
+    // saldo inicial (abertura) — re-baseia o saldo atual como no saveAbertura
+    const saldoRaw = g("saldo");
+    if (saldoRaw != null && saldoRaw.trim() !== "") { const novoAb = parseValor(saldoRaw); a.saldo = Math.round((numOr0(a.saldo) + (novoAb - aberturaAtual(a))) * 100) / 100; }
+    // tipo (travado se houver ativos lançados)
+    const tipoSel = g("tipo");
+    if (tipoSel && !temAtivos(a) && tipoSel !== a.tipo) {
+      a.tipo = tipoSel;
+      a.grupo = tipoSel === "patrimonio" ? "pat" : "fin";
+      if (a.grupo === "pat") { if (a.alocado == null) a.alocado = numOr0(a.saldo); if (a.custo == null) a.custo = 0; }
+      else { delete a.alocado; delete a.custo; }
+    }
   }
-  closePop(); renderView();
+  refreshSideNet(); closePop(); scheduleSave(); renderView();
 }
 function saveAcctName(id) {
   const inp = document.querySelector(`[data-acct-input="${id}"]`), a = acctById(id);
@@ -1929,8 +1944,19 @@ function renderPop() {
   } else if (p.kind === "acctEdit") {
     const a = acctById(p.id);
     title = "Editar conta";
+    const curTipo = p.curTipo != null ? p.curTipo : (a ? a.tipo : "banco");
+    const curSub = p.curSub != null ? p.curSub : (a ? a.sub : "");
+    const curSaldo = p.curSaldo != null ? p.curSaldo : (a ? numOr0(aberturaAtual(a)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "");
+    const travaTipo = a && temAtivos(a); // com ativos lançados, o tipo fica travado (classificação depende dele)
+    const tipoOpts = [["banco", "Conta / banco"], ["invest", "Investimento"], ["cartao", "Cartão de crédito"], ["dinheiro", "Dinheiro"], ["patrimonio", "Patrimônio (bem)"]]
+      .map(([v, l]) => `<option value="${v}"${v === curTipo ? " selected" : ""}>${l}</option>`).join("");
+    const cart = a && temAtivos(a);
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-ae="nome" value="${attr(p.curName != null ? p.curName : (a ? a.nome : ""))}" autocomplete="off"></label>
-      <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ae-icon", p.editIcon)}</div>`;
+      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-ae="tipo"${travaTipo ? " disabled" : ""}>${tipoOpts}</select></label><label class="fld"><span class="fld-label">${cart ? "Caixa inicial" : "Saldo inicial"}</span><input data-ae="saldo" inputmode="decimal" value="${attr(curSaldo)}" autocomplete="off"></label></div>
+      <label class="fld"><span class="fld-label">Subtítulo</span><input data-ae="sub" value="${attr(curSub)}" placeholder="Ex.: Conta corrente, Reserva…" autocomplete="off"></label>
+      <div class="fld"><span class="fld-label">Ícone</span>${iconPicker("data-ae-icon", p.editIcon)}</div>
+      ${travaTipo ? `<p class="pop-hint">O tipo fica travado porque esta conta tem ativos lançados (a classificação depende dele). Remova os ativos pra trocar o tipo.</p>` : ""}
+      <p class="pop-hint">O ${cart ? "caixa" : "saldo"} inicial é o valor antes do 1º lançamento — mudar re-baseia o ${cart ? "caixa" : "saldo"} atual.</p>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-acct-edit-save="${p.id}">Salvar</button>`;
   } else if (p.kind === "assetMove") {
     const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
@@ -2550,7 +2576,7 @@ function wire() {
     const cei = e.target.closest("[data-ce-icon]");
     if (cei) { const inp = document.querySelector('[data-ce="nome"]'); if (inp) state.pop.curName = inp.value; state.pop.editIcon = cei.dataset.ceIcon; renderPop(); return; }
     const aei = e.target.closest("[data-ae-icon]");
-    if (aei) { const inp = document.querySelector('[data-ae="nome"]'); if (inp) state.pop.curName = inp.value; state.pop.editIcon = aei.dataset.aeIcon; renderPop(); return; }
+    if (aei) { const gv = (s) => { const el = document.querySelector(`[data-ae="${s}"]`); return el ? el.value : null; }; const n = gv("nome"); if (n != null) state.pop.curName = n; const t = gv("tipo"); if (t != null) state.pop.curTipo = t; const sb = gv("sub"); if (sb != null) state.pop.curSub = sb; const sl = gv("saldo"); if (sl != null) state.pop.curSaldo = sl; state.pop.editIcon = aei.dataset.aeIcon; renderPop(); return; }
     const aes = e.target.closest("[data-acct-edit-save]");
     if (aes) { saveAcctEditForm(aes.dataset.acctEditSave); return; }
     const iclr = e.target.closest("[data-imp-clear]");
