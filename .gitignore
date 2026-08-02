@@ -15,3 +15,10 @@ imagens/
 
 # wrangler (cache local do deploy)
 .wrangler/
+
+# arquivos de exemplo (extratos B3 com dados pessoais) — nunca versionar
+arq_exemplo/
+
+# planilhas de extrato (dados pessoais)
+*.xlsx
+*.xls

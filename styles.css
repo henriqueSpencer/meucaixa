@@ -590,6 +590,26 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .pop-modal .fld input,.pop-modal .fld select{width:100%;font-family:inherit;font-size:14px;padding:11px 12px;border:1px solid var(--border);border-radius:10px;background:var(--card-2);color:var(--ink);font-weight:500}
 .pop-modal .fld input:focus,.pop-modal .fld select:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 22%,transparent)}
 .pop-foot{padding:14px 20px 18px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end}
+/* importar da B3 (conciliação de ativos) */
+.pop-modal.wide{max-width:620px;width:calc(100vw - 32px)}
+.ai-loading{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--sub);padding:18px 4px}
+.ai-loading svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ai-head{display:flex;flex-direction:column;gap:8px}
+.ai-sum{font-size:12.5px;color:var(--sub)}
+.ai-sum b{color:var(--ink);font-variant-numeric:tabular-nums}
+.ai-src{color:var(--subtle)}
+.ai-list{max-height:46vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px;background:var(--card-2)}
+.ai-row{display:flex;align-items:center;gap:10px;padding:7px 11px;border-bottom:1px solid var(--card);cursor:pointer;font-size:13px}
+.ai-row:last-child{border-bottom:none}
+.ai-row:hover{background:var(--card)}
+.ai-row input{width:15px;height:15px;flex:0 0 auto;accent-color:var(--brand)}
+.ai-row.dup{opacity:.6}
+.ai-date{min-width:64px;color:var(--sub);font-variant-numeric:tabular-nums}
+.ai-tkr{min-width:66px;font-weight:700;color:var(--ink)}
+.ai-cls{font-size:10px;font-weight:600;padding:1px 6px;border-radius:5px;background:var(--card);color:var(--subtle)}
+.ai-det{flex:1;text-align:right;font-variant-numeric:tabular-nums}
+.ai-tag{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:5px;background:rgba(124,137,160,.18);color:#7C89A0}
 .pop-danger{display:inline-flex;align-items:center;gap:7px;font-size:13.5px;font-weight:600;color:var(--neg);border:1px solid color-mix(in srgb,var(--neg) 40%,var(--border));background:color-mix(in srgb,var(--neg) 8%,var(--card));padding:10px 15px;border-radius:10px;transition:.12s}
 .pop-danger:hover{background:color-mix(in srgb,var(--neg) 16%,var(--card))}
 

@@ -1300,6 +1300,7 @@ function invAtivosSection(a) {
     ${table}
     <div class="inv-cart-actions">
       <button class="mini-btn primary" data-inv-add="${a.id}">${ic("plus", 14)} Lançar ativo</button>
+      <button class="mini-btn" data-inv-import="${a.id}">${ic("upload", 13)} Importar da B3</button>
       ${pos.length ? `<button class="mini-btn" data-inv-moves="${a.id}">${ic("list", 14)} Lançamentos</button>` : ""}
       <button class="mini-btn" data-inv-refresh>${ic("undo", 13)} Atualizar cotações</button>
     </div>
@@ -2219,6 +2220,33 @@ function renderPop() {
     body = `<p class="confirm-lead">${ic("archive", 18)} Excluir esta ${venda ? "venda" : "compra"}${m ? ` de <b>${_esc(m.ticker || "?")}</b>` : ""}?</p>
       <p class="pop-hint">${m ? `${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)} em ${m.iso ? dataFullBR(m.iso) : "—"}. ` : ""}O preço médio e a quantidade da posição serão recalculados sem este lançamento.</p>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-move-del-confirm="${attr(p.id)}">${ic("archive", 15)} Excluir</button>`;
+  } else if (p.kind === "assetImport") {
+    title = "Importar da B3";
+    const kindLbl = p.b3kind === "neg" ? "Negociação (compra/venda)" : p.b3kind === "mov" ? "Movimentação (proventos)" : "";
+    if (p.loading) {
+      body = `<div class="ai-loading">${ic("rotate", 18)} Lendo <b>${_esc(p.fileName || "")}</b>… isso pode levar alguns segundos.</div>`;
+      foot = `<button class="mini-btn" data-pop-close>Cancelar</button>`;
+    } else if (p.error) {
+      body = `<p class="confirm-lead">${ic("circle-alert", 18)} ${_esc(p.error)}</p><p class="pop-hint">Na área do investidor da B3, baixe em PDF o <b>Extrato de Negociação - Detalhe</b> (compras/vendas) ou o <b>Extrato de Movimentação</b> (proventos).</p>`;
+      foot = `<button class="mini-btn primary" data-pop-close>Entendi</button>`;
+    } else {
+      const rows = p.rows || [];
+      const nov = rows.filter((r) => !r.dup).length, dup = rows.length - nov;
+      const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
+      const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === p.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
+      const list = rows.map((r) => {
+        const det = r.tipo === "provento" ? `provento ${fmtNum(r.valor)}` : `${r.tipo === "venda" ? "venda" : "compra"} ${(Math.round(r.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(r.preco)}`;
+        const cor = r.tipo === "venda" ? "var(--neg)" : r.tipo === "provento" ? "var(--pos)" : "var(--sub)";
+        return `<label class="ai-row${r.dup ? " dup" : ""}"><input type="checkbox" data-ai-row="${attr(r.key)}"${r.accept ? " checked" : ""}><span class="ai-date">${r.iso ? dataFullBR(r.iso) : "—"}</span><span class="ai-tkr">${_esc(r.ticker)}</span><span class="ai-cls">${CLASSE_LABEL[r.classe] || r.classe}</span><span class="ai-det" style="color:${cor}">${det}</span>${r.dup ? `<span class="ai-tag">já existe</span>` : ""}</label>`;
+      }).join("");
+      body = `<div class="ai-head">
+          <label class="fld"><span class="fld-label">Importar na carteira</span><select data-ai-acct>${contaOpts}</select></label>
+          <div class="ai-sum"><b>${rows.length}</b> lidos · <b style="color:var(--pos)">${nov}</b> novos · <b>${dup}</b> já existem<span class="ai-src"> · ${kindLbl}</span></div>
+        </div>
+        <div class="ai-list">${list || `<div class="empty-mini">Nada pra importar.</div>`}</div>
+        <p class="pop-hint">Já vêm marcados só os <b>novos</b> (os que já existem ficam desmarcados). A classe é um chute pelo ticker — dá pra reclassificar depois no ativo.</p>`;
+      foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-ai-commit>Importar selecionados</button>`;
+    }
   } else if (p.kind === "rfVal") {
     title = "Valor atual · " + _esc(p.ticker);
     const pos = computePositions(p.contaId).find((x) => x.ticker === p.ticker);
@@ -2256,8 +2284,9 @@ function renderPop() {
       <div class="fld-row"><label class="fld"><span class="fld-label">IPCA 12m</span><input data-prem="ipca" inputmode="decimal" placeholder="0,0" autocomplete="off" value="${attr(pr.ipca != null ? pr.ipca : "")}"></label><label class="fld"><span class="fld-label">CDI 12m</span><input data-prem="cdi" inputmode="decimal" placeholder="0,0" autocomplete="off" value="${attr(pr.cdi != null ? pr.cdi : "")}"></label></div>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-prem-save>Salvar</button>`;
   }
-  el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
-  const first = el.querySelector("input"); if (first) first.focus();
+  const wide = p.kind === "assetImport" ? " wide" : "";
+  el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal${wide}"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
+  if (p.kind !== "assetImport") { const first = el.querySelector("input"); if (first) first.focus(); }
 }
 function closePop() { state.pop = null; renderPop(); }
 function openTxPop(id) { state.pop = { kind: "tx", id: String(id) }; renderPop(); }
@@ -2334,6 +2363,63 @@ function saveAssetTag() {
   const g = (s) => { const el = document.querySelector(`[data-tag="${s}"]`); return el ? el.value : ""; };
   setAssetTag(p.ticker, { objetivo: g("objetivo"), setor: g("setor"), segmento: g("segmento") });
   closePop(); scheduleSave(); renderView();
+}
+/* ---------- importar ativos da B3 (Negociação = compra/venda; Movimentação = proventos) ---------- */
+// escolhe o arquivo, lê o PDF e abre o pop de conciliação de ativos
+function invImportPick(contaId) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = ".pdf,application/pdf";
+  inp.onchange = async () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    state.pop = { kind: "assetImport", contaId, loading: true, fileName: f.name };
+    renderPop();
+    try {
+      const { kind, moves } = await parseB3PDF(await f.arrayBuffer());
+      if (!state.pop || state.pop.kind !== "assetImport") return; // usuário fechou
+      if (!kind) { state.pop.loading = false; state.pop.error = "Não reconheci este PDF como Extrato de Negociação ou de Movimentação da B3."; renderPop(); return; }
+      if (!moves.length) { state.pop.loading = false; state.pop.error = "Não encontrei compras/vendas nem proventos neste arquivo."; renderPop(); return; }
+      Object.assign(state.pop, { loading: false, b3kind: kind, rows: assetImportDedup(contaId, moves) });
+      renderPop();
+    } catch (e) {
+      if (state.pop && state.pop.kind === "assetImport") { state.pop.loading = false; state.pop.error = "Falha ao ler o PDF: " + String(e).slice(0, 120); renderPop(); }
+    }
+  };
+  inp.click();
+}
+// marca cada movimento lido como novo ou já-existente (dedup contra os assetMoves da conta escolhida)
+function assetImportDedup(contaId, moves) {
+  return moves.map((m, i) => {
+    const dup = assetMoves.some((x) => x.contaId === contaId && String(x.ticker || "").toUpperCase() === m.ticker && (x.iso || "") === (m.iso || "") && x.tipo === m.tipo
+      && (m.tipo === "provento"
+        ? Math.abs(numOr0(x.qtd) * numOr0(x.preco) - m.valor) < 0.01
+        : Math.abs(numOr0(x.qtd) - m.qtd) < 1e-6 && Math.abs(numOr0(x.preco) - m.preco) < 0.01));
+    return Object.assign({ key: "imp" + i }, m, { dup, accept: !dup });
+  });
+}
+function openAssetImport(contaId, kind, fileName, moves) {
+  state.pop = { kind: "assetImport", contaId, b3kind: kind, fileName, loading: false, rows: assetImportDedup(contaId, moves) };
+  renderPop();
+}
+// troca a conta de destino → re-dedup contra os ativos daquela conta
+function assetImportSetConta(contaId) {
+  const p = state.pop; if (!p || p.kind !== "assetImport" || !p.rows) return;
+  p.contaId = contaId;
+  p.rows = assetImportDedup(contaId, p.rows); // re-marca dup/novo pela nova conta
+  renderPop();
+}
+function assetImportCommit() {
+  const p = state.pop; if (!p || p.kind !== "assetImport" || !p.rows) return;
+  // lê os checkboxes marcados (não re-renderiza a cada toggle p/ não perder a rolagem)
+  const checked = new Set([...document.querySelectorAll("[data-ai-row]:checked")].map((el) => el.dataset.aiRow));
+  const base = Date.now(); let n = 0;
+  p.rows.forEach((r, i) => {
+    if (!checked.has(r.key)) return;
+    const mv = r.tipo === "provento"
+      ? { id: "am" + (base + i), contaId: p.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: "provento", qtd: 1, preco: r.valor }
+      : { id: "am" + (base + i), contaId: p.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: r.tipo, qtd: r.qtd, preco: r.preco };
+    assetMoves.push(mv); n++;
+  });
+  closePop(); refreshSideNet(); scheduleSave(); renderView();
 }
 // renda fixa: atualizar o valor atual (marcação a mercado à mão), guardado em prefs por conta+ticker
 function openRfVal(contaId, ticker) {
@@ -2648,6 +2734,79 @@ async function parsePDF(buffer) {
   }
   return out;
 }
+/* ---------- PDF B3 (área do investidor): Negociação (compra/venda) e Movimentação (proventos) ---------- */
+const B3_MESES = { janeiro: 1, fevereiro: 2, "março": 3, marco: 3, abril: 4, maio: 5, junho: 6, julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12 };
+function b3Money(s) { const m = String(s).match(/R\$\s*(-?)\s*([\d.]+),(\d{2})/); if (!m) return null; const n = parseFloat(m[2].replace(/\./g, "") + "." + m[3]); return m[1] === "-" ? -n : n; }
+function b3Date(s) { const m = String(s).trim().match(/^(\d{1,2}) de ([a-zçã]+) de (\d{4})$/i); if (!m) return ""; const mm = B3_MESES[m[2].toLowerCase()]; return mm ? `${m[3]}-${String(mm).padStart(2, "0")}-${String(+m[1]).padStart(2, "0")}` : ""; }
+// ticker B3: 4–6 alfanum COM letra E dígito (evita casar "BANCO", "S/A", nomes)
+const b3IsTicker = (s) => /^[A-Z0-9]{4,6}$/.test(s) && /\d/.test(s) && /[A-Z]/.test(s);
+function b3Kind(firstPageItems) { const t = firstPageItems.map((i) => i.str).join(" "); if (/Extrato de Negocia/i.test(t)) return "neg"; if (/Extrato de Movimenta/i.test(t)) return "mov"; return null; }
+// classe default pelo ticker/mercado (o usuário reclassifica depois)
+const b3Classe = (ticker, rf) => rf ? "rf" : (/11$/.test(ticker) ? "fii" : "acao");
+// agrupa items por linha (mesmo y) e ordena por x
+function b3Rows(items) {
+  const rows = {};
+  items.forEach((it) => { const s = (it.str || "").trim(); if (!s) return; const y = Math.round(it.y); (rows[y] = rows[y] || []).push({ x: it.x, s }); });
+  return Object.keys(rows).map(Number).sort((a, b) => b - a).map((y) => ({ y, toks: rows[y].sort((p, q) => p.x - q.x) }));
+}
+// NEGOCIAÇÃO: cada linha "Compra/Venda … TICKER qtd R$preço R$valor". Parse da direita (2 últimos R$
+// = preço e valor; qtd = nº antes; ticker = último código-de-negociação antes). Data vem do cabeçalho.
+function b3ParseNegPage(items, ctx) {
+  const out = []; ctx = ctx || { data: "" };
+  for (const row of b3Rows(items)) {
+    const toks = row.toks, first = toks[0].s;
+    const d = b3Date(first); if (d) { ctx.data = d; continue; }
+    if (!/^(Compra|Venda)$/i.test(first)) continue;
+    const moneys = toks.filter((t) => b3Money(t.s) !== null);
+    if (moneys.length < 2) continue;
+    const preco = b3Money(moneys[moneys.length - 2].s), valor = b3Money(moneys[moneys.length - 1].s);
+    const pre = toks.filter((t) => t.x < moneys[0].x);
+    let qi = -1; for (let i = pre.length - 1; i >= 0; i--) { if (/^[\d.]+(,\d+)?$/.test(pre[i].s)) { qi = i; break; } }
+    if (qi < 0) continue;
+    const qtd = parseValor(pre[qi].s);
+    let ticker = ""; for (let i = qi - 1; i >= 0; i--) { if (b3IsTicker(pre[i].s)) { ticker = pre[i].s; break; } }
+    if (!ticker || !qtd) continue;
+    const rf = pre.some((t) => /Renda\s*Fixa/i.test(t.s));
+    out.push({ iso: ctx.data, tipo: /venda/i.test(first) ? "venda" : "compra", ticker, classe: b3Classe(ticker, rf), qtd, preco: preco || (valor / qtd) });
+  }
+  return out;
+}
+// MOVIMENTAÇÃO: linhas quebram em várias y. Âncora = valor na coluna direita (x grande, >0); tipo e
+// ticker são achados por proximidade em y. Só proventos (Dividendo/JCP/Rendimento) com ticker entram —
+// Empréstimo/Transferência/Amortização e rendimentos sem ticker são ignorados (best-effort).
+function b3ParseMovPage(items, ctx) {
+  ctx = ctx || { data: "" };
+  const all = []; items.forEach((it) => { const s = (it.str || "").trim(); if (s) all.push({ x: it.x, y: it.y, s }); });
+  const out = [];
+  for (const t of all.slice().sort((a, b) => b.y - a.y)) {
+    const d = b3Date(t.s); if (d) { ctx.data = d; continue; }
+    const v = b3Money(t.s);
+    if (v === null || v <= 0 || t.x < 500) continue; // só a coluna Valor da Operação
+    const near = all.filter((o) => Math.abs(o.y - t.y) <= 10);
+    const typeTok = near.filter((o) => o.x < 110).map((o) => o.s).join(" ");
+    if (!/dividendo|juros sobre|rendimento/i.test(typeTok)) continue; // ignora o resto
+    let ticker = ""; for (const o of near) { const m = o.s.match(/\b([A-Z0-9]{4,6})\s*-\s/); if (m && b3IsTicker(m[1])) { ticker = m[1]; break; } }
+    if (!ticker) continue;
+    out.push({ iso: ctx.data, tipo: "provento", ticker, classe: b3Classe(ticker, false), valor: v });
+  }
+  return out;
+}
+// lê um PDF B3 inteiro → lista de movimentos de ativo ({iso,tipo,ticker,classe,qtd,preco} ou provento).
+async function parseB3PDF(buffer) {
+  const pdfjs = await loadPdfLib();
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const page1 = await (await doc.getPage(1)).getTextContent();
+  const items1 = page1.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
+  const kind = b3Kind(items1);
+  if (!kind) return { kind: null, moves: [] };
+  const ctx = { data: "" }; let moves = [];
+  for (let p = 1; p <= doc.numPages; p++) {
+    const tc = await (await doc.getPage(p)).getTextContent();
+    const items = tc.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }));
+    moves = moves.concat(kind === "neg" ? b3ParseNegPage(items, ctx) : b3ParseMovPage(items, ctx));
+  }
+  return { kind, moves };
+}
 const RECON_RULES = [
   { kw: ["ifood", "rappi", "restaurante", "lanche", "burger", "pizza", "bar ", "padaria"], cat: "LAZER", sub: "Comer fora" },
   { kw: ["uber", "99app", "99 ", "posto", "shell", "ipiranga", "combustiv", "estacion", "pedagio", "sem parar"], cat: "Custo de Vida", sub: "Carro" },
@@ -2848,6 +3007,9 @@ function wire() {
     if (iAdd) { openAssetMove(iAdd.dataset.invAdd); return; }
     const iMoves = e.target.closest("[data-inv-moves]");
     if (iMoves) { openAssetMoves(iMoves.dataset.invMoves); return; }
+    const iImp = e.target.closest("[data-inv-import]");
+    if (iImp) { invImportPick(iImp.dataset.invImport); return; }
+    if (e.target.closest("[data-ai-commit]")) { assetImportCommit(); return; }
     const iOpen = e.target.closest("[data-asset-open]");
     if (iOpen) { openAssetEdit(iOpen.dataset.assetOpen); return; }
     const iTipo = e.target.closest("[data-am-tipo]");
@@ -3103,6 +3265,9 @@ function wire() {
       if (q !== undefined) patch.qtd = q; if (pr !== undefined) patch.preco = pr; if (vl !== undefined) patch.valor = vl;
       Object.assign(state.pop, patch); renderPop();
     }
+    // importar da B3: trocar a carteira de destino → re-dedup
+    const aiA = e.target.closest("[data-ai-acct]");
+    if (aiA) { assetImportSetConta(aiA.value); return; }
   });
   // batimento: a cada tecla guarda o saldo do banco e atualiza SÓ o resultado (não a view toda,
   // senão o input é recriado e perde o foco no meio da digitação)
