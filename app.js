@@ -1024,9 +1024,10 @@ function viewAcctDetail(nome) {
     let balHTML = "";
     if (k !== "0000-00") {
       if (cart) {
-        const invM = investedMarketAt(a.id, k);
+        const invM = investedMarketAt(a.id, k);   // ativos a valor de mercado (cotação histórica)
+        const invC = investedCostAt(a.id, k);      // ativos a custo (o que foi aplicado)
         const totMes = Math.round((fim + invM) * 100) / 100; // total da conta no fim do mês = caixa + ativos a mercado
-        balHTML = `<span class="md-bal">caixa <b class="num">${fmt(fim)}</b></span><span class="md-bal">investido <b class="num">${fmt(invM)}</b></span><span class="md-bal md-bal-tot">total <b class="num">${fmt(totMes)}</b></span>`;
+        balHTML = `<span class="md-bal">caixa <b class="num">${fmt(fim)}</b></span><span class="md-bal">aplicado <b class="num">${fmt(invC)}</b></span><span class="md-bal">mercado <b class="num">${fmt(invM)}</b></span><span class="md-bal md-bal-tot">total <b class="num">${fmt(totMes)}</b></span>`;
       } else {
         balHTML = `<span class="md-bal">${balLabel} <b class="num">${fmt(fim)}</b></span>`;
       }
