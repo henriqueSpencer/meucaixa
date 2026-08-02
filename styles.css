@@ -935,6 +935,21 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .fld-inline input{width:90px;text-align:right}
 .fld-suffix{color:var(--subtle);font-size:13px}
 @media(max-width:760px){.pat-2col{grid-template-columns:1fr}.pat-hero{flex-direction:column;align-items:flex-start}}
+/* composição da carteira (pizza/donut) */
+.comp-tabs{margin:2px 0 14px}
+.pie-wrap{display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.pie-chart{position:relative;flex:0 0 auto}
+.pie-svg{display:block}
+.pie-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.pie-center b{font-size:20px;font-weight:700;font-family:'Space Grotesk',sans-serif;color:var(--ink);line-height:1}
+.pie-center span{font-size:10px;color:var(--subtle)}
+.pie-legend{flex:1;min-width:220px;display:flex;flex-direction:column;gap:2px}
+.pie-leg-row{display:flex;align-items:center;gap:9px;padding:5px 0;border-bottom:1px solid var(--card-2)}
+.pie-leg-row:last-child{border-bottom:none}
+.pie-leg-name{flex:1;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pie-leg-val{font-size:12.5px;color:var(--sub);font-variant-numeric:tabular-nums}
+.pie-leg-pct{font-size:12.5px;font-weight:700;color:var(--ink);min-width:48px;text-align:right;font-variant-numeric:tabular-nums}
+@media(max-width:520px){.pie-wrap{gap:16px;justify-content:center}}
 .pat-rbars{display:flex;align-items:stretch;gap:5px;height:96px;margin-top:6px}
 .pat-rbar{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
 .pat-rbar-track{position:relative;flex:1;width:70%;background:linear-gradient(var(--card-2),var(--card-2)) center/100% 1px no-repeat}

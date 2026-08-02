@@ -169,6 +169,40 @@ function histPriceAt(ticker, ym) {
   return now != null ? now : null;
 }
 const CLASSE_LABEL = { acao: "Ação", etf: "ETF", fii: "FII", rf: "Renda fixa", caixa: "Caixa", outro: "Outro" };
+// classificação POR TICKER (objetivo/liquidez + setor + segmento), guardada em prefs (sincroniza).
+// "objetivo" é ortogonal à classe: ex., um ETF pode ser marcado como Caixa. Serve à visão de liquidez
+// e às pizzas de composição. setor/segmento são texto livre (com sugestões).
+const OBJETIVOS = [
+  { key: "caixa", label: "Caixa / liquidez", cor: "#7C89A0" },
+  { key: "rf_curto", label: "Reserva / RF curto", cor: "#5E9E7E" },
+  { key: "rf_longo", label: "RF longo prazo", cor: "#8A7A5C" },
+  { key: "acoes", label: "Ações / longo prazo", cor: "#3E7CB1" },
+  { key: "fii", label: "FIIs / renda", cor: "#B0863A" },
+  { key: "exterior", label: "Exterior", cor: "#A65B4E" },
+  { key: "outro", label: "Outro", cor: "#9A9B8C" },
+];
+const OBJ_LABEL = OBJETIVOS.reduce((o, x) => (o[x.key] = x.label, o), {});
+const OBJ_COR = OBJETIVOS.reduce((o, x) => (o[x.key] = x.cor, o), {});
+// objetivo padrão derivado da classe do ativo (o usuário pode sobrescrever por ticker)
+function objetivoDefault(classe) {
+  return { acao: "acoes", etf: "acoes", fii: "fii", rf: "rf_longo", caixa: "caixa" }[classe] || "outro";
+}
+const assetTagsAll = () => (state.prefs && state.prefs.assetTags) || {};
+// tags de um ticker, com objetivo default pela classe informada
+function assetTag(ticker, classe) {
+  const t = assetTagsAll()[String(ticker || "").toUpperCase()] || {};
+  return { objetivo: t.objetivo || objetivoDefault(classe), setor: t.setor || "", segmento: t.segmento || "" };
+}
+function setAssetTag(ticker, patch) {
+  const tk = String(ticker || "").toUpperCase(); if (!tk) return;
+  const all = Object.assign({}, assetTagsAll());
+  const cur = Object.assign({}, all[tk] || {});
+  ["objetivo", "setor", "segmento"].forEach((k) => { if (patch[k] != null) { const v = String(patch[k]).trim(); if (v) cur[k] = v; else delete cur[k]; } });
+  if (Object.keys(cur).length) all[tk] = cur; else delete all[tk];
+  state.prefs.assetTags = all;
+}
+// palette p/ fatias dinâmicas (setor/segmento, cujos valores não são fixos)
+const PIE_PALETTE = ["#3E7CB1", "#B0863A", "#5E9E7E", "#A65B4E", "#8A7A5C", "#7C89A0", "#C6A24E", "#6D8891", "#9A6A8C", "#7E9A6A", "#B5776A", "#5C7A99"];
 const hasHoldings = () => assetMoves.length > 0;
 const temAtivos = (a) => a && assetMoves.some((m) => m.contaId === a.id);
 
@@ -845,6 +879,39 @@ function pctDeltaMes() {
   return ((atual - numOr0(prev.liquido)) / numOr0(prev.liquido)) * 100;
 }
 const patDelta = (g) => { const cor = g >= 0 ? "var(--pos)" : "var(--neg)"; return `<span style="color:${cor};font-weight:600">${g >= 0 ? "+" : ""}${g.toFixed(1)}%</span>`; };
+const CLASSE_COR = { acao: "#3E7CB1", etf: "#5E9E7E", fii: "#B0863A", rf: "#8A7A5C", caixa: "#7C89A0", outro: "#9A9B8C" };
+const COMP_DIMS = [{ key: "objetivo", label: "Objetivo" }, { key: "classe", label: "Classe" }, { key: "setor", label: "Setor" }, { key: "segmento", label: "Segmento" }];
+// composição da carteira (valor de mercado) por dimensão: classe | objetivo | setor | segmento.
+// Inclui o caixa parado da corretora nas dimensões classe/objetivo (é patrimônio de fato).
+function carteiraComposicao(dim) {
+  const map = {}; const add = (key, label, cor, valor) => { if (valor <= 0) return; const o = map[key] || (map[key] = { key, label, cor, valor: 0 }); o.valor += valor; };
+  let palIdx = 0; const dyn = {}; const palColor = (k) => dyn[k] || (dyn[k] = PIE_PALETTE[palIdx++ % PIE_PALETTE.length]);
+  accounts.filter((a) => !a.arquivada && a.tipo === "invest").forEach((a) => {
+    computePositions(a.id).forEach((p) => {
+      const val = p.valor; if (val <= 0) return;
+      const tag = assetTag(p.ticker, p.classe);
+      if (dim === "classe") add(p.classe || "outro", CLASSE_LABEL[p.classe] || "Outro", CLASSE_COR[p.classe] || "#9A9B8C", val);
+      else if (dim === "objetivo") add(tag.objetivo, OBJ_LABEL[tag.objetivo] || tag.objetivo, OBJ_COR[tag.objetivo] || "#9A9B8C", val);
+      else if (dim === "setor") { const s = tag.setor || "Sem setor"; add(s, s, tag.setor ? palColor(s) : "#9A9B8C", val); }
+      else { const s = tag.segmento || "Sem segmento"; add(s, s, tag.segmento ? palColor(s) : "#9A9B8C", val); }
+    });
+    if (dim === "classe" || dim === "objetivo") { const cx = carteiraCaixa(a); if (cx > 0.005) add("caixa", dim === "objetivo" ? OBJ_LABEL.caixa : "Caixa", "#7C89A0", cx); }
+  });
+  const segs = Object.values(map).sort((x, y) => y.valor - x.valor);
+  return { segs, total: segs.reduce((s, x) => s + x.valor, 0) };
+}
+// donut SVG puro (sem lib): cada fatia é um arco via stroke-dasharray num círculo.
+function pieSVG(segs, total, size) {
+  size = size || 140; if (!total) return "";
+  const r = size / 2, stroke = size * 0.24, rad = r - stroke / 2, circ = 2 * Math.PI * rad;
+  let acc = 0;
+  const rings = segs.map((s) => {
+    const dash = (s.valor / total) * circ;
+    const el = `<circle cx="${r}" cy="${r}" r="${rad}" fill="none" stroke="${s.cor}" stroke-width="${stroke}" stroke-dasharray="${dash.toFixed(2)} ${(circ - dash).toFixed(2)}" stroke-dashoffset="${(-acc).toFixed(2)}" transform="rotate(-90 ${r} ${r})"/>`;
+    acc += dash; return el;
+  }).join("");
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" class="pie-svg" role="img">${rings}</svg>`;
+}
 function viewPatrimonial() {
   const { val, bruto, passivos, liquido } = patAlloc();
   const rent = patRentab(), prov = patProventos(), prem = patPrem();
@@ -905,7 +972,15 @@ function viewPatrimonial() {
   const posicoes = pos.length ? `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Posições consolidadas</h3><span class="card-sub">${pos.length} ${pos.length === 1 ? "ativo" : "ativos"} · valor ${fmt(rent.valor)} · custo ${fmt(rent.custo)}</span></div></div>
     <div class="inv-tbl-wrap"><table class="inv-tbl"><thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num">PM</th><th class="num">Atual</th><th class="num">Valor</th><th class="num" style="text-align:right">Result.</th></tr></thead><tbody>${posRows}</tbody></table></div>
     <p class="pat-foot">Clique numa linha pra abrir a conta do ativo.</p></div>` : "";
-  return `${hero}${kpis}${alloc}<div class="pat-2col">${evolucao}${carteira}</div><div class="pat-2col">${proventos}${rentab}</div>${posicoes}`;
+  // composição da carteira (pizza) por dimensão escolhida
+  const compDim = state.compDim || "objetivo";
+  const comp = carteiraComposicao(compDim);
+  const compTabs = COMP_DIMS.map((d) => `<button class="chip ${d.key === compDim ? "on" : ""}" data-comp-dim="${d.key}">${d.label}</button>`).join("");
+  const compLegend = comp.segs.map((s) => `<div class="pie-leg-row"><span class="pat-dot" style="background:${s.cor}"></span><span class="pie-leg-name">${_esc(s.label)}</span><span class="pie-leg-val num">${fmt(s.valor)}</span><span class="pie-leg-pct num">${comp.total > 0 ? ((s.valor / comp.total) * 100).toFixed(1) : "0"}%</span></div>`).join("");
+  const composicao = `<div class="card pat-sec"><div class="pat-sec-head"><div><h3>Composição da carteira</h3><span class="card-sub">valor de mercado · total ${fmt(comp.total)}</span></div></div>
+    <div class="filters comp-tabs">${compTabs}</div>
+    ${comp.total > 0 ? `<div class="pie-wrap"><div class="pie-chart">${pieSVG(comp.segs, comp.total)}<div class="pie-center"><b class="num">${comp.segs.length}</b><span>${comp.segs.length === 1 ? "grupo" : "grupos"}</span></div></div><div class="pie-legend">${compLegend}</div></div>${(compDim === "setor" || compDim === "segmento") ? `<p class="pat-foot">Marque o ${compDim} de cada ativo (abra o ativo na conta → “Classificar”). Sem marcação, cai em “Sem ${compDim}”.</p>` : ""}` : `<div class="empty-mini">Lance ativos numa carteira pra ver a composição.</div>`}</div>`;
+  return `${hero}${kpis}${alloc}${composicao}<div class="pat-2col">${evolucao}${carteira}</div><div class="pat-2col">${proventos}${rentab}</div>${posicoes}`;
 }
 
 function viewDashboard() {
@@ -1157,9 +1232,12 @@ function invPosDetailRow(contaId, p) {
   const qtdStr = (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   const arg = attr(`${contaId}|${p.ticker}|${p.classe || "acao"}`);
   const prov = numOr0(p.proventos);
+  const tg = assetTag(p.ticker, p.classe);
+  const tagStr = `${OBJ_LABEL[tg.objetivo] || tg.objetivo}${tg.setor ? ` · ${tg.setor}` : ""}${tg.segmento ? ` · ${tg.segmento}` : ""}`;
   const sum = `PM ${fmtNum(p.pm)} · ${qtdStr} un · investido ${fmt(p.investido)}`
     + (prov > 1e-6 ? ` · proventos ${fmtNum(prov)} · PM c/ prov ${fmtNum(p.pmProv)}` : "")
-    + (Math.abs(p.realizado) > 1e-6 ? ` · realizado ${p.realizado >= 0 ? "+" : "−"} ${fmtNum(Math.abs(p.realizado))}` : "");
+    + (Math.abs(p.realizado) > 1e-6 ? ` · realizado ${p.realizado >= 0 ? "+" : "−"} ${fmtNum(Math.abs(p.realizado))}` : "")
+    + ` · ${tagStr}`;
   return `<tr class="inv-detail-row"><td colspan="9"><div class="inv-detail">
     <div class="inv-detail-head"><span>Movimentações consideradas</span><span class="inv-detail-sum">${sum}</span></div>
     <div class="inv-mv-list">${rows}</div>
@@ -1167,6 +1245,7 @@ function invPosDetailRow(contaId, p) {
       <button class="mini-btn primary" data-pos-buy="${arg}">${ic("plus", 13)} Comprar mais</button>
       <button class="mini-btn" data-pos-sell="${arg}">${ic("trending-down", 13)} Vender</button>
       <button class="mini-btn" data-pos-prov="${arg}">${ic("trending-up", 13)} Lançar provento</button>
+      <button class="mini-btn" data-pos-tag="${arg}">${ic("tag", 13)} Classificar</button>
       <button class="mini-btn danger" data-pos-del="${attr(contaId + "|" + p.ticker)}">${ic("archive", 13)} Excluir ativo</button>
     </div>
   </div></td></tr>`;
@@ -1744,6 +1823,7 @@ const state = {
   acctDetail: null, acctMenu: null, acctEdit: null,
   // investimentos: posições expandidas (chave "contaId|TICKER") mostrando as movimentações
   invExpand: {},
+  compDim: "objetivo", // dimensão da pizza de composição na Visão patrimonial
   // detalhe de categoria/subcategoria (todos os lançamentos)
   catDetail: null,
   // dashboard
@@ -2101,6 +2181,18 @@ function renderPop() {
     body = `<p class="confirm-lead">${ic("archive", 18)} Excluir esta ${venda ? "venda" : "compra"}${m ? ` de <b>${_esc(m.ticker || "?")}</b>` : ""}?</p>
       <p class="pop-hint">${m ? `${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)} em ${m.iso ? dataFullBR(m.iso) : "—"}. ` : ""}O preço médio e a quantidade da posição serão recalculados sem este lançamento.</p>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-move-del-confirm="${attr(p.id)}">${ic("archive", 15)} Excluir</button>`;
+  } else if (p.kind === "assetTag") {
+    title = "Classificar " + _esc(p.ticker);
+    const objOpts = OBJETIVOS.map((o) => `<option value="${o.key}"${o.key === p.objetivo ? " selected" : ""}>${o.label}</option>`).join("");
+    const setores = [...new Set(Object.values(assetTagsAll()).map((t) => t.setor).filter(Boolean))];
+    const segs = [...new Set(Object.values(assetTagsAll()).map((t) => t.segmento).filter(Boolean))];
+    body = `<p class="pop-hint">O <b>objetivo/liquidez</b> é independente da classe (ex.: um ETF pode contar como Caixa). Alimenta a visão de liquidez e as pizzas de composição.</p>
+      <label class="fld"><span class="fld-label">Objetivo / liquidez</span><select data-tag="objetivo">${objOpts}</select></label>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Setor</span><input data-tag="setor" list="tag-setores" placeholder="Ex.: Financeiro" autocomplete="off" value="${attr(p.setor || "")}"></label><label class="fld"><span class="fld-label">Segmento</span><input data-tag="segmento" list="tag-segs" placeholder="Ex.: Logística" autocomplete="off" value="${attr(p.segmento || "")}"></label></div>
+      <datalist id="tag-setores">${setores.map((s) => `<option value="${attr(s)}">`).join("")}</datalist>
+      <datalist id="tag-segs">${segs.map((s) => `<option value="${attr(s)}">`).join("")}</datalist>
+      <p class="pop-hint">A classificação vale pro ticker em todas as carteiras.</p>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-assettag-save>Salvar</button>`;
   } else if (p.kind === "abertura") {
     const a = acctByName(p.nome), cart = temAtivos(a);
     title = cart ? "Caixa inicial" : "Saldo inicial";
@@ -2186,6 +2278,19 @@ function confirmAssetDel(contaId, ticker) {
 }
 // excluir UMA movimentação (compra/venda) — também com confirmação, pois recalcula PM/qtd da posição
 function openMoveDelConfirm(id) { if (assetMoves.some((m) => String(m.id) === String(id))) { state.pop = { kind: "confirmMoveDel", id: String(id) }; renderPop(); } }
+// classificar ativo (objetivo/liquidez + setor + segmento) — guardado por ticker em prefs
+function openAssetTag(contaId, ticker, classe) {
+  const tk = String(ticker || "").toUpperCase();
+  const t = assetTag(tk, classe);
+  state.pop = { kind: "assetTag", contaId, ticker: tk, classe, objetivo: t.objetivo, setor: t.setor, segmento: t.segmento };
+  renderPop();
+}
+function saveAssetTag() {
+  const p = state.pop; if (!p || p.kind !== "assetTag") return;
+  const g = (s) => { const el = document.querySelector(`[data-tag="${s}"]`); return el ? el.value : ""; };
+  setAssetTag(p.ticker, { objetivo: g("objetivo"), setor: g("setor"), segmento: g("segmento") });
+  closePop(); scheduleSave(); renderView();
+}
 // clicar numa compra/venda no extrato → abre o mesmo modal em modo EDIÇÃO (com excluir)
 function openAssetEdit(id) {
   const m = assetMoves.find((x) => String(x.id) === String(id));
@@ -2700,6 +2805,11 @@ function wire() {
     if (pSell) { const [c, t, cl] = pSell.dataset.posSell.split("|"); openAssetMoveFor(c, t, cl, "venda"); return; }
     const pProv = e.target.closest("[data-pos-prov]");
     if (pProv) { const [c, t, cl] = pProv.dataset.posProv.split("|"); openAssetMoveFor(c, t, cl, "provento"); return; }
+    const pTag = e.target.closest("[data-pos-tag]");
+    if (pTag) { const [c, t, cl] = pTag.dataset.posTag.split("|"); openAssetTag(c, t, cl); return; }
+    if (e.target.closest("[data-assettag-save]")) { saveAssetTag(); return; }
+    const cDim = e.target.closest("[data-comp-dim]");
+    if (cDim) { state.compDim = cDim.dataset.compDim; renderView(); return; }
     const pDel = e.target.closest("[data-pos-del]");
     if (pDel) { const [c, t] = pDel.dataset.posDel.split("|"); openAssetDelConfirm(c, t); return; }
     const aDelC = e.target.closest("[data-asset-del-confirm]");
