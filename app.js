@@ -1092,17 +1092,50 @@ function invGanhoHTML(g, pct, big) {
   const p = pct != null && isFinite(pct) ? ` <span class="inv-pct">${g >= 0 ? "+" : ""}${pct.toFixed(1)}%</span>` : "";
   return `<span class="num${big ? " inv-big" : ""}" style="color:${cor};font-weight:600">${sig} ${fmtNum(Math.abs(g))}${p}</span>`;
 }
-function invPosRow(p) {
+function invPosRow(p, contaId) {
   const cot = p.semCotacao ? `<span class="inv-nocot" title="Sem cotação na fonte — usando o custo">—</span>` : fmtNum(p.cotacao);
   const qtd = (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
-  return `<tr>
-    <td><div class="inv-ativo"><span class="inv-tkr">${_esc(p.ticker)}</span>${p.nome ? `<span class="inv-nome">${_esc(p.nome)}</span>` : ""}</div>${p.classe ? `<span class="inv-classe">${CLASSE_LABEL[p.classe] || p.classe}</span>` : ""}</td>
+  const key = `${contaId}|${p.ticker}`;
+  const open = !!(state.invExpand && state.invExpand[key]);
+  const main = `<tr class="inv-pos-tr click${open ? " on" : ""}" data-pos-toggle="${attr(key)}">
+    <td><div class="inv-ativo-row"><span class="inv-caret">${ic(open ? "chevron-down" : "arrow-right", 13)}</span><div class="inv-ativo"><span class="inv-tkr">${_esc(p.ticker)}</span>${p.nome ? `<span class="inv-nome">${_esc(p.nome)}</span>` : ""}</div>${p.classe ? `<span class="inv-classe">${CLASSE_LABEL[p.classe] || p.classe}</span>` : ""}</div></td>
     <td class="num">${qtd}</td>
     <td class="num">${fmtNum(p.pm)}</td>
     <td class="num">${cot}</td>
     <td class="num">${fmtNum(p.valor)}</td>
     <td class="num" style="text-align:right">${invGanhoHTML(p.ganho, p.ganhoPct)}</td>
   </tr>`;
+  return open ? main + invPosDetailRow(contaId, p) : main;
+}
+// Linha embutida (colspan) que abre sob o ativo: lista TODAS as movimentações que formam a posição
+// (as que dão o PM/qtd), com botões de comprar mais / vender / excluir o ativo. Pedido do usuário:
+// não é popup — filtra e mostra na própria conta. Cada movimentação é clicável (edita/exclui).
+function invPosDetailRow(contaId, p) {
+  const moves = assetMoves.filter((m) => m.contaId === contaId && String(m.ticker || "").toUpperCase() === p.ticker)
+    .slice().sort((a, b) => String(a.iso || "").localeCompare(String(b.iso || "")));
+  const rows = moves.map((m) => {
+    const venda = m.tipo === "venda", cor = venda ? "var(--neg)" : "var(--pos)";
+    const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+    const total = numOr0(m.qtd) * numOr0(m.preco);
+    return `<div class="inv-mv click" data-asset-open="${attr(m.id)}">
+      <span class="inv-mv-badge" style="background:${cor}1A;color:${cor}">${venda ? "Venda" : "Compra"}</span>
+      <span class="inv-mv-date">${m.iso ? dataFullBR(m.iso) : "—"}</span>
+      <span class="inv-mv-qp">${q} × ${fmtNum(m.preco)}</span>
+      <span class="inv-mv-tot num" style="color:${cor}">${venda ? "+ " : "− "}${fmtNum(total)}</span>
+      <span class="inv-mv-edit">${ic("pencil", 13)}</span>
+    </div>`;
+  }).join("");
+  const qtdStr = (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  const arg = attr(`${contaId}|${p.ticker}|${p.classe || "acao"}`);
+  return `<tr class="inv-detail-row"><td colspan="6"><div class="inv-detail">
+    <div class="inv-detail-head"><span>Movimentações consideradas</span><span class="inv-detail-sum">PM ${fmtNum(p.pm)} · ${qtdStr} un · custo ${fmt(p.custo)}${Math.abs(p.realizado) > 1e-6 ? ` · realizado ${p.realizado >= 0 ? "+" : "−"} ${fmtNum(Math.abs(p.realizado))}` : ""}</span></div>
+    <div class="inv-mv-list">${rows}</div>
+    <div class="inv-detail-actions">
+      <button class="mini-btn primary" data-pos-buy="${arg}">${ic("plus", 13)} Comprar mais</button>
+      <button class="mini-btn" data-pos-sell="${arg}">${ic("trending-down", 13)} Vender</button>
+      <button class="mini-btn danger" data-pos-del="${attr(contaId + "|" + p.ticker)}">${ic("archive", 13)} Excluir ativo</button>
+    </div>
+  </div></td></tr>`;
 }
 // Seção de ativos EMBUTIDA na página da própria conta (carteira). Posições + lançar + cotações.
 function invAtivosSection(a) {
@@ -1113,7 +1146,7 @@ function invAtivosSection(a) {
   const table = pos.length ? `
     <div class="inv-tbl-wrap"><table class="inv-tbl">
       <thead><tr><th>Ativo</th><th class="num">Qtd</th><th class="num">PM</th><th class="num">Cotação</th><th class="num">Valor</th><th class="num" style="text-align:right">Ganho</th></tr></thead>
-      <tbody>${pos.map(invPosRow).join("")}</tbody>
+      <tbody>${pos.map((p) => invPosRow(p, a.id)).join("")}</tbody>
     </table></div>` : `<div class="empty-mini">Nenhum ativo lançado ainda. Clique em “Lançar ativo” pra registrar o que está dentro desta conta.</div>`;
   return `<div class="card inv-cart">
     <div class="inv-sec-head"><div><h3>Ativos</h3><span class="card-sub">${pos.length ? `${pos.length} ${pos.length === 1 ? "ativo" : "ativos"} · custo ${fmt(custo)} · ${invQuoteLabel()}` : invQuoteLabel()}</span></div>${pos.length ? `<div class="inv-sec-val"><div class="num inv-big">${fmt(valor)}</div>${invGanhoHTML(ganho, pct)}</div>` : ""}</div>
@@ -1675,6 +1708,8 @@ const state = {
   form: { desc: "", valor: "", cat: "", sub: "", conta: "Conta Corrente", data: TODAY_ISO, origem: "Conta Corrente", destino: "Investimentos" },
   // contas
   acctDetail: null, acctMenu: null, acctEdit: null,
+  // investimentos: posições expandidas (chave "contaId|TICKER") mostrando as movimentações
+  invExpand: {},
   // detalhe de categoria/subcategoria (todos os lançamentos)
   catDetail: null,
   // dashboard
@@ -2010,6 +2045,21 @@ function renderPop() {
       return `<div class="mini-row"><div class="mini-l"><div><div class="mini-desc">${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)}</div></div></div><div class="inv-move-r"><span class="num" style="color:${cor};font-weight:600">${fmtNum(total)}</span><button class="pop-danger sm" data-inv-del="${attr(m.id)}" title="Excluir">${ic("archive", 14)}</button></div></div>`;
     }).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
     foot = `<button class="mini-btn primary" data-inv-add="${attr(p.contaId)}">${ic("plus", 14)} Novo lançamento</button>`;
+  } else if (p.kind === "confirmAssetDel") {
+    const tk = p.ticker;
+    const n = assetMoves.filter((m) => m.contaId === p.contaId && String(m.ticker || "").toUpperCase() === tk).length;
+    const pos = computePositions(p.contaId).find((x) => x.ticker === tk);
+    title = "Excluir ativo";
+    body = `<p class="confirm-lead">${ic("archive", 18)} Excluir <b>${_esc(tk)}</b> desta carteira?</p>
+      <p class="pop-hint">Isso remove <b>${n} ${n === 1 ? "movimentação" : "movimentações"}</b> (compras/vendas) que formam a posição.${pos ? ` A posição de <b>${(Math.round(pos.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} un</b> (valor ${fmt(pos.valor)}) deixa de existir e o <b>caixa</b> e o <b>patrimônio</b> da conta são recalculados.` : ""} Não dá pra desfazer — mas você pode lançar de novo.</p>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-asset-del-confirm="${attr(p.contaId + "|" + tk)}">${ic("archive", 15)} Excluir ativo</button>`;
+  } else if (p.kind === "confirmMoveDel") {
+    const m = assetMoves.find((x) => String(x.id) === String(p.id));
+    const venda = m && m.tipo === "venda";
+    title = "Excluir lançamento";
+    body = `<p class="confirm-lead">${ic("archive", 18)} Excluir esta ${venda ? "venda" : "compra"}${m ? ` de <b>${_esc(m.ticker || "?")}</b>` : ""}?</p>
+      <p class="pop-hint">${m ? `${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)} em ${m.iso ? dataFullBR(m.iso) : "—"}. ` : ""}O preço médio e a quantidade da posição serão recalculados sem este lançamento.</p>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-move-del-confirm="${attr(p.id)}">${ic("archive", 15)} Excluir</button>`;
   } else if (p.kind === "abertura") {
     const a = acctByName(p.nome), cart = temAtivos(a);
     title = cart ? "Caixa inicial" : "Saldo inicial";
@@ -2077,6 +2127,23 @@ function savePremissas() {
 function invDefaultConta() { const c = accounts.filter((a) => !a.arquivada && a.tipo === "invest"); return c[0] ? c[0].id : null; }
 function openAssetMove(contaId) { state.pop = { kind: "assetMove", contaId: contaId || invDefaultConta(), tipo: "compra", data: TODAY_ISO }; renderPop(); }
 function openAssetMoves(contaId) { state.pop = { kind: "assetMoves", contaId }; renderPop(); }
+// comprar mais / vender A PARTIR de uma posição já existente: abre o modal já com o ticker/classe/nome
+function openAssetMoveFor(contaId, ticker, classe, tipo) {
+  const tk = String(ticker || "").toUpperCase();
+  const ex = assetMoves.find((m) => m.contaId === contaId && String(m.ticker || "").toUpperCase() === tk);
+  state.pop = { kind: "assetMove", contaId, tipo: tipo === "venda" ? "venda" : "compra", data: TODAY_ISO, ticker: tk, classe: classe || (ex && ex.classe) || "acao", nome: (ex && ex.nome) || "" };
+  renderPop();
+}
+// excluir o ATIVO inteiro (todas as movimentações do ticker naquela conta) — com confirmação (tarefa 2)
+function openAssetDelConfirm(contaId, ticker) { state.pop = { kind: "confirmAssetDel", contaId, ticker: String(ticker || "").toUpperCase() }; renderPop(); }
+function confirmAssetDel(contaId, ticker) {
+  const tk = String(ticker || "").toUpperCase();
+  for (let i = assetMoves.length - 1; i >= 0; i--) { const m = assetMoves[i]; if (m.contaId === contaId && String(m.ticker || "").toUpperCase() === tk) assetMoves.splice(i, 1); }
+  if (state.invExpand) delete state.invExpand[`${contaId}|${tk}`];
+  refreshSideNet(); closePop(); scheduleSave(); renderView();
+}
+// excluir UMA movimentação (compra/venda) — também com confirmação, pois recalcula PM/qtd da posição
+function openMoveDelConfirm(id) { if (assetMoves.some((m) => String(m.id) === String(id))) { state.pop = { kind: "confirmMoveDel", id: String(id) }; renderPop(); } }
 // clicar numa compra/venda no extrato → abre o mesmo modal em modo EDIÇÃO (com excluir)
 function openAssetEdit(id) {
   const m = assetMoves.find((x) => String(x.id) === String(id));
@@ -2568,7 +2635,20 @@ function wire() {
     if (iTipo) { invSetTipo(iTipo.dataset.amTipo); return; }
     if (e.target.closest("[data-inv-save]")) { saveAssetMove(); return; }
     const iDel = e.target.closest("[data-inv-del]");
-    if (iDel) { delAssetMove(iDel.dataset.invDel); return; }
+    if (iDel) { openMoveDelConfirm(iDel.dataset.invDel); return; }
+    const iDelC = e.target.closest("[data-move-del-confirm]");
+    if (iDelC) { delAssetMove(iDelC.dataset.moveDelConfirm); return; }
+    // posição: expandir movimentações + comprar mais / vender / excluir ativo (Fase 1)
+    const pTog = e.target.closest("[data-pos-toggle]");
+    if (pTog) { const k = pTog.dataset.posToggle; if (!state.invExpand) state.invExpand = {}; if (state.invExpand[k]) delete state.invExpand[k]; else state.invExpand[k] = true; renderView(); return; }
+    const pBuy = e.target.closest("[data-pos-buy]");
+    if (pBuy) { const [c, t, cl] = pBuy.dataset.posBuy.split("|"); openAssetMoveFor(c, t, cl, "compra"); return; }
+    const pSell = e.target.closest("[data-pos-sell]");
+    if (pSell) { const [c, t, cl] = pSell.dataset.posSell.split("|"); openAssetMoveFor(c, t, cl, "venda"); return; }
+    const pDel = e.target.closest("[data-pos-del]");
+    if (pDel) { const [c, t] = pDel.dataset.posDel.split("|"); openAssetDelConfirm(c, t); return; }
+    const aDelC = e.target.closest("[data-asset-del-confirm]");
+    if (aDelC) { const [c, t] = aDelC.dataset.assetDelConfirm.split("|"); confirmAssetDel(c, t); return; }
     const abt = e.target.closest("[data-abertura]");
     if (abt) { openAbertura(abt.dataset.abertura); return; }
     const abtS = e.target.closest("[data-abertura-save]");

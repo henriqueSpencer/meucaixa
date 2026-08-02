@@ -845,6 +845,31 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .inv-nome{font-size:11px;color:var(--subtle)}
 .inv-classe{font-size:10px;font-weight:600;padding:2px 7px;border-radius:6px;background:var(--card-2);color:var(--sub);display:inline-block;margin-top:3px}
 .inv-nocot{color:var(--subtle)}
+/* posição clicável (expande as movimentações) */
+.inv-pos-tr.click{cursor:pointer}
+.inv-pos-tr.click:hover td{background:var(--card-2)}
+.inv-pos-tr.on td{background:color-mix(in srgb,var(--brand) 6%,var(--card))}
+.inv-ativo-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.inv-caret{color:var(--subtle);display:inline-flex;flex:0 0 auto}
+.inv-pos-tr.on .inv-caret{color:var(--brand)}
+/* linha de detalhe (movimentações consideradas + ações) */
+.inv-detail-row td{padding:0!important;background:color-mix(in srgb,var(--brand) 4%,var(--card))}
+.inv-detail{padding:12px 18px 14px}
+.inv-detail-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px}
+.inv-detail-head>span:first-child{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--subtle)}
+.inv-detail-sum{font-size:12px;color:var(--sub);font-variant-numeric:tabular-nums}
+.inv-mv-list{display:flex;flex-direction:column;gap:2px;margin-bottom:10px}
+.inv-mv{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer}
+.inv-mv:hover{background:var(--card)}
+.inv-mv-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;flex:0 0 auto}
+.inv-mv-date{font-size:12px;color:var(--sub);min-width:46px}
+.inv-mv-qp{font-size:12.5px;color:var(--ink);flex:1;font-variant-numeric:tabular-nums}
+.inv-mv-tot{font-weight:600;font-variant-numeric:tabular-nums}
+.inv-mv-edit{color:var(--subtle);display:inline-flex;opacity:0;transition:.12s}
+.inv-mv:hover .inv-mv-edit{opacity:1}
+.inv-detail-actions{display:flex;gap:8px;flex-wrap:wrap}
+.confirm-lead{font-size:15px;font-weight:600;color:var(--ink);display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.confirm-lead svg{color:var(--neg);flex:0 0 auto}
 .inv-cart-actions{display:flex;gap:9px;margin-top:12px}
 .inv-move-r{display:flex;align-items:center;gap:10px}
 .pop-danger.sm{padding:5px 8px;font-size:12px}
