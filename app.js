@@ -203,6 +203,18 @@ function setAssetTag(ticker, patch) {
 }
 // palette p/ fatias dinâmicas (setor/segmento, cujos valores não são fixos)
 const PIE_PALETTE = ["#3E7CB1", "#B0863A", "#5E9E7E", "#A65B4E", "#8A7A5C", "#7C89A0", "#C6A24E", "#6D8891", "#9A6A8C", "#7E9A6A", "#B5776A", "#5C7A99"];
+// renda fixa / caixa: sem cotação de bolsa → valor atual é digitado à mão (marcação), guardado por
+// conta+ticker em prefs. Aporte = compra; resgate = venda (o efeito no caixa segue o ledger normal).
+const semCotacaoClasse = (classe) => classe === "rf" || classe === "caixa";
+const rfValores = () => (state.prefs && state.prefs.rfValores) || {};
+const rfKey = (contaId, ticker) => `${contaId}|${String(ticker || "").toUpperCase()}`;
+function rfValor(contaId, ticker) { const v = rfValores()[rfKey(contaId, ticker)]; return v && v.valor != null ? { valor: numOr0(v.valor), iso: v.iso || "" } : null; }
+function setRfValor(contaId, ticker, valor, iso) {
+  const all = Object.assign({}, rfValores()), k = rfKey(contaId, ticker);
+  if (valor == null || valor === "" || !isFinite(numOr0(valor))) delete all[k];
+  else all[k] = { valor: numOr0(valor), iso: iso || TODAY_ISO };
+  state.prefs.rfValores = all;
+}
 const hasHoldings = () => assetMoves.length > 0;
 const temAtivos = (a) => a && assetMoves.some((m) => m.contaId === a.id);
 
@@ -214,12 +226,16 @@ function computePositions(contaId) {
   const pos = {};
   moves.forEach((m) => {
     const k = String(m.ticker || "?").toUpperCase();
-    const o = pos[k] || (pos[k] = { ticker: k, nome: m.nome || "", classe: m.classe || "", qtd: 0, custo: 0, realizado: 0, proventos: 0, aportado: 0 });
+    const o = pos[k] || (pos[k] = { ticker: k, nome: m.nome || "", classe: m.classe || "", qtd: 0, custo: 0, realizado: 0, proventos: 0, aportado: 0, rf: false });
     if (m.nome) o.nome = m.nome;
     if (m.classe) o.classe = m.classe;
     const q = numOr0(m.qtd), pr = numOr0(m.preco);
     if (m.tipo === "provento") {
       o.proventos += q * pr; // provento: dinheiro recebido (qtd=1, preco=valor), não mexe em qtd/custo
+    } else if (semCotacaoClasse(o.classe)) {
+      // renda fixa / caixa: sem qtd/PM/cotação. Aporte soma ao aplicado; resgate abate pelo valor.
+      o.rf = true;
+      if (m.tipo === "venda") { o.custo -= pr; o.aportado -= pr; } else { o.custo += pr; o.aportado += pr; }
     } else if (m.tipo === "venda") {
       const pm = o.qtd > 0 ? o.custo / o.qtd : 0;
       const qv = Math.min(q, o.qtd); // não vende mais do que tem
@@ -229,20 +245,26 @@ function computePositions(contaId) {
     }
   });
   return Object.values(pos).map((o) => {
-    const pm = o.qtd > 0 ? o.custo / o.qtd : 0;          // preço médio SEM proventos (custo puro)
-    const pmProv = o.qtd > 0 ? (o.custo - o.proventos) / o.qtd : 0; // PM ajustado pelos proventos recebidos
-    const price = assetPrice(o.ticker);
-    const cot = price != null ? price : pm; // sem cotação → vale o custo (ganho 0)
-    const valor = o.qtd * cot;
+    const isRF = o.rf;
+    const pm = (!isRF && o.qtd > 0) ? o.custo / o.qtd : 0;            // preço médio SEM proventos (custo puro)
+    const pmProv = (!isRF && o.qtd > 0) ? (o.custo - o.proventos) / o.qtd : 0; // PM ajustado pelos proventos
+    const price = isRF ? null : assetPrice(o.ticker);
+    const manual = isRF ? rfValor(contaId, o.ticker) : null;         // valor atual manual (marcação RF)
+    let cot, valor, semCot;
+    if (price != null) { cot = price; valor = o.qtd * cot; semCot = false; }
+    else if (manual) { valor = manual.valor; cot = 0; semCot = false; }          // RF marcado a valor atual
+    else if (isRF) { valor = o.custo; cot = 0; semCot = false; }                  // RF sem marcação: vale o aplicado
+    else { cot = pm; valor = o.qtd * pm; semCot = true; }                         // ação sem cotação: usa o custo
     const ganho = valor - o.custo;                        // resultado SEM proventos (não-realizado)
     const ganhoProv = ganho + o.proventos;                // resultado COM proventos
     return Object.assign({}, o, {
-      pm, pmProv, cotacao: price, valor, investido: o.custo,
+      isRF, pm, pmProv, cotacao: price, valor, investido: o.custo,
+      valorManual: manual ? manual.valor : null, valorManualIso: manual ? manual.iso : "",
       ganho, ganhoPct: o.custo > 0 ? (ganho / o.custo) * 100 : 0,
       ganhoProv, ganhoProvPct: o.custo > 0 ? (ganhoProv / o.custo) * 100 : 0,
-      semCotacao: price == null,
+      semCotacao: semCot,
     });
-  }).filter((o) => Math.abs(o.qtd) > 1e-9)
+  }).filter((o) => o.isRF ? Math.abs(o.custo) > 1e-6 : Math.abs(o.qtd) > 1e-9)
     .sort((a, b) => b.valor - a.valor);
 }
 // Conta de investimento = CAIXA + INVESTIDO (nada é sobrescrito; tudo derivado ao vivo):
@@ -1042,14 +1064,17 @@ function acctTxRow(t, nome) {
 // linha de compra/venda de ativo no extrato: NÃO é despesa/receita — é reaplicação interna
 // (compra = caixa → investido; venda = investido → caixa). Cor de transferência + tag, nunca vermelho.
 function acctAssetRow(m) {
-  const prov = m.tipo === "provento", venda = m.tipo === "venda";
+  const prov = m.tipo === "provento", venda = m.tipo === "venda", rf = semCotacaoClasse(m.classe);
   // provento: dinheiro que entra na corretora (renda), cor positiva; compra/venda = reaplicação interna
   const eff = (venda || prov ? 1 : -1) * numOr0(m.qtd) * numOr0(m.preco);
   const cor = prov ? C.receita : C.transfer;
   const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
-  const titulo = prov ? `Provento · ${_esc(m.ticker || "?")}` : `${venda ? "Venda" : "Compra"} · ${_esc(m.ticker || "?")}`;
+  const verbo = prov ? "Provento" : rf ? (venda ? "Resgate" : "Aporte") : (venda ? "Venda" : "Compra");
+  const titulo = `${verbo} · ${_esc(m.ticker || "?")}`;
   const tag = prov ? "provento" : venda ? "resgate" : "aplicação";
-  const meta = prov ? `${m.iso ? dataBR(m.iso) : "—"} · recebido` : `${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)} · ${venda ? "investido → caixa" : "caixa → investido"}`;
+  const meta = prov ? `${m.iso ? dataBR(m.iso) : "—"} · recebido`
+    : rf ? `${m.iso ? dataBR(m.iso) : "—"} · ${venda ? "resgate" : "aplicação"} · ${venda ? "investido → caixa" : "caixa → investido"}`
+    : `${m.iso ? dataBR(m.iso) : "—"} · ${q} × ${fmtNum(m.preco)} · ${venda ? "investido → caixa" : "caixa → investido"}`;
   const icone = prov ? "trending-up" : "transfer";
   return `<div class="mini-row click txr" data-asset-open="${attr(m.id)}"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic(icone, 16)}</span><div class="tx-mid"><div class="mini-desc">${titulo} <span class="asset-tag">${tag}</span></div><div class="mini-meta">${meta}</div></div><span class="num" style="color:${cor};font-weight:600">${eff < 0 ? "−" : "+"} ${fmtNum(Math.abs(eff))}</span></div>`;
 }
@@ -1078,7 +1103,10 @@ function heldAt(contaId, ym) {
     const o = pos[k] || (pos[k] = { qtd: 0, custo: 0 });
     if (m.tipo === "provento") return; // provento não altera quantidade/custo
     const q = numOr0(m.qtd), pr = numOr0(m.preco);
-    if (m.tipo === "venda") { const pm = o.qtd > 0 ? o.custo / o.qtd : 0; const qv = Math.min(q, o.qtd); o.custo -= pm * qv; o.qtd -= qv; }
+    if (semCotacaoClasse(m.classe)) { // RF/Caixa: aporte soma / resgate abate pelo valor; qtd é só marcador
+      if (m.tipo === "venda") o.custo -= pr; else o.custo += pr;
+      o.qtd = Math.abs(o.custo) > 1e-6 ? 1 : 0;
+    } else if (m.tipo === "venda") { const pm = o.qtd > 0 ? o.custo / o.qtd : 0; const qv = Math.min(q, o.qtd); o.custo -= pm * qv; o.qtd -= qv; }
     else { o.qtd += q; o.custo += pr * q; }
   });
   const out = {};
@@ -1190,15 +1218,18 @@ function invGanhoHTML(g, pct, big) {
   return `<span class="num${big ? " inv-big" : ""}" style="color:${cor};font-weight:600">${sig} ${fmtNum(Math.abs(g))}${p}</span>`;
 }
 function invPosRow(p, contaId) {
-  const cot = p.semCotacao ? `<span class="inv-nocot" title="Sem cotação na fonte — usando o custo">—</span>` : fmtNum(p.cotacao);
-  const qtd = (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  // RF/Caixa não têm qtd/PM/cotação de bolsa: mostram "—" (a cotação vira "manual" se marcado)
+  const cot = p.isRF
+    ? (p.valorManualIso ? `<span class="inv-nocot" title="Valor marcado à mão em ${dataFullBR(p.valorManualIso)}">manual</span>` : "—")
+    : p.semCotacao ? `<span class="inv-nocot" title="Sem cotação na fonte — usando o custo">—</span>` : fmtNum(p.cotacao);
+  const qtd = p.isRF ? "—" : (Math.round(p.qtd * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   const key = `${contaId}|${p.ticker}`;
   const open = !!(state.invExpand && state.invExpand[key]);
   const prov = numOr0(p.proventos);
   const main = `<tr class="inv-pos-tr click${open ? " on" : ""}" data-pos-toggle="${attr(key)}">
     <td><div class="inv-ativo-row"><span class="inv-caret">${ic(open ? "chevron-down" : "arrow-right", 13)}</span><div class="inv-ativo"><span class="inv-tkr">${_esc(p.ticker)}</span>${p.nome ? `<span class="inv-nome">${_esc(p.nome)}</span>` : ""}</div>${p.classe ? `<span class="inv-classe">${CLASSE_LABEL[p.classe] || p.classe}</span>` : ""}</div></td>
     <td class="num">${qtd}</td>
-    <td class="num">${fmtNum(p.pm)}</td>
+    <td class="num">${p.isRF ? "—" : fmtNum(p.pm)}</td>
     <td class="num">${fmtNum(p.investido)}</td>
     <td class="num">${cot}</td>
     <td class="num">${fmtNum(p.valor)}</td>
@@ -1215,12 +1246,12 @@ function invPosDetailRow(contaId, p) {
   const moves = assetMoves.filter((m) => m.contaId === contaId && String(m.ticker || "").toUpperCase() === p.ticker)
     .slice().sort((a, b) => String(a.iso || "").localeCompare(String(b.iso || "")));
   const rows = moves.map((m) => {
-    const prov = m.tipo === "provento", venda = m.tipo === "venda";
+    const prov = m.tipo === "provento", venda = m.tipo === "venda", rf = semCotacaoClasse(m.classe);
     const cor = prov || venda ? "var(--pos)" : "var(--neg)"; // entra (+) = verde; compra sai (−) = vermelho
     const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
     const total = numOr0(m.qtd) * numOr0(m.preco);
-    const label = prov ? "Provento" : venda ? "Venda" : "Compra";
-    const qp = prov ? "recebido" : `${q} × ${fmtNum(m.preco)}`;
+    const label = prov ? "Provento" : rf ? (venda ? "Resgate" : "Aporte") : (venda ? "Venda" : "Compra");
+    const qp = prov ? "recebido" : rf ? (venda ? "resgatado" : "aplicado") : `${q} × ${fmtNum(m.preco)}`;
     return `<div class="inv-mv click" data-asset-open="${attr(m.id)}">
       <span class="inv-mv-badge" style="background:${cor}1A;color:${cor}">${label}</span>
       <span class="inv-mv-date">${m.iso ? dataFullBR(m.iso) : "—"}</span>
@@ -1234,17 +1265,20 @@ function invPosDetailRow(contaId, p) {
   const prov = numOr0(p.proventos);
   const tg = assetTag(p.ticker, p.classe);
   const tagStr = `${OBJ_LABEL[tg.objetivo] || tg.objetivo}${tg.setor ? ` · ${tg.setor}` : ""}${tg.segmento ? ` · ${tg.segmento}` : ""}`;
-  const sum = `PM ${fmtNum(p.pm)} · ${qtdStr} un · investido ${fmt(p.investido)}`
-    + (prov > 1e-6 ? ` · proventos ${fmtNum(prov)} · PM c/ prov ${fmtNum(p.pmProv)}` : "")
+  const base = p.isRF
+    ? `aplicado ${fmt(p.investido)} · valor atual ${fmt(p.valor)}${p.valorManualIso ? ` (marcado em ${dataFullBR(p.valorManualIso)})` : " (sem marcação)"}`
+    : `PM ${fmtNum(p.pm)} · ${qtdStr} un · investido ${fmt(p.investido)}`;
+  const sum = base
+    + (prov > 1e-6 ? ` · proventos ${fmtNum(prov)}${p.isRF ? "" : ` · PM c/ prov ${fmtNum(p.pmProv)}`}` : "")
     + (Math.abs(p.realizado) > 1e-6 ? ` · realizado ${p.realizado >= 0 ? "+" : "−"} ${fmtNum(Math.abs(p.realizado))}` : "")
     + ` · ${tagStr}`;
   return `<tr class="inv-detail-row"><td colspan="9"><div class="inv-detail">
     <div class="inv-detail-head"><span>Movimentações consideradas</span><span class="inv-detail-sum">${sum}</span></div>
     <div class="inv-mv-list">${rows}</div>
     <div class="inv-detail-actions">
-      <button class="mini-btn primary" data-pos-buy="${arg}">${ic("plus", 13)} Comprar mais</button>
-      <button class="mini-btn" data-pos-sell="${arg}">${ic("trending-down", 13)} Vender</button>
-      <button class="mini-btn" data-pos-prov="${arg}">${ic("trending-up", 13)} Lançar provento</button>
+      <button class="mini-btn primary" data-pos-buy="${arg}">${ic("plus", 13)} ${p.isRF ? "Aportar mais" : "Comprar mais"}</button>
+      <button class="mini-btn" data-pos-sell="${arg}">${ic("trending-down", 13)} ${p.isRF ? "Resgatar" : "Vender"}</button>
+      ${p.isRF ? `<button class="mini-btn" data-pos-rfval="${attr(contaId + "|" + p.ticker)}">${ic("pencil", 13)} Atualizar valor</button>` : `<button class="mini-btn" data-pos-prov="${arg}">${ic("trending-up", 13)} Lançar provento</button>`}
       <button class="mini-btn" data-pos-tag="${arg}">${ic("tag", 13)} Classificar</button>
       <button class="mini-btn danger" data-pos-del="${attr(contaId + "|" + p.ticker)}">${ic("archive", 13)} Excluir ativo</button>
     </div>
@@ -2137,20 +2171,24 @@ function renderPop() {
     const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === p.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
     const classeOpts = Object.keys(CLASSE_LABEL).map((k) => `<option value="${k}"${k === (p.classe || "acao") ? " selected" : ""}>${CLASSE_LABEL[k]}</option>`).join("");
     const prov = p.tipo === "provento";
-    title = p.id ? "Editar lançamento" : prov ? "Lançar provento" : "Lançar ativo";
+    const rfMode = !prov && semCotacaoClasse(p.classe || "acao"); // RF/Caixa: valor único (aporte/resgate)
+    title = p.id ? "Editar lançamento" : prov ? "Lançar provento" : rfMode ? "Lançar renda fixa" : "Lançar ativo";
     const valorFields = prov
-      ? `<label class="fld"><span class="fld-label">Valor recebido (R$)</span><input data-am="valor" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.valor || (p.preco && p.qtd ? "" : p.preco) || "")}"></label>`
+      ? `<label class="fld"><span class="fld-label">Valor recebido (R$)</span><input data-am="valor" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.valor || "")}"></label>`
+      : rfMode
+      ? `<label class="fld"><span class="fld-label">${p.tipo === "venda" ? "Valor resgatado" : "Valor aplicado"} (R$)</span><input data-am="valor" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.valor || "")}"></label>`
       : `<div class="fld-row"><label class="fld"><span class="fld-label">Quantidade</span><input data-am="qtd" inputmode="decimal" placeholder="0" autocomplete="off" value="${attr(p.qtd || "")}"></label><label class="fld"><span class="fld-label">Preço unitário</span><input data-am="preco" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.preco || "")}"></label></div>`;
+    const tabC = rfMode ? "Aporte" : "Compra", tabV = rfMode ? "Resgate" : "Venda";
     body = `<div class="am-tipo">
-        <button type="button" class="am-tab ${(p.tipo || "compra") === "compra" ? "on" : ""}" data-am-tipo="compra">Compra</button>
-        <button type="button" class="am-tab ${p.tipo === "venda" ? "on" : ""}" data-am-tipo="venda">Venda</button>
-        <button type="button" class="am-tab ${prov ? "on" : ""}" data-am-tipo="provento">Provento</button>
+        <button type="button" class="am-tab ${(p.tipo || "compra") === "compra" ? "on" : ""}" data-am-tipo="compra">${tabC}</button>
+        <button type="button" class="am-tab ${p.tipo === "venda" ? "on" : ""}" data-am-tipo="venda">${tabV}</button>
+        ${rfMode ? "" : `<button type="button" class="am-tab ${prov ? "on" : ""}" data-am-tipo="provento">Provento</button>`}
       </div>
       <div class="fld-row"><label class="fld"><span class="fld-label">Carteira</span><select data-am="conta">${contaOpts}</select></label><label class="fld"><span class="fld-label">Data</span><input type="date" data-am="data" value="${attr(p.data || TODAY_ISO)}"></label></div>
-      <div class="fld-row"><label class="fld"><span class="fld-label">Ticker</span><input data-am="ticker" placeholder="Ex.: HGLG11" autocomplete="off" style="text-transform:uppercase" value="${attr(p.ticker || "")}"></label><label class="fld"><span class="fld-label">Classe</span><select data-am="classe">${classeOpts}</select></label></div>
-      <label class="fld"><span class="fld-label">Nome (opcional)</span><input data-am="nome" placeholder="Ex.: CSHG Logística" autocomplete="off" value="${attr(p.nome || "")}"></label>
+      <div class="fld-row"><label class="fld"><span class="fld-label">${rfMode ? "Nome/Título" : "Ticker"}</span><input data-am="ticker" placeholder="${rfMode ? "Ex.: CDB BTG 2028" : "Ex.: HGLG11"}" autocomplete="off"${rfMode ? "" : ` style="text-transform:uppercase"`} value="${attr(p.ticker || "")}"></label><label class="fld"><span class="fld-label">Classe</span><select data-am="classe">${classeOpts}</select></label></div>
+      ${rfMode ? "" : `<label class="fld"><span class="fld-label">Nome (opcional)</span><input data-am="nome" placeholder="Ex.: CSHG Logística" autocomplete="off" value="${attr(p.nome || "")}"></label>`}
       ${valorFields}
-      <p class="pop-hint">${prov ? "Dividendo/JCP/rendimento recebido nesta posição. Entra no caixa da corretora e aparece nos proventos da Visão patrimonial." : "O preço médio é calculado pelo sistema a partir dos seus lançamentos."}</p>`;
+      <p class="pop-hint">${prov ? "Dividendo/JCP/rendimento recebido nesta posição. Entra no caixa da corretora e aparece nos proventos da Visão patrimonial." : rfMode ? "Renda fixa não tem cotação de bolsa: registre os aportes/resgates e atualize o valor atual à mão (botão “Atualizar valor” no ativo)." : "O preço médio é calculado pelo sistema a partir dos seus lançamentos."}</p>`;
     foot = p.id
       ? `<button class="pop-danger" data-inv-del="${attr(p.id)}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-inv-save>Salvar</button>`
       : `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-inv-save>Salvar lançamento</button>`;
@@ -2181,6 +2219,12 @@ function renderPop() {
     body = `<p class="confirm-lead">${ic("archive", 18)} Excluir esta ${venda ? "venda" : "compra"}${m ? ` de <b>${_esc(m.ticker || "?")}</b>` : ""}?</p>
       <p class="pop-hint">${m ? `${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)} em ${m.iso ? dataFullBR(m.iso) : "—"}. ` : ""}O preço médio e a quantidade da posição serão recalculados sem este lançamento.</p>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-move-del-confirm="${attr(p.id)}">${ic("archive", 15)} Excluir</button>`;
+  } else if (p.kind === "rfVal") {
+    title = "Valor atual · " + _esc(p.ticker);
+    const pos = computePositions(p.contaId).find((x) => x.ticker === p.ticker);
+    body = `<p class="pop-hint">Quanto essa aplicação vale hoje (marcação à mão). Aplicado: <b>${pos ? fmt(pos.investido) : "—"}</b> — a diferença vira o rendimento.</p>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Valor atual (R$)</span><input data-rfv="valor" inputmode="decimal" placeholder="0,00" autocomplete="off" value="${attr(p.valor || "")}"></label><label class="fld"><span class="fld-label">Data</span><input type="date" data-rfv="data" value="${attr(p.iso || TODAY_ISO)}"></label></div>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-rfval-save>Salvar</button>`;
   } else if (p.kind === "assetTag") {
     title = "Classificar " + _esc(p.ticker);
     const objOpts = OBJETIVOS.map((o) => `<option value="${o.key}"${o.key === p.objetivo ? " selected" : ""}>${o.label}</option>`).join("");
@@ -2291,13 +2335,28 @@ function saveAssetTag() {
   setAssetTag(p.ticker, { objetivo: g("objetivo"), setor: g("setor"), segmento: g("segmento") });
   closePop(); scheduleSave(); renderView();
 }
+// renda fixa: atualizar o valor atual (marcação a mercado à mão), guardado em prefs por conta+ticker
+function openRfVal(contaId, ticker) {
+  const tk = String(ticker || "").toUpperCase();
+  const cur = rfValor(contaId, tk), pos = computePositions(contaId).find((x) => x.ticker === tk);
+  const val = cur ? String(cur.valor).replace(".", ",") : (pos ? String(Math.round(pos.investido * 100) / 100).replace(".", ",") : "");
+  state.pop = { kind: "rfVal", contaId, ticker: tk, valor: val, iso: (cur && cur.iso) || TODAY_ISO };
+  renderPop();
+}
+function saveRfVal() {
+  const p = state.pop; if (!p || p.kind !== "rfVal") return;
+  const gv = (s) => { const el = document.querySelector(`[data-rfv="${s}"]`); return el ? el.value : ""; };
+  setRfValor(p.contaId, p.ticker, parseValor(gv("valor")), gv("data") || TODAY_ISO);
+  refreshSideNet(); closePop(); scheduleSave(); renderView();
+}
 // clicar numa compra/venda no extrato → abre o mesmo modal em modo EDIÇÃO (com excluir)
 function openAssetEdit(id) {
   const m = assetMoves.find((x) => String(x.id) === String(id));
   if (!m) return;
   const br = (n) => String(numOr0(n)).replace(".", ","); // número BR pro input (vírgula decimal)
   const base = { kind: "assetMove", id: m.id, contaId: m.contaId, tipo: m.tipo, data: m.iso || TODAY_ISO, ticker: m.ticker, nome: m.nome, classe: m.classe };
-  if (m.tipo === "provento") base.valor = br(numOr0(m.qtd) * numOr0(m.preco)); // provento: valor recebido = qtd×preco
+  // provento e RF/caixa usam um campo único (valor = qtd×preco); ações usam qtd + preço
+  if (m.tipo === "provento" || semCotacaoClasse(m.classe)) base.valor = br(numOr0(m.qtd) * numOr0(m.preco));
   else { base.qtd = br(m.qtd); base.preco = br(m.preco); }
   state.pop = base;
   renderPop();
@@ -2318,14 +2377,16 @@ function saveAssetMove() {
   const g = (s) => { const el = document.querySelector(`[data-am="${s}"]`); return el ? el.value : ""; };
   const p = state.pop || {};
   const prov = p.tipo === "provento";
+  const classe = g("classe") || "acao";
+  const rfMode = !prov && semCotacaoClasse(classe);
+  const single = prov || rfMode; // um único campo de valor (guardado como qtd=1 × preco=valor)
   const contaId = g("conta"), ticker = g("ticker").trim().toUpperCase();
-  // provento: um único campo "valor recebido" (guardado como qtd=1 × preco=valor)
-  const qtd = prov ? 1 : parseValor(g("qtd"));
-  const preco = prov ? parseValor(g("valor")) : parseValor(g("preco"));
+  const qtd = single ? 1 : parseValor(g("qtd"));
+  const preco = single ? parseValor(g("valor")) : parseValor(g("preco"));
   if (!contaId || !ticker || qtd <= 0 || preco <= 0) { const t = document.querySelector('[data-am="ticker"]'); if (t && !ticker) t.focus(); return; }
   const dados = {
     contaId, iso: g("data") || TODAY_ISO, ticker, nome: g("nome").trim(),
-    classe: g("classe") || "acao", tipo: prov ? "provento" : p.tipo === "venda" ? "venda" : "compra", qtd, preco,
+    classe, tipo: prov ? "provento" : p.tipo === "venda" ? "venda" : "compra", qtd, preco,
   };
   if (p.id) { const m = assetMoves.find((x) => String(x.id) === String(p.id)); if (m) Object.assign(m, dados); } // edição
   else assetMoves.push(Object.assign({ id: "am" + Date.now() }, dados)); // novo
@@ -2808,6 +2869,9 @@ function wire() {
     const pTag = e.target.closest("[data-pos-tag]");
     if (pTag) { const [c, t, cl] = pTag.dataset.posTag.split("|"); openAssetTag(c, t, cl); return; }
     if (e.target.closest("[data-assettag-save]")) { saveAssetTag(); return; }
+    const pRf = e.target.closest("[data-pos-rfval]");
+    if (pRf) { const [c, t] = pRf.dataset.posRfval.split("|"); openRfVal(c, t); return; }
+    if (e.target.closest("[data-rfval-save]")) { saveRfVal(); return; }
     const cDim = e.target.closest("[data-comp-dim]");
     if (cDim) { state.compDim = cDim.dataset.compDim; renderView(); return; }
     const pDel = e.target.closest("[data-pos-del]");
@@ -3030,6 +3094,15 @@ function wire() {
     // seletor de tipo de conta (nova conta / editar): atualiza só a descrição, sem re-render
     const ts = e.target.closest('[data-af="tipo"], [data-ae="tipo"]');
     if (ts) { const h = document.querySelector("[data-tipo-hint]"); if (h) h.textContent = (TIPO_INFO[ts.value] || TIPO_INFO.banco).desc; }
+    // trocar a classe no modal de ativo: RF/Caixa usam campo de valor único → re-renderiza o modal
+    const amc = e.target.closest('[data-am="classe"]');
+    if (amc && state.pop && state.pop.kind === "assetMove") {
+      const g = (s) => { const el = document.querySelector(`[data-am="${s}"]`); return el ? el.value : undefined; };
+      const patch = { classe: amc.value, contaId: g("conta") || state.pop.contaId, data: g("data"), ticker: g("ticker"), nome: g("nome") };
+      const q = g("qtd"), pr = g("preco"), vl = g("valor");
+      if (q !== undefined) patch.qtd = q; if (pr !== undefined) patch.preco = pr; if (vl !== undefined) patch.valor = vl;
+      Object.assign(state.pop, patch); renderPop();
+    }
   });
   // batimento: a cada tecla guarda o saldo do banco e atualiza SÓ o resultado (não a view toda,
   // senão o input é recriado e perde o foco no meio da digitação)
