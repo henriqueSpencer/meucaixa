@@ -10,6 +10,14 @@ cd ~/Documents/Investimentos/meu_caixa && python3 -m http.server 5173   # → ht
 Precisa de internet + login (magic-link). O app **exige autenticação** antes de mostrar qualquer dado.
 Cache-busting: `styles.css`/`app.js`/`store.js` usam `?v=N` no `index.html` — **bump o N ao editar**,
 senão o navegador serve a versão antiga. (`vendor/supabase.js` não tem versão; é fixo.)
+**Se precisar da Pages Function** (`/api/history/*`, usada só pelo gráfico "Carteira a mercado"), o
+`python3 -m http.server` NÃO a serve — use `wrangler pages dev`:
+```bash
+DIST=$(mktemp -d); git archive HEAD | tar -x -C "$DIST"; npx wrangler@latest pages dev "$DIST" --port 5173
+```
+⚠️ o `wrangler pages dev` serve uma **cópia congelada** (`git archive`), não os arquivos ao vivo — ao
+editar, **reconstrua o DIST e reinicie**. Pro resto do app (inclusive importar da B3, que roda pdf.js no
+navegador) o `python3 -m http.server` basta e reflete edições na hora.
 
 ## Arquitetura (produção)
 Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **direto com o Supabase**
@@ -60,9 +68,12 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   BR, sem lançamentos. Além disso, `ensureSeeded()` (no boot, após `applyModel`) faz **self-heal**: se o
   usuário ficou **sem nenhuma categoria** (seed parcial / código antigo em cache), injeta o conjunto
   padrão e persiste — senão não dá nem pra lançar transação. Usuário com dados nunca cai nesses caminhos.
-- **Telas (`VIEWS`/`PAGE`, aba via `data-tab`)**: `dashboard`, `contas`, `transacoes`, `conciliacao`,
-  `categorias`, `historico` (audit git-like), `config` (Configurações). Nova aba = entrada em `VIEWS` +
-  `PAGE` + botão `data-tab` no `index.html` (as funções `view*` são globais).
+- **Telas (`VIEWS`/`PAGE`, aba via `data-tab`)**: `dashboard`, `patrimonial` (cockpit de investimentos),
+  `contas`, `transacoes`, `conciliacao`, `categorias`, `historico` (audit git-like), `config`
+  (Configurações). Nova aba = entrada em `VIEWS` + `PAGE` + botão `data-tab` no `index.html` (as funções
+  `view*` são globais). Duas telas **tomam a área de conteúdo fora do sistema de abas** (como o detalhe de
+  conta): `viewAcctDetail` (quando `state.acctDetail`) e `viewAssetRecon` (quando `state.assetRecon`) — o
+  `renderView` checa esses states antes de cair no `VIEWS[state.tab]`.
 - **Configurações (`viewConfig`)**: perfil (nome editável via `Store.updateName`→`user_metadata.full_name`;
   e-mail read-only), segurança (alterar senha, reusa `data-setpass`), seus dados (resumo + `exportBackup`
   = download JSON do `currentModel`), aparência (tema segue o sistema), sessão (sair) + versão (`APP_VERSION`).
@@ -79,7 +90,8 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
 ## Supabase (projeto `meucaixa`)
 - ref/project_id: **`umvtbondcihigdltspub`** · região sa-east-1 · URL `https://umvtbondcihigdltspub.supabase.co`
 - Publishable key (no `store.js`, **pública por design** — o RLS protege): `sb_publishable_Yw6ISMmrN_ovWPbfIEpt-w_hPauW78Y`
-- Tabelas: `accounts`, `categories` (hierárquica via `parent_id`), `transactions`, `prefs` (jsonb).
+- Tabelas: `accounts`, `categories` (hierárquica via `parent_id`), `transactions`, `prefs` (jsonb),
+  **`asset_moves`** (ledger de compra/venda/provento de ativos — ver seção Investimentos).
   Todas com `user_id uuid default auth.uid()`, `updated_at` (trigger `set_updated_at`), `deleted`,
   índice `(user_id, updated_at)` e **RLS** `for all using/with check (user_id = auth.uid())`.
 - **`audit_log`** (append-only, migração `audit_log`): histórico de alterações. Gatilhos `zaudit_*`
@@ -148,6 +160,71 @@ tag e limpe as tabelas.
   isRemoteEmpty/seed/fetchAudit/user`) e appendar o `app.js` como `<script>` inline — aí
   `win.eval("state.tx")` e `win.eval("moveAcct('c5','up')")` funcionam e dá pra dirigir a UI de verdade
   (`<input type=file>` com `Object.defineProperty(inp,"files",…)` + `dispatchEvent(new Event("change"))`).
+
+## Investimentos (carteira de ativos) — EM PRODUÇÃO
+Contas `tipo:"invest"` (carteiras/corretoras) registram **ativos** — ações/ETF/FII/renda fixa — em vez de
+lançar valorização à mão. A parte de ativos vive **dentro da página da própria conta** (`invAtivosSection`
+no `viewAcctDetail`), não numa aba separada. Decisões de design do usuário: valorização a mercado **não** é
+fluxo de caixa (só patrimônio); adicionar ativo = **lançamento** (data/ticker/qtd/preço) e o **preço médio
+é derivado** (custo médio ponderado). Cotação atual via **brapi** `quote/list` (CORS liberado, sem token,
+cache em localStorage `mc_quotes`); histórico mensal via a Pages Function `/api/history` (Yahoo).
+
+- **Ledger `asset_moves`** (Supabase, RLS/PK-composta/audit/sync como as outras): cada linha é um movimento
+  `{contaId, iso, ticker, nome, classe, tipo, qtd, preco}`. `tipo` ∈ `compra`/`venda`/**`provento`**. Não há
+  coluna `valor`: **provento e renda-fixa-lump** são guardados como `qtd:1, preco:<valor>` (sem migração de
+  schema — a coluna `tipo` não tem CHECK). No `store.js` roda no diff/merge junto com as demais tabelas.
+- **Posição derivada** (`computePositions(contaId)`): custo médio ponderado; venda reduz pelo PM e realiza
+  ganho; **provento** só acumula `o.proventos` (não mexe em qtd/custo). Retorna `pm` (PM sem proventos),
+  `pmProv` ((custo−proventos)/qtd), `investido` (=custo), `valor`, `ganho`/`ganhoPct` (s/ prov),
+  `ganhoProv`/`ganhoProvPct` (c/ prov), `isRF`, `valorManual`. A tabela de ativos mostra Qtd·PM·Investido·
+  Cotação·Valor·Proventos·Result. s/ prov·Result. c/ prov (scroll horizontal). **Clicar num ativo expande
+  inline** (`state.invExpand["contaId|TICKER"]`, `invPosDetailRow`) as movimentações que o formam +
+  Comprar mais/Vender/Lançar provento/Classificar/Excluir ativo. Excluir (ativo inteiro ou 1 movimento)
+  **pede confirmação** (`confirmAssetDel`/`confirmMoveDel`).
+- **Conta = CAIXA + INVESTIDO** (nada sobrescreve `a.saldo`; tudo derivado ao vivo): `carteiraCaixa` =
+  saldo + `invCashDelta` (compra sai −, venda/provento entram +); `invInvestido` = Σ valor de mercado;
+  `acctTotal` = caixa + investido → alimenta `netWorth`. O extrato inclui compra/venda/provento como linhas
+  de caixa (`acctAssetRow`); o cabeçalho e cada mês mostram **caixa · aplicado (custo) · mercado · total**.
+  (Um approach antigo que sobrescrevia o saldo com o valor de mercado — `recomputeInvestBalances` — foi
+  REMOVIDO; se reaparecer em cache é código velho.)
+- **Renda fixa** (CDB/LCI/Tesouro; classe `rf`/`caixa`, `semCotacaoClasse`): sem cotação de bolsa. Aporte =
+  compra, resgate = venda; o **valor atual é manual** (marcação), guardado em `prefs.rfValores["contaId|TICKER"]`
+  (`rfValor`/`setRfValor`, pop "Atualizar valor"). Mostra "—" em qtd/PM/cotação. **Nuance:** a "Renda Fixa"
+  da B3 (LFTB11 etc.) vem COM quantidade → o import a classifica como **`etf`** (ativo com qtd), não como RF-
+  lump; o agrupamento "renda fixa" fica no **objetivo/liquidez** (independente da classe).
+- **Classificação por ticker** (`prefs.assetTags[TICKER] = {objetivo,setor,segmento}`; `assetTag`/`setAssetTag`,
+  objetivo default pela classe): objetivo/liquidez (Caixa, RF curto/longo, Ações, FIIs, Exterior…) é
+  **ortogonal à classe** (um ETF pode ser "Caixa"). Alimenta a **pizza de composição** (`carteiraComposicao(dim)`
+  + `pieSVG` donut puro) na Visão patrimonial, dimensões classe/objetivo/setor/segmento (`state.compDim`).
+- **Visão patrimonial** (`viewPatrimonial`, aba `patrimonial`): líquido/bruto/passivos, alocação por classe
+  (atual vs meta editável), composição (pizza), evolução por snapshots ("Registrar mês"), carteira a mercado
+  reconstruída do histórico (`heldAt`/`investedMarketAt` × `PRICE_HIST`), proventos 12m (de `asset_moves`
+  provento; fallback: receita marcada dividendo/rendimento), rentabilidade real vs IPCA/CDI. Metas/snapshots/
+  premissas/tags/rfValores ficam todos em **`prefs`** (sincronizado via currentModel/applyModel).
+- **Pages Function `functions/api/history/[ticker].js`**: 1ª peça de servidor no MeuCaixa (antes era estático
+  puro + Supabase). Proxy do histórico mensal de fechamento do Yahoo (CORS liberado, cache no edge 6h) porque
+  o navegador não alcança o Yahoo direto e a brapi passou a cobrar token. Deploy leva junto (Cloudflare Pages
+  suporta Functions); rodar local exige `wrangler pages dev` (ver "Como rodar local").
+
+### Importar da B3 → tela de conciliação de ativos
+Botão **"Importar da B3"** na seção Ativos lê **PDF da área do investidor** (pdf.js já vendorizado):
+`b3ParseNegPage` (Extrato de **Negociação** → compra/venda, linha única, parse da direita: 2 últimos R$ =
+preço/valor, qtd, ticker=último código-de-negociação) e `b3ParseMovPage` (Extrato de **Movimentação** →
+proventos Dividendo/JCP/Rendimento; multi-linha, âncora no valor da coluna direita x≥500 + tipo/ticker por
+proximidade em y; ignora Empréstimo/Transferência/Amortização e proventos sem ticker). `parseB3PDF` detecta
+o tipo pela pág.1 (`b3Kind`). Depois abre a **tela `viewAssetRecon`** (`state.assetRecon`, take-over da área
+de conteúdo) — **espelha a conciliação de extrato**: cards editáveis (`assetReconCard`, campos `data-arf`),
+aceitar/ignorar/reativar (`assetReconAccept`/`Ignore`/`Reactivate`/`AcceptAll`), dedup contra os
+`asset_moves` da conta (`assetImportDedup` → o que já existe nasce "ignorado"), trocar carteira re-deduplica
+(`assetReconSetConta`). **Validação de saldo**: painel "Como a carteira fica" com **caixa · aplicado · mercado
+· total projetados** (`assetReconProjTotals` injeta os aceitos no ledger, calcula com a mesma lógica da conta
+e desfaz — não vaza) + **posição por ativo** (`assetReconProjected`, atual→projetada). `assetReconCommit`
+cria os aceitos como `asset_moves`. Validado nos PDFs reais do usuário: Negociação 34 trades, Movimentação
+316 proventos. **Só faz PDF da B3** (Negociação cobre compra/venda; Nota de corretagem e CSV ficaram de fora
+— dá pra somar depois). Os PDFs de exemplo em `arq_exemplo/` são **gitignored** (têm CPF/dados reais; junto
+com `*.xlsx`). **Testar sem browser:** pdf.js roda em node com `global.self=global` +
+`GlobalWorkerOptions.workerSrc` no `.min.js`; extraia os text-items (`{str,x,y}`) dos PDFs e passe pros
+`b3Parse*` via `win.eval` no jsdom (ver `test_fase5.js`/`val_b3.js` no scratchpad).
 
 ## Importar extrato (tela Conciliação)
 Lê **OFX/CSV/TXT** (`parseOFX`/`parseCSV`, texto) e **PDF** do **Mercado Pago** (`parsePDF`→`mpParsePage`
@@ -226,5 +303,7 @@ sem extrato lido), pra usar o **batimento de saldo** e/ou **lançar à mão** (`
 ## Mapa de arquivos
 `index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `store.js` (persistência+sync) ·
 `styles.css` · `vendor/supabase.js` (UMD vendorizado) · `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`
-(pdf.js, leitura de PDF na importação) · `manifest.json` + `sw.js` + `icons/` (PWA) ·
-`gerar_dados.py`→`dados.js` (seed local, gitignored).
+(pdf.js, leitura de PDF na importação — extrato Mercado Pago **e** B3) ·
+`functions/api/history/[ticker].js` (Pages Function serverless: histórico de cotação p/ a Visão
+patrimonial) · `manifest.json` + `sw.js` + `icons/` (PWA) · `gerar_dados.py`→`dados.js` (seed local,
+gitignored) · `arq_exemplo/` + `*.xlsx` (PDFs/planilhas de extrato com dados reais — **gitignored**).
