@@ -1435,7 +1435,8 @@ function assetReconCard(r) {
   const val = prov ? numOr0(r.valor) : numOr0(r.qtd) * numOr0(r.preco);
   const eff = prov || r.tipo === "venda" ? val : -val; // compra sai (−); venda/provento entram (+)
   const rawDate = r.iso ? r.iso.split("-").reverse().join("/") : "";
-  const tipoLabel = prov ? "Provento" : r.tipo === "venda" ? "Venda" : "Compra";
+  const rfCard = !prov && semCotacaoClasse(r.classe); // RF: mostra "Aporte/Resgate" em vez de "Compra/Venda"
+  const tipoLabel = prov ? "Provento" : rfCard ? (r.tipo === "venda" ? "Resgate" : "Aporte") : (r.tipo === "venda" ? "Venda" : "Compra");
   const qtxt = (Math.round(numOr0(r.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   const brokerTag = r.broker ? `<span class="ar-card-broker">${_esc(r.broker)}</span>` : "";
   const conta = r.contaId ? acctById(r.contaId) : null;
@@ -3193,19 +3194,25 @@ async function readXlsx(buffer) {
 // Direção do trade vem de Entrada/Saída (Crédito=compra, Débito=venda) — só o Excel traz essa coluna.
 function b3MovClass(mov, es) {
   const m = b3Norm(mov), credito = /^cred/.test(b3Norm(es));
-  if (/dividendo|rendimento|juros sobre capital|pagamento de juros|leilao de fracao|reembolso/.test(m) && !/transferido/.test(m))
+  if (/dividendo|rendimento|juros sobre capital|pagamento de juros|amortiza|leilao de fracao|reembolso/.test(m) && !/transferido/.test(m))
     return { tipo: "provento", sign: credito && !/cancel/.test(m) ? 1 : -1 };
-  if (m === "compra") return { tipo: "compra" };
-  if (m === "venda") return { tipo: "venda" };
+  if (m === "compra" || m === "aplicacao") return { tipo: "compra" };            // aporte (ações e RF)
+  if (m === "venda" || m === "resgate" || m === "resgate antecipado" || m === "vencimento") return { tipo: "venda" }; // resgate/baixa
   if (/compra ?\/ ?venda|transferencia - liquidacao/.test(m)) return { tipo: credito ? "compra" : "venda" };
-  return null; // empréstimo, transferência simples, subscrição, bonificação, amortização, RF sem ticker…
+  return null; // empréstimo, transferência simples, subscrição, bonificação, retirada de custódia…
 }
-// "ABCB2 - BANCO ABC BRASIL S.A." → {ticker, nome}. Produto sem código de negociação (Tesouro/CDB) → ticker "".
+// prefixos de renda fixa da B3 (o produto vem como "TIPO - CÓDIGO - Emissor")
+const B3_RF_PREFIX = /^(CDB|RDB|LCI|LCA|LC|LF|LIG|LCD|CRA|CRI|CRP|DEB|DPGE|CDCA|NC|LH|LFT)$/;
+// classifica o Produto → {ticker, nome, isRF}. 1) ativo listado (ticker B3); 2) RF codificada (CDB/CRA/CRI/DEB…);
+// 3) RF sem código (Tesouro Direto). Opções ("Opção de Compra - …") e o resto → ticker "" (ignorado).
 function b3Produto(prod) {
   const s = String(prod || "").trim(), i = s.indexOf(" - ");
-  if (i < 0) return { ticker: "", nome: s };
-  const code = s.slice(0, i).trim().toUpperCase();
-  return b3IsTicker(code) ? { ticker: code, nome: s.slice(i + 3).trim() } : { ticker: "", nome: s };
+  const p0 = (i < 0 ? s : s.slice(0, i)).trim().toUpperCase();
+  if (b3IsTicker(p0)) return { ticker: p0, nome: s.slice(i + 3).trim(), isRF: false }; // ação/FII/ETF
+  const parts = s.split(" - ").map((x) => x.trim());
+  if (B3_RF_PREFIX.test(p0) && parts.length >= 2) return { ticker: (parts[1] || p0).toUpperCase(), nome: parts.slice(2).join(" - ") || p0, isRF: true };
+  if (i < 0 && /tesouro|letra financeira|cdb|lci|lca/i.test(s)) return { ticker: s.toUpperCase().replace(/\s+/g, " ").slice(0, 40), nome: s, isRF: true };
+  return { ticker: "", nome: s, isRF: false };
 }
 const b3IsoBR = (d) => { const m = String(d || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
 const b3Num = (v) => { if (typeof v === "number") return isFinite(v) ? v : null; if (v == null) return null; const s = String(v).replace(/R\$|\s|\./g, "").replace(",", "."); const n = parseFloat(s); return isNaN(n) ? null : n; };
@@ -3218,19 +3225,20 @@ function b3ParseMovXlsx(rows) {
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r]; if (!row) continue;
     const cls = b3MovClass(row[iMov], row[iES]); if (!cls) continue;
-    const { ticker, nome } = b3Produto(row[iProd]); if (!ticker) continue; // RF/Tesouro sem código de negociação
+    const { ticker, nome, isRF } = b3Produto(row[iProd]); if (!ticker) continue; // sem ticker/RF-code = ignora (opções etc.)
     const iso = b3IsoBR(row[iData]); if (!iso) continue;
     const instituicao = iInst >= 0 ? String(row[iInst] || "").replace(/\s+/g, " ").trim() : "";
     const broker = b3Broker(instituicao);
+    const classe = isRF ? "rf" : b3Classe(ticker, false);
     const valor = b3Num(row[iVal]);
     if (cls.tipo === "provento") {
       if (!valor) continue;
       const qAtivo = b3Num(row[iQtd]); // quantidade de ativos que gerou o provento (ex.: 44 cotas → dividendo)
-      out.push({ iso, tipo: "provento", ticker, nome, classe: b3Classe(ticker, false), instituicao, broker, valor: cls.sign * valor, qtd: qAtivo && qAtivo > 0 ? qAtivo : undefined });
+      out.push({ iso, tipo: "provento", ticker, nome, classe, instituicao, broker, valor: cls.sign * valor, qtd: qAtivo && qAtivo > 0 ? qAtivo : undefined });
     } else {
       const qtd = b3Num(row[iQtd]), preco = b3Num(row[iPU]);
-      if (!qtd || qtd <= 0 || !preco || preco <= 0) continue; // trade real tem qtd e preço (empréstimo/custódia não)
-      out.push({ iso, tipo: cls.tipo, ticker, nome, classe: b3Classe(ticker, false), instituicao, broker, qtd, preco });
+      if (!qtd || qtd <= 0 || !preco || preco <= 0) continue; // trade real tem qtd e preço (custódia/empréstimo/vencimento sem valor não)
+      out.push({ iso, tipo: cls.tipo, ticker, nome, classe, instituicao, broker, qtd, preco });
     }
   }
   return { kind: "mov", moves: out };

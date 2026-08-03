@@ -234,8 +234,16 @@ preco:valor`, guarda `qtd:<cotas>, preco:valor/qtd` — assim `qtd×preco` repro
 (no JCP o "preço unitário" da B3 é bruto, antes do IR de 15%, então derivamos do valor líquido) **e** a
 quantidade fica visível (card, extrato do ativo, lista de lançamentos mostram "N cotas"). Sem qtd no arquivo
 (PDF, ou coluna vazia) → `qtd:1`. Todo o cálculo de valor já usava `qtd×preco`, então a mudança é transparente.
-**Renda fixa direta (Tesouro/CDB/LCI/CRA/CRI/debênture) NÃO é importada** — vem sem código de negociação da B3
-(`b3Produto` exige ticker) e no app é marcada à mão; ETFs de renda fixa com ticker (ex.: LFTB11) entram normal.
+**Renda fixa direta É importada** (`b3Produto` retorna `{ticker, nome, isRF}`): 1) ativo listado (ticker B3);
+2) RF codificada — produto `TIPO - CÓDIGO - Emissor` com `TIPO` ∈ `B3_RF_PREFIX` (CDB/RDB/LCI/LCA/CRA/CRI/DEB/
+DPGE/…) → ticker = o CÓDIGO, `classe:"rf"`; 3) RF sem código (Tesouro Direto) → ticker = o nome. **Opções**
+("Opção de Compra - …") e o resto → ticker "" (ignorado). `b3MovClass` mapeia `Aplicação`→compra,
+`Resgate`/`Resgate Antecipado`/`Vencimento`→venda, `Amortização`/`Pagamento de Juros`→provento. RF entra como
+compra/venda com qtd×preço (custo) — o **valor atual segue manual** (marcação à mão, `prefs.rfValores`); o card
+da conciliação mostra "Aporte/Resgate". `Vencimento` costuma vir com `valor=0` → o guard "trade só com qtd E
+preço>0" **pula** (o papel não zera sozinho; ajuste à mão). **Limitação**: resgate cujo aporte ficou fora do
+período (ou em outra corretora) gera posição/negativo — o painel "como as carteiras ficam" mostra isso pra
+conferência. ETFs de RF com ticker (ex.: LFTB11) seguem entrando como ETF/FII (têm cotação), não como RF-manual.
 - **Excel do relatório de Movimentação (`b3ParseMovXlsx`) é a FONTE COMPLETA** e o caminho preferido: traz
   todo o histórico de compra/venda **+** proventos com colunas estruturadas (Entrada/Saída, Data, Movimentação,
   Produto, Quantidade, Preço unitário, Valor). `b3MovClass(mov, es)` classifica o tipo do movimento
