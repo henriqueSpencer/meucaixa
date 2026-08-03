@@ -227,7 +227,10 @@ vai pra conta mapeada; sem conta → linha **travada** (Aceitar desabilitado, ta
 mapa re-deduplica só aquele broker (`assetReconDedupAll(broker)` — dedup por-linha contra os `asset_moves` da
 **conta destino da linha**). `assetReconCommit` distribui os aceitos em **múltiplas contas** (`contaId: r.contaId`).
 A validação "Como as carteiras ficam" (`assetReconProjByConta`) mostra **um bloco por conta** mapeada (4 totais +
-posição por ativo). A **lista é agrupada por corretora** (`state.arCollapsed`/`state.arPage`): cada grupo colapsa
+posição por ativo) e conta **todos os lançamentos NÃO-IGNORADOS** (pendentes + aceitos) — **aparece por padrão**
+ao importar; só o ✕ (ignorar/já existe) tira do cálculo, igual ao saldo projetado da conciliação de extrato.
+Quando faltam corretoras no de-para, um **banner** explica quantos lançamentos estão "sem conta" e por que o
+"Aceitar N" só oferece os mapeados. A **lista é agrupada por corretora** (`state.arCollapsed`/`state.arPage`): cada grupo colapsa
 (`assetReconToggleGroup`), **pagina 30 cards** por vez (`assetReconMoreGroup` — evita renderizar centenas) e tem
 **"Aceitar todos desta corretora"** (`assetReconAcceptBroker`). Validado (jsdom, arquivo real): 614 movs → 5
 corretoras, prefill casou 3 por nome, XP criou carteira na hora, Rico mapeado numa conta existente, commit
