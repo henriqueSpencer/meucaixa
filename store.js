@@ -233,6 +233,16 @@
   }
   async function setPassword(password) { return sb.auth.updateUser({ password }); }
   async function updateName(nome) { return sb.auth.updateUser({ data: { full_name: nome } }); }
+  // admin (SaaS): flag no banco + visão agregada de todos os usuários (RPC SECURITY DEFINER, guard por is_admin)
+  async function isAdmin() {
+    if (!userId) return false;
+    try { const { data, error } = await sb.rpc("is_admin"); if (error) return false; return !!data; } catch (e) { return false; }
+  }
+  async function adminOverview() {
+    const { data, error } = await sb.rpc("admin_overview");
+    if (error) throw error;
+    return data || { totais: {}, usuarios: [] };
+  }
   // histórico de alterações (audit_log) — mais recente primeiro
   async function fetchAudit(limit) {
     if (!userId) return [];
@@ -386,7 +396,7 @@
   }
 
   window.Store = {
-    init, onAuth, onStale, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, updateName, fetchAudit, signOut,
+    init, onAuth, onStale, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, updateName, fetchAudit, isAdmin, adminOverview, signOut,
     loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed,
     get userId() { return userId; },
     get user() { return user; },

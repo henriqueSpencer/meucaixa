@@ -344,6 +344,7 @@ const PAGE = {
   categorias: ["Categorias", "Estrutura de receitas e despesas"],
   historico: ["Histórico", "Toda alteração registrada, por dia — como um diário de mudanças"],
   config: ["Configurações", "Sua conta, segurança e dados"],
+  admin: ["Admin", "Visão administrativa · todos os usuários do app"],
 };
 const APP_VERSION = (() => { try { const s = [...document.scripts].find((x) => /app\.js/.test(x.src)); const m = s && s.src.match(/v=(\d+)/); return m ? m[1] : ""; } catch (e) { return ""; } })();
 
@@ -1757,6 +1758,58 @@ function viewHistorico() {
   return `<div id="hist-root">${renderHistBody()}</div>`;
 }
 
+/* ---------- Admin (SaaS): todos os usuários ---------- */
+// mesmo padrão async de loadHistorico: a view devolve um root e a carga repovoa via renderAdminBody
+function admDate(iso) { const p = String(iso || "").split(/[-T ]/); return p.length >= 3 ? `${p[2]}/${p[1]}/${p[0]}` : "—"; }
+function admDaysAgo(iso) {
+  if (!iso) return "—";
+  const t = Date.parse(iso); if (!isFinite(t)) return "—";
+  const d = Math.floor((Date.now() - t) / 86400000);
+  if (d <= 0) return "hoje"; if (d === 1) return "ontem"; if (d < 30) return `há ${d} dias`;
+  if (d < 60) return "há 1 mês"; return `há ${Math.floor(d / 30)} meses`;
+}
+function renderAdminBody() {
+  const a = state.adminData;
+  if (a === null || a === undefined) return `<div class="hist-loading"><div class="auth-spin"></div><span>Carregando usuários…</span></div>`;
+  if (a === "error") return `<div class="card"><div class="empty-mini">Não consegui carregar os dados de admin. <button class="link" data-admin-refresh>Tentar de novo</button></div></div>`;
+  const tot = a.totais || {}, users = (a.usuarios || []).slice();
+  const kpis = `<div class="adm-kpis">
+    <div class="card kpi"><div class="kpi-top"><span class="kpi-label">Usuários</span><span class="kpi-ic" style="background:${C.receita}1A;color:${C.receita}">${ic("user", 16)}</span></div><div class="kpi-val num">${numOr0(tot.usuarios)}</div></div>
+    <div class="card kpi"><div class="kpi-top"><span class="kpi-label">Ativos (30 dias)</span><span class="kpi-ic" style="background:${C.receita}1A;color:${C.receita}">${ic("sparkles", 16)}</span></div><div class="kpi-val num">${numOr0(tot.ativos_30d)}</div></div>
+    <div class="card kpi"><div class="kpi-top"><span class="kpi-label">Lançamentos</span><span class="kpi-ic" style="background:${C.despesa}1A;color:${C.despesa}">${ic("list", 16)}</span></div><div class="kpi-val num">${numOr0(tot.lancamentos).toLocaleString("pt-BR")}</div></div>
+  </div>`;
+  const rows = users.map((u) => `<tr>
+      <td class="adm-email">${_esc(u.email || "—")}</td>
+      <td>${admDate(u.created_at)}</td>
+      <td>${u.last_sign_in_at ? admDaysAgo(u.last_sign_in_at) : "nunca"}</td>
+      <td class="num">${numOr0(u.n_contas)}</td>
+      <td class="num">${numOr0(u.n_lancamentos).toLocaleString("pt-BR")}</td>
+      <td class="num">${numOr0(u.n_ativos)}</td>
+      <td>${admDaysAgo(u.ultima_atividade)}</td>
+    </tr>`).join("");
+  const table = `<div class="card adm-card"><div class="adm-table-wrap"><table class="adm-table">
+      <thead><tr><th>E-mail</th><th>Criado</th><th>Último acesso</th><th class="num">Contas</th><th class="num">Lançtos</th><th class="num">Ativos</th><th>Atividade</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="7" class="empty-mini">Nenhum usuário.</td></tr>`}</tbody>
+    </table></div></div>`;
+  return `<div class="adm"><div class="hist-top"><span class="card-sub">${users.length} ${users.length === 1 ? "usuário" : "usuários"} cadastrados</span><button class="ghost hist-refresh" data-admin-refresh>${ic("rotate", 14)} Atualizar</button></div>${kpis}${table}</div>`;
+}
+async function loadAdmin(force) {
+  if (state._adminLoading) return;
+  if (state.adminData && state.adminData !== "error" && !force) return;
+  state._adminLoading = true;
+  const hasCache = state.adminData && state.adminData !== "error";
+  if (!hasCache) { state.adminData = null; const r0 = document.getElementById("admin-root"); if (r0) r0.innerHTML = renderAdminBody(); }
+  try { state.adminData = await Store.adminOverview(); }
+  catch (e) { if (!hasCache) state.adminData = "error"; }
+  state._adminLoading = false;
+  const r = document.getElementById("admin-root"); if (r) r.innerHTML = renderAdminBody();
+}
+function viewAdmin() {
+  if (!state.isAdmin) return `<div class="card"><div class="empty-mini">Área restrita.</div></div>`;
+  loadAdmin();
+  return `<div id="admin-root">${renderAdminBody()}</div>`;
+}
+
 /* ---------- Configurações do usuário ---------- */
 function viewConfig() {
   const u = (window.Store && Store.user) || {};
@@ -1785,8 +1838,18 @@ function viewConfig() {
     </div>
     <div class="card cfg-card">
       <div class="cfg-head"><span class="cfg-ic">${ic("download", 17)}</span><h3>Seus dados</h3></div>
-      <p class="cfg-p"><b>${nAcc}</b> ${nAcc === 1 ? "conta" : "contas"} · <b>${nCat}</b> categorias · <b>${nTx}</b> ${nTx === 1 ? "lançamento" : "lançamentos"}. Baixe um backup completo em JSON quando quiser.</p>
-      <button class="ghost" data-config-export>${ic("download", 15)} Exportar backup (.json)</button>
+      <p class="cfg-p"><b>${nAcc}</b> ${nAcc === 1 ? "conta" : "contas"} · <b>${nCat}</b> categorias · <b>${nTx}</b> ${nTx === 1 ? "lançamento" : "lançamentos"}. O backup em JSON inclui <b>tudo</b>: contas, categorias, lançamentos, investimentos (ativos e proventos) e suas preferências (metas, snapshots, classificações).</p>
+      <div class="cfg-actions">
+        <button class="ghost" data-config-export>${ic("download", 15)} Exportar backup (.json)</button>
+        <button class="ghost" data-config-import>${ic("upload", 15)} Importar backup</button>
+      </div>
+      <input type="file" accept="application/json,.json" hidden data-config-import-file>
+      ${state.prefs && state.prefs.demo ? `<div class="cfg-demo-note"><div class="cfg-demo-txt">${ic("sparkles", 14)}<span><b>Você está vendo dados de exemplo.</b> Quando quiser começar do zero com os seus números, é só limpar.</span></div><button class="pop-danger sm" data-config-cleardemo>${ic("trash", 14)} Zerar dados de exemplo</button></div>` : ""}
+    </div>
+    <div class="card cfg-card">
+      <div class="cfg-head"><span class="cfg-ic">${ic("sparkles", 17)}</span><h3>Apresentação</h3></div>
+      <p class="cfg-p">Refaça o tour guiado pelas principais telas do Meu Caixa quando quiser.</p>
+      <button class="ghost" data-tour-start>${ic("play-circle", 15)} Rever apresentação</button>
     </div>
     <div class="card cfg-card">
       <div class="cfg-head"><span class="cfg-ic">${ic("settings", 17)}</span><h3>Aparência</h3></div>
@@ -1817,8 +1880,42 @@ function exportBackup() {
   a.href = url; a.download = `meucaixa-backup-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+// lê um .json exportado (ou o próprio modelo) e abre confirmação antes de SUBSTITUIR os dados atuais
+function importBackup(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    let data;
+    try { data = JSON.parse(reader.result); } catch (e) { data = null; }
+    // aceita tanto o wrapper { model: … } quanto um modelo cru
+    const model = data && (data.model || (data.accounts && data.catTree ? data : null));
+    const ok = model && Array.isArray(model.accounts) && model.catTree && Array.isArray(model.catTree.receita) && Array.isArray(model.catTree.despesa) && Array.isArray(model.tx);
+    if (!ok) { state.pop = { kind: "importErr" }; renderPop(); return; }
+    state.pop = {
+      kind: "confirmImport", model,
+      nAcc: model.accounts.length,
+      nCat: (model.catTree.receita.length + model.catTree.despesa.length),
+      nTx: model.tx.length,
+      nAsset: Array.isArray(model.assetMoves) ? model.assetMoves.length : 0,
+    };
+    renderPop();
+  };
+  reader.onerror = () => { state.pop = { kind: "importErr" }; renderPop(); };
+  reader.readAsText(file);
+}
+// confirmado: aplica o modelo importado e persiste (o sync empurra pro servidor a partir do snapshot)
+function commitImport() {
+  const p = state.pop; if (!p || p.kind !== "confirmImport") return;
+  applyModel(p.model);
+  ensureSeeded();
+  refreshSideNet(); refreshDataLabels();
+  state.pop = null;
+  saveState();
+  state.tab = "dashboard";
+  renderView(); renderModal(); renderPop();
+}
 
-const VIEWS = { dashboard: viewDashboard, patrimonial: viewPatrimonial, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig };
+const VIEWS = { dashboard: viewDashboard, patrimonial: viewPatrimonial, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig, admin: viewAdmin };
 
 /* ---------- drill-down do gráfico Receitas × Despesas ---------- */
 function renderDrill() {
@@ -1915,6 +2012,8 @@ function modalHTML() {
 /* ---------- 8. estado, render e eventos ---------- */
 const state = {
   tab: "dashboard",
+  isAdmin: false, adminData: undefined, // aba Admin (SaaS): só visível/carregada para o e-mail dono
+  tour: null, // walkthrough de onboarding (passo atual)
   prefs: {}, // preferências sincronizadas (metas de alocação, snapshots de patrimônio, premissas IPCA/CDI)
   tx: initialTx.slice(),
   recon: [],
@@ -2339,6 +2438,22 @@ function renderPop() {
     body = `<p class="pop-hint">Índices acumulados nos últimos 12 meses (%). Usados pra calcular retorno real e excesso sobre o CDI.</p>
       <div class="fld-row"><label class="fld"><span class="fld-label">IPCA 12m</span><input data-prem="ipca" inputmode="decimal" placeholder="0,0" autocomplete="off" value="${attr(pr.ipca != null ? pr.ipca : "")}"></label><label class="fld"><span class="fld-label">CDI 12m</span><input data-prem="cdi" inputmode="decimal" placeholder="0,0" autocomplete="off" value="${attr(pr.cdi != null ? pr.cdi : "")}"></label></div>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-prem-save>Salvar</button>`;
+  } else if (p.kind === "confirmImport") {
+    title = "Importar backup";
+    body = `<p class="confirm-lead">${ic("upload", 18)} Restaurar este backup?</p>
+      <p class="pop-hint">O arquivo tem <b>${p.nAcc} ${p.nAcc === 1 ? "conta" : "contas"}</b> · <b>${p.nCat} categorias</b> · <b>${p.nTx.toLocaleString("pt-BR")} ${p.nTx === 1 ? "lançamento" : "lançamentos"}</b>${p.nAsset ? ` · <b>${p.nAsset} ${p.nAsset === 1 ? "movimento de ativo" : "movimentos de ativos"}</b>` : ""}.</p>
+      <div class="lock-note">${ic("circle-alert", 14)}<div><b>Substitui todos os seus dados atuais</b> por este backup (sincroniza em todos os aparelhos). Se quiser guardar o que tem hoje, exporte antes.</div></div>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-import-confirm>${ic("upload", 15)} Substituir pelos dados do arquivo</button>`;
+  } else if (p.kind === "confirmClearDemo") {
+    title = "Zerar dados de exemplo";
+    body = `<p class="confirm-lead">${ic("trash", 18)} Começar do zero?</p>
+      <p class="pop-hint">Remove todas as contas e lançamentos <b>de exemplo</b> e deixa um começo limpo: duas contas zeradas (Conta Corrente e Carteira) e as categorias padrão, prontas pra você lançar os <b>seus</b> números.</p>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-clear-demo-confirm>${ic("trash", 15)} Zerar e começar</button>`;
+  } else if (p.kind === "importErr") {
+    title = "Importar backup";
+    body = `<p class="confirm-lead">${ic("circle-alert", 18)} Não consegui ler este arquivo.</p>
+      <p class="pop-hint">Escolha um arquivo <b>.json</b> exportado pelo próprio Meu Caixa (botão “Exportar backup”). Ele precisa ter contas, categorias e lançamentos.</p>`;
+    foot = `<button class="mini-btn primary" data-pop-close>Entendi</button>`;
   }
   const wide = p.kind === "assetImport" ? " wide" : "";
   el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal${wide}"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
@@ -3217,12 +3332,22 @@ function wire() {
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
+    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
+    if (e.target.closest("[data-admin-refresh]")) { loadAdmin(true); return; }
     const hday = e.target.closest("[data-hist-day]");
     if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
     if (e.target.closest("[data-config-save-name]")) { saveConfigName(); return; }
     if (e.target.closest("[data-config-export]")) { exportBackup(); return; }
+    if (e.target.closest("[data-config-import]")) { const inp = document.querySelector("[data-config-import-file]"); if (inp) inp.click(); return; }
+    if (e.target.closest("[data-import-confirm]")) { commitImport(); return; }
+    if (e.target.closest("[data-config-cleardemo]")) { clearDemoData(); return; }
+    if (e.target.closest("[data-tour-start]")) { startTour(); return; }
+    if (e.target.closest("[data-tour-next]")) { tourGo(1); return; }
+    if (e.target.closest("[data-tour-prev]")) { tourGo(-1); return; }
+    if (e.target.closest("[data-tour-close]")) { tourFinish(); return; }
+    if (e.target.closest("[data-tour-cleardemo]")) { clearDemoData(); return; }
+    if (e.target.closest("[data-clear-demo-confirm]")) { commitClearDemo(); return; }
     const filt = e.target.closest("[data-filter]");
     if (filt) { state.filter = filt.dataset.filter; renderView(); return; }
     // drill-down
@@ -3366,6 +3491,8 @@ function wire() {
   document.addEventListener("change", (e) => {
     const f = e.target.closest("[data-imp-file]");
     if (f && f.files && f.files.length) { addReconFiles(f.files); f.value = ""; return; }
+    const bkp = e.target.closest("[data-config-import-file]");
+    if (bkp && bkp.files && bkp.files.length) { importBackup(bkp.files[0]); bkp.value = ""; return; }
     const ia = e.target.closest("[data-imp-acct]");
     if (ia) { state.reconAccount = ia.value; return; } // mantém a conta escolhida ao re-renderizar
     const rf = e.target.closest("[data-recon-field]");
@@ -3415,6 +3542,9 @@ async function init() {
     if (e.target.closest("[data-setpass-form]")) { e.preventDefault(); submitSetPass(); return; }
   });
   document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-landing-signup]")) { e.preventDefault(); _authState = { view: "signin", mode: "signup", email: "", msg: "" }; renderAuth(); return; }
+    if (e.target.closest("[data-landing-login]")) { e.preventDefault(); _authState = { view: "signin", mode: "login", email: "", msg: "" }; renderAuth(); return; }
+    if (e.target.closest("[data-landing-back]")) { e.preventDefault(); _authState = { view: "landing", mode: "login", email: "", msg: "" }; renderAuth(); return; }
     if (e.target.closest("[data-auth-google]")) { e.preventDefault(); loginGoogle(); return; }
     if (e.target.closest("[data-auth-toggle]")) { e.preventDefault(); const em = document.querySelector("[data-auth-email]"); _authState = { view: "signin", mode: _authState.mode === "signup" ? "login" : "signup", email: em ? em.value.trim() : _authState.email, msg: "" }; renderAuth(); return; }
     if (e.target.closest("[data-auth-back]")) { _authState = { view: "signin", mode: "login", email: _authState.email, msg: "" }; renderAuth(); return; }
@@ -3442,6 +3572,11 @@ async function init() {
   if (Store.isAuthed()) boot(); else showLogin();
 }
 
+// mostra/esconde o botão de nav Admin conforme state.isAdmin (fica display:none por padrão no HTML)
+function updateAdminNav() {
+  const b = document.getElementById("nav-admin");
+  if (b) b.style.display = state.isAdmin ? "" : "none";
+}
 // reflete o usuário logado na sidebar (nome/e-mail/inicial) — antes era "Henrique" fixo
 function updateSidebarUser() {
   const u = window.Store && Store.user; if (!u) return;
@@ -3485,6 +3620,52 @@ function defaultSeedModel() {
   };
 }
 
+// começo COM DADOS DE EXEMPLO p/ o usuário novo entender o app (contas, lançamentos no mês atual e no
+// anterior, 1 carteira com ativos). Marcado com prefs.demo=true → botão "zerar" e o tour reconhecem.
+function exampleSeedModel() {
+  const base = defaultSeedModel();
+  const ym = TODAY_ISO.slice(0, 7);                                  // mês atual (YYYY-MM)
+  const y = +TODAY_ISO.slice(0, 4), m = +TODAY_ISO.slice(5, 7);
+  const pm = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`; // mês anterior
+  const dd = (yms, d) => `${yms}-${String(d).padStart(2, "0")}`;
+  let n = 0; const id = () => "ex" + (++n);
+  const mk = (tipo, yms, d, extra) => Object.assign({ id: id(), tipo, iso: dd(yms, d), data: dataBR(dd(yms, d)), status: "conciliado" }, extra);
+  const desp = (yms, d, cat, sub, conta, v, desc) => mk("despesa", yms, d, { desc, valor: -Math.abs(v), cat, sub, conta });
+  const rec = (yms, d, cat, sub, conta, v, desc) => mk("receita", yms, d, { desc, valor: Math.abs(v), cat, sub, conta });
+  const transf = (yms, d, origem, destino, v, desc) => mk("transferencia", yms, d, { desc, valor: Math.abs(v), origem, destino });
+  const reemb = (yms, d, cat, sub, conta, v, desc) => mk("reembolso", yms, d, { desc, valor: Math.abs(v), cat, sub, conta });
+  const CC = "Conta Corrente", CART = "Carteira", NB = "Nubank", INV = "Investimentos";
+  const tx = [
+    rec(pm, 5, "Salário", "Salário", CC, 7500, "Salário"),
+    desp(pm, 10, "Moradia", "Aluguel", CC, 1800, "Aluguel"),
+    desp(pm, 12, "Alimentação", "Supermercado", CC, 620, "Supermercado do mês"),
+    desp(pm, 15, "Moradia", "Energia", CC, 180, "Conta de luz"),
+    desp(pm, 18, "Alimentação", "Restaurante", NB, 95, "Jantar fora"),
+    desp(pm, 20, "Transporte", "Combustível", NB, 250, "Gasolina"),
+    desp(pm, 22, "Lazer", "Streaming", NB, 55, "Assinaturas"),
+    rec(pm, 25, "Renda extra", "Freelance", CC, 1200, "Projeto freelance"),
+    transf(pm, 26, CC, INV, 1000, "Aporte mensal"),
+    desp(pm, 28, "Saúde", "Farmácia", CC, 70, "Farmácia"),
+    rec(ym, 5, "Salário", "Salário", CC, 7500, "Salário"),
+    desp(ym, 1, "Moradia", "Aluguel", CC, 1800, "Aluguel"),
+    desp(ym, 2, "Alimentação", "Supermercado", CC, 410, "Feira e mercado"),
+    desp(ym, 2, "Transporte", "Aplicativos", NB, 32, "Corrida de app"),
+    reemb(ym, 2, "Transporte", "Aplicativos", CC, 32, "Reembolso da corrida"),
+  ];
+  const accounts = [
+    { id: "cc", nome: CC, sub: "Banco", tipo: "banco", saldo: 4380, grupo: "fin", arquivada: false, ordem: 0, icon: "landmark" },
+    { id: "nb", nome: NB, sub: "Cartão de crédito", tipo: "cartao", saldo: -432, grupo: "fin", arquivada: false, ordem: 1, icon: "credit-card" },
+    { id: "cart", nome: CART, sub: "Dinheiro", tipo: "banco", saldo: 120, grupo: "fin", arquivada: false, ordem: 2, icon: "banknote" },
+    { id: "inv", nome: INV, sub: "Corretora", tipo: "invest", saldo: 300, grupo: "fin", arquivada: false, ordem: 3, icon: "invest" },
+  ];
+  const assetMoves = [
+    { id: "am1", contaId: "inv", iso: dd(pm, 15), ticker: "HGLG11", nome: "CSHG Logística", classe: "fii", tipo: "compra", qtd: 10, preco: 160 },
+    { id: "am2", contaId: "inv", iso: dd(pm, 16), ticker: "ITSA4", nome: "Itaúsa", classe: "acao", tipo: "compra", qtd: 100, preco: 9.5 },
+    { id: "am3", contaId: "inv", iso: dd(ym, 1), ticker: "HGLG11", nome: "CSHG Logística", classe: "fii", tipo: "provento", qtd: 1, preco: 12 },
+  ];
+  return { accounts, catTree: base.catTree, tx, dashOrder: state.dashOrder.slice(), prefs: { demo: true }, assetMoves };
+}
+
 // self-heal: um usuário sem NENHUMA categoria (seed antigo/parcial vindo de código em cache velho)
 // não consegue nem lançar transação. Injeta o conjunto padrão e persiste. Idempotente — só age
 // quando está realmente vazio; não mexe nas categorias de quem já tem as suas.
@@ -3502,6 +3683,64 @@ function normalizeAcctTipos() {
   let mudou = false;
   accounts.forEach((a) => { if (a.tipo === "dinheiro") { a.tipo = "banco"; a.grupo = a.grupo || "fin"; if (!a.icon) a.icon = "banknote"; mudou = true; } });
   if (mudou) saveState();
+}
+
+/* ---------- onboarding: walkthrough (5 passos) + zerar dados de exemplo ---------- */
+const TOUR_STEPS = [
+  { tab: "dashboard", icon: "layout", title: "Visão geral", text: "Seu mês num relance: receitas, despesas, resultado, gastos por categoria e as últimas transações — tudo calculado dos seus lançamentos reais." },
+  { tab: "contas", icon: "wallet", title: "Contas e cartões", text: "Reúna contas, dinheiro, cartões e carteiras de investimento num lugar só. Cada uma mostra o saldo atual; as de investimento separam caixa, aplicado e valor de mercado." },
+  { tab: "transacoes", icon: "transfer", title: "Lançar é rápido", text: "Registre receitas, despesas, transferências e reembolsos pelo botão “Nova transação”. Categorias e subcategorias mantêm tudo organizado." },
+  { tab: "patrimonial", icon: "trending-up", title: "Investimentos a mercado", text: "Ações, FIIs, ETFs e renda fixa com preço médio, cotação, proventos e alocação por classe e objetivo — a carteira valorizada de verdade." },
+  { tab: "conciliacao", icon: "checklist", title: "Importe e concilie", text: "Leia o extrato do banco (PDF/OFX/CSV) ou da B3, bata o saldo e lance só o que falta — sem digitar tudo à mão." },
+];
+function maybeStartTour() { if (state.prefs && state.prefs.demo && !state.prefs.tourDone) startTour(); }
+function startTour() { state.tour = 0; gotoTourTab(); renderTour(); }
+function gotoTourTab() {
+  const step = TOUR_STEPS[state.tour]; if (!step) return;
+  state.tab = step.tab; state.acctDetail = null; state.acctMenu = null; state.assetRecon = null; state.catDetail = null;
+  renderView();
+}
+function tourGo(delta) {
+  if (state.tour == null) return;
+  const nx = state.tour + delta;
+  if (nx < 0) return;
+  if (nx >= TOUR_STEPS.length) { tourFinish(); return; }
+  state.tour = nx; gotoTourTab(); renderTour();
+}
+function tourFinish() {
+  state.tour = null;
+  state.prefs = Object.assign({}, state.prefs, { tourDone: true });
+  saveState(); renderTour();
+}
+function renderTour() {
+  const el = document.getElementById("tour-root"); if (!el) return;
+  if (state.tour == null) { el.innerHTML = ""; return; }
+  const i = state.tour, step = TOUR_STEPS[i], n = TOUR_STEPS.length, last = i === n - 1;
+  const dots = TOUR_STEPS.map((_, k) => `<span class="tour-dot${k === i ? " on" : ""}"></span>`).join("");
+  el.innerHTML = `<div class="overlay tour-overlay"><div class="tour-card">
+    <button class="x tour-x" data-tour-close>${ic("x", 18)}</button>
+    <div class="tour-ic">${ic(step.icon, 26)}</div>
+    <div class="tour-step">Passo ${i + 1} de ${n}</div>
+    <h3>${step.title}</h3>
+    <p>${step.text}</p>
+    <div class="tour-dots">${dots}</div>
+    <div class="tour-foot">
+      ${i > 0 ? `<button class="mini-btn" data-tour-prev>${ic("arrow-left", 14)} Voltar</button>` : `<button class="mini-btn" data-tour-close>Pular</button>`}
+      <button class="mini-btn primary" data-tour-next>${last ? `${ic("check", 14)} Concluir` : `Próximo ${ic("arrow-right", 14)}`}</button>
+    </div>
+    ${last ? `<button class="tour-clear" data-tour-cleardemo>${ic("trash", 14)} Já entendi — zerar o exemplo e começar do zero</button>` : ""}
+  </div></div>`;
+}
+// abre a confirmação de zerar (fecha o tour antes pra não empilhar overlays)
+function clearDemoData() { state.tour = null; renderTour(); state.pop = { kind: "confirmClearDemo" }; renderPop(); }
+function commitClearDemo() {
+  applyModel(defaultSeedModel());   // starter vazio: 2 contas zeradas + categorias, sem lançamentos
+  state.prefs = {};                 // some com demo/tourDone e qualquer preferência do exemplo
+  state.pop = null; state.tour = null;
+  refreshSideNet(); refreshDataLabels();
+  saveState();
+  state.tab = "dashboard";
+  renderView(); renderModal(); renderPop(); renderTour();
 }
 
 // carrega os dados (do IndexedDB; puxa/semeia se preciso) e sobe o app
@@ -3522,7 +3761,7 @@ async function boot() {
     // (dados reais locais OF em dev; senão o starter genérico com contas e categorias padrão).
     let remoteEmpty = true;
     try { remoteEmpty = await Store.isRemoteEmpty(); } catch (e) { remoteEmpty = false; }
-    if (remoteEmpty) { const starter = OF ? seedModel : defaultSeedModel(); await Store.seed(starter); model = starter; }
+    if (remoteEmpty) { const starter = OF ? seedModel : exampleSeedModel(); await Store.seed(starter); model = starter; }
     else model = { accounts: [], catTree: { receita: [], despesa: [] }, tx: [], dashOrder: state.dashOrder.slice() };
   }
   applyModel(model);
@@ -3533,6 +3772,10 @@ async function boot() {
   hideAuth(); // remove o "carregando", se estava
   if (!_wired) { wire(); _wired = true; }
   renderView(); renderModal(); renderPop();
+  // é admin? (RPC no banco) → revela a aba Admin. Silencioso pra quem não é.
+  if (Store.isAdmin) Store.isAdmin().then((ok) => { state.isAdmin = !!ok; updateAdminNav(); }).catch(() => {});
+  // onboarding: abre a apresentação sozinha na 1ª vez de uma conta com dados de exemplo
+  maybeStartTour();
   // cotações frescas em segundo plano (só se houver ativos lançados)
   if (hasHoldings()) { fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); }
   // pull em segundo plano: se outro aparelho mudou, atualiza a tela
@@ -3558,16 +3801,49 @@ function refreshDataLabels() {
 const AUTH_GOOGLE = false; // liga o botão "Entrar com Google" quando o provedor estiver ativo no Supabase
 const GOOGLE_SVG = `<svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
 let _authState = { view: "signin", mode: "login", email: "", msg: "" };
-function showLogin() { _booted = false; _authState = { view: "signin", mode: "login", email: "", msg: "" }; renderAuth(); }
+function showLogin() { _booted = false; _authState = { view: "landing", mode: "login", email: "", msg: "" }; renderAuth(); }
 function hideAuth() { const g = document.getElementById("auth-gate"); if (g) g.innerHTML = ""; }
 function renderAuthError(msg) { _authState = { view: "error", mode: "login", email: "", msg }; renderAuth(); }
 function renderAuthLoading() {
   const g = document.getElementById("auth-gate"); if (!g) return;
   g.innerHTML = `<div class="auth-overlay"><div class="auth-card"><div class="auth-brand">${ic("wallet", 30)}</div><h2>Carregando seus dados…</h2><p>Sincronizando com a nuvem. No primeiro acesso deste aparelho isso leva alguns segundos.</p><div class="auth-spin"></div></div></div>`;
 }
+// landing de quem chega deslogado: overview + diferenciais + CTA (abre o card de login/criar conta)
+function renderLanding() {
+  const g = document.getElementById("auth-gate"); if (!g) return;
+  const feats = [
+    ["rotate", "Funciona offline e sincroniza", "Seus dados vivem no aparelho e sincronizam sozinhos entre celular e computador — sem depender de conexão pra usar."],
+    ["upload", "Importe da B3 e do banco", "Leia PDF de extrato do banco e da área do investidor da B3 (compras, vendas e proventos) e concilie com um clique."],
+    ["trending-up", "Investimentos a preço de mercado", "Ações, FIIs, ETFs e renda fixa com preço médio, cotação atual, proventos e a carteira valorizada de verdade."],
+    ["checklist", "Conciliação bancária", "Compare o extrato com o que já lançou, bata o saldo na vírgula e lance só o que falta."],
+    ["layout", "Categorias e gráficos claros", "Receitas, despesas e reembolsos organizados, com pizzas e evolução mês a mês do seu dinheiro."],
+    ["shield", "Privado por padrão", "Cada conta só enxerga os próprios dados (isolados no banco). Exporte um backup completo quando quiser."],
+  ];
+  g.innerHTML = `<div class="landing">
+    <div class="landing-inner">
+      <header class="lp-hero">
+        <div class="lp-brand"><span class="lp-mark">${ic("wallet", 30)}</span><span class="lp-brandname">Meu Caixa</span></div>
+        <h1 class="lp-title">Suas finanças pessoais, <span>do jeito que fazem sentido.</span></h1>
+        <p class="lp-sub">Controle de contas, cartões e investimentos num só lugar — com importação de extratos, conciliação bancária e a carteira a preço de mercado. Simples, privado e sincronizado entre seus aparelhos.</p>
+        <div class="lp-cta">
+          <button class="auth-btn lp-primary" data-landing-signup>Criar conta grátis</button>
+          <button class="auth-btn ghost lp-secondary" data-landing-login>Entrar</button>
+        </div>
+      </header>
+      <div class="lp-grid">
+        ${feats.map(([i, t, d]) => `<div class="lp-card"><span class="lp-ic">${ic(i, 20)}</span><h3>${t}</h3><p>${d}</p></div>`).join("")}
+      </div>
+      <footer class="lp-foot">
+        <p>Já tem conta? <a href="#" data-landing-login>Entrar</a></p>
+        <span class="lp-ver">Meu Caixa${APP_VERSION ? ` · versão ${APP_VERSION}` : ""}</span>
+      </footer>
+    </div>
+  </div>`;
+}
 function renderAuth() {
   const g = document.getElementById("auth-gate"); if (!g) return;
   const s = _authState;
+  if (s.view === "landing") { renderLanding(); return; }
   let inner;
   if (s.view === "sent") {
     inner = `<div class="auth-ic">${ic("check", 26)}</div><h2>Confirme seu e-mail</h2>
@@ -3590,7 +3866,8 @@ function renderAuth() {
         <button class="auth-btn" type="submit"${busy ? " disabled" : ""}>${busy ? "Aguarde…" : signup ? "Criar conta" : "Entrar"}</button>
       </form>
       ${s.msg ? `<p class="auth-msg err">${s.msg}</p>` : ""}
-      <p class="auth-switch">${signup ? "Já tem conta?" : "Ainda não tem conta?"} <a href="#" data-auth-toggle>${signup ? "Entrar" : "Criar conta"}</a></p>`;
+      <p class="auth-switch">${signup ? "Já tem conta?" : "Ainda não tem conta?"} <a href="#" data-auth-toggle>${signup ? "Entrar" : "Criar conta"}</a></p>
+      <p class="auth-switch"><a href="#" data-landing-back>${ic("arrow-left", 13)} Voltar à apresentação</a></p>`;
   }
   g.innerHTML = `<div class="auth-overlay"><div class="auth-card">${inner}</div></div>`;
   const inp = g.querySelector(s.email ? "[data-auth-pass]" : "[data-auth-email]"); if (inp) setTimeout(() => inp.focus(), 0);
