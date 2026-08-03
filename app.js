@@ -1514,9 +1514,12 @@ function viewAssetRecon() {
     ${projByConta.length ? projBlocks : `<div class="empty-mini">Aceite lançamentos (com a corretora mapeada) pra ver a posição resultante.</div>`}
   </div>`;
   const resumo = `<div class="recon-sum"><b>${rows.length}</b> lidos · <b>${nov}</b> ${nov === 1 ? "novo" : "novos"} · <b>${dup}</b> já ${dup === 1 ? "existe" : "existem"}${semConta ? ` · <b>${semConta}</b> sem conta` : ""} · ${kindLbl}</div>`;
-  const acceptAll = pend ? `<button class="ghost" data-ar-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
+  const acceptAll = pend ? `<button class="ghost" data-ar-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}${semConta ? " (com conta)" : ""}</button>` : "";
   const saveLabel = conc ? `Importar ${conc} lançamento${conc > 1 ? "s" : ""}` : "Nada para importar";
-  const bar = head + check + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} aceitos</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-ar-cancel>${ic("x", 14)} Cancelar</button>${acceptAll}<button class="recon-save" data-ar-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
+  // aviso claro quando faltam corretoras no de-para: explica por que só N estão "prontos pra aceitar"
+  const semBrokers = ar.brokers.filter((b) => !ar.brokerMap[b.key]);
+  const warn = semConta ? `<div class="card ar-warn-banner">${ic("circle-alert", 17)}<div><b>${semConta} ${semConta === 1 ? "lançamento" : "lançamentos"}</b> ${semConta === 1 ? "está" : "estão"} sem conta de destino porque ${semBrokers.length === 1 ? "a corretora" : "as corretoras"} <b>${semBrokers.map((b) => _esc(b.key)).join(", ")}</b> ainda ${semBrokers.length === 1 ? "não foi mapeada" : "não foram mapeadas"}. Escolha uma conta (ou <b>“+ criar carteira”</b>) no de-para acima pra poder aceitá-${semConta === 1 ? "lo" : "los"}. Por isso o botão só oferece <b>${pend}</b> agora.</div></div>` : "";
+  const bar = head + warn + check + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} aceitos</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-ar-cancel>${ic("x", 14)} Cancelar</button>${acceptAll}<button class="recon-save" data-ar-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
   // lista AGRUPADA por corretora: cada grupo colapsa, pagina (evita render de centenas de cards) e tem
   // "aceitar todos desta corretora". state.arCollapsed/arPage guardam colapso e quantos cards mostrar.
   const PAGE = 30;
