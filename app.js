@@ -1510,8 +1510,8 @@ function viewAssetRecon() {
     </div>`;
   }).join("");
   const check = `<div class="card recon-check ar-check">
-    <div class="ar-check-h"><b>Como as carteiras ficam</b><span>projeção depois de aceitar — confira com sua corretora</span></div>
-    ${projByConta.length ? projBlocks : `<div class="empty-mini">Aceite lançamentos (com a corretora mapeada) pra ver a posição resultante.</div>`}
+    <div class="ar-check-h"><b>Como as carteiras ficam</b><span>considerando tudo que será importado — ignore com ✕ o que não quiser · confira com sua corretora</span></div>
+    ${projByConta.length ? projBlocks : `<div class="empty-mini">Mapeie as corretoras no de-para acima pra ver como cada carteira fica.</div>`}
   </div>`;
   const resumo = `<div class="recon-sum"><b>${rows.length}</b> lidos · <b>${nov}</b> ${nov === 1 ? "novo" : "novos"} · <b>${dup}</b> já ${dup === 1 ? "existe" : "existem"}${semConta ? ` · <b>${semConta}</b> sem conta` : ""} · ${kindLbl}</div>`;
   const acceptAll = pend ? `<button class="ghost" data-ar-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}${semConta ? " (com conta)" : ""}</button>` : "";
@@ -2662,15 +2662,17 @@ function createInvestAccount(nome) {
   const o = { id: "u" + Date.now(), nome: String(nome || "Nova carteira").trim(), sub: "Investimento", tipo: "invest", saldo: 0, grupo: "fin", arquivada: false, icon: "invest" };
   accounts.push(o); reindexAccounts(); refreshSideNet(); return o.id;
 }
-// projeção por CONTA mapeada: 4 totais (caixa·aplicado·mercado·total) + posição por ticker (atual→projetada),
-// COMO SE os aceitos fossem lançados. Injeta os pseudo-movimentos no ledger, calcula e desfaz (não vaza).
+// projeção por CONTA mapeada: 4 totais (caixa·aplicado·mercado·total) + posição por ticker (atual→projetada).
+// Conta TODOS os lançamentos NÃO-IGNORADOS (pendentes + aceitos) — igual ao saldo projetado da conciliação de
+// extrato: aparece por padrão ao importar; só o ✕ (ignorar/já existe) tira do cálculo. Injeta os pseudo-
+// movimentos no ledger, calcula e desfaz (não vaza).
 function assetReconProjByConta() {
   const ar = state.assetRecon; if (!ar) return [];
-  const aceitos = ar.rows.filter((r) => r.status === "conciliado" && r.contaId);
-  const contaIds = [...new Set(aceitos.map((r) => r.contaId))];
+  const contam = ar.rows.filter((r) => r.status !== "ignorado" && r.contaId);
+  const contaIds = [...new Set(contam.map((r) => r.contaId))];
   return contaIds.map((cid) => {
     const a = acctById(cid); if (!a) return null;
-    const meus = aceitos.filter((r) => r.contaId === cid);
+    const meus = contam.filter((r) => r.contaId === cid);
     const pos = {};
     computePositions(cid).forEach((p) => { pos[p.ticker] = { ticker: p.ticker, atual: p.qtd, proj: p.qtd, isRF: p.isRF }; });
     meus.filter((r) => r.tipo !== "provento").forEach((r) => {
