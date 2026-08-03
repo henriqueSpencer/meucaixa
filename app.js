@@ -2596,8 +2596,11 @@ function saveAssetTag() {
 function b3ImportPick() {
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = ".pdf,.xlsx,application/pdf";
+  // o input PRECISA estar no DOM: um <input> solto tem o click()/change engolidos na 1ª vez em alguns
+  // navegadores (Safari/iOS) — por isso "só funcionava na 2ª vez". Some depois de escolher.
+  inp.style.display = "none"; document.body.appendChild(inp);
   inp.onchange = async () => {
-    const f = inp.files && inp.files[0]; if (!f) return;
+    const f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
     state.pop = { kind: "assetImport", loading: true, fileName: f.name };
     renderPop();
     try {
@@ -3795,7 +3798,7 @@ async function init() {
     // conciliação impossível de editar). Então: SEMPRE aplica o modelo (pra absorver o que a outra aba
     // fez e não empurrar dado velho no reconCommit — o "push fantasma"), mas só re-renderiza quando
     // não há edição em curso. Mesmo motivo do guard de `state.modal`.
-    const busy = state.modal || state.imported;
+    const busy = state.modal || state.imported || state.assetRecon; // a conciliação da B3 também é transitória
     Store.loadSnapshot().then((m) => { if (m) { applyModel(m); refreshDataLabels(); if (!busy) renderView(); } }).catch(() => {});
   });
   Store.onAuth((authed) => { if (authed) boot(); else showLogin(); });
@@ -4008,8 +4011,9 @@ async function boot() {
   maybeStartTour();
   // cotações frescas em segundo plano (só se houver ativos lançados)
   if (hasHoldings()) { fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); }
-  // pull em segundo plano: se outro aparelho mudou, atualiza a tela
-  Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); renderView(); } }).catch(() => {});
+  // pull em segundo plano: se outro aparelho mudou, atualiza a tela — mas NÃO re-renderiza por cima de um
+  // fluxo transitório aberto (modal/conciliação de extrato/conciliação da B3), senão a tela "pisca" e some.
+  Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); if (!(state.modal || state.imported || state.assetRecon)) renderView(); } }).catch(() => {});
 }
 
 function refreshDataLabels() {
