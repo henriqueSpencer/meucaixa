@@ -1252,7 +1252,7 @@ function invPosDetailRow(contaId, p) {
     const q = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
     const total = numOr0(m.qtd) * numOr0(m.preco);
     const label = prov ? "Provento" : rf ? (venda ? "Resgate" : "Aporte") : (venda ? "Venda" : "Compra");
-    const qp = prov ? "recebido" : rf ? (venda ? "resgatado" : "aplicado") : `${q} × ${fmtNum(m.preco)}`;
+    const qp = prov ? (numOr0(m.qtd) > 1 ? `${q} cotas` : "recebido") : rf ? (venda ? "resgatado" : "aplicado") : `${q} × ${fmtNum(m.preco)}`;
     return `<div class="inv-mv click" data-asset-open="${attr(m.id)}">
       <span class="inv-mv-badge" style="background:${cor}1A;color:${cor}">${label}</span>
       <span class="inv-mv-date">${m.iso ? dataFullBR(m.iso) : "—"}</span>
@@ -1439,7 +1439,9 @@ function assetReconCard(r) {
   const qtxt = (Math.round(numOr0(r.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
   const brokerTag = r.broker ? `<span class="ar-card-broker">${_esc(r.broker)}</span>` : "";
   const conta = r.contaId ? acctById(r.contaId) : null;
-  const left = `<div class="recon-raw"><div class="raw-label">no arquivo${rawDate ? ` · ${rawDate}` : ""}${brokerTag}</div><div class="raw-desc">${tipoLabel} · ${_esc(r.ticker)}${prov ? "" : ` · ${qtxt} × ${fmtNum(r.preco)}`}</div><div class="raw-val num" style="color:${eff < 0 ? "var(--neg)" : "var(--pos)"}">${eff < 0 ? "− " : "+ "}${fmtNum(Math.abs(eff))}</div></div>`;
+  const provQtd = prov && numOr0(r.qtd) > 0 ? ` · ${qtxt} cotas` : ""; // qtd de ativos que gerou o provento
+  const descMeta = prov ? provQtd : ` · ${qtxt} × ${fmtNum(r.preco)}`;
+  const left = `<div class="recon-raw"><div class="raw-label">no arquivo${rawDate ? ` · ${rawDate}` : ""}${brokerTag}</div><div class="raw-desc">${tipoLabel} · ${_esc(r.ticker)}${descMeta}</div><div class="raw-val num" style="color:${eff < 0 ? "var(--neg)" : "var(--pos)"}">${eff < 0 ? "− " : "+ "}${fmtNum(Math.abs(eff))}</div></div>`;
   const contaTag = conta
     ? `<div class="recon-match ok">${ic("arrow-right", 12)} ${_esc(conta.nome)}</div>`
     : `<div class="recon-match warn">${ic("circle-alert", 12)} mapeie “${_esc(r.broker)}” acima</div>`;
@@ -1514,7 +1516,32 @@ function viewAssetRecon() {
   const acceptAll = pend ? `<button class="ghost" data-ar-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
   const saveLabel = conc ? `Importar ${conc} lançamento${conc > 1 ? "s" : ""}` : "Nada para importar";
   const bar = head + check + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} aceitos</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-ar-cancel>${ic("x", 14)} Cancelar</button>${acceptAll}<button class="recon-save" data-ar-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
-  return bar + `<div class="recon-list">${rows.map(assetReconCard).join("")}</div>`;
+  // lista AGRUPADA por corretora: cada grupo colapsa, pagina (evita render de centenas de cards) e tem
+  // "aceitar todos desta corretora". state.arCollapsed/arPage guardam colapso e quantos cards mostrar.
+  const PAGE = 30;
+  const groups = ar.brokers.map((b) => {
+    const grows = rows.filter((r) => r.broker === b.key);
+    const conta = ar.brokerMap[b.key] ? acctById(ar.brokerMap[b.key]) : null;
+    const gConc = grows.filter((r) => r.status === "conciliado").length;
+    const gPend = grows.filter((r) => r.status === "pendente" && r.contaId).length;
+    const gIgn = grows.filter((r) => r.status === "ignorado").length;
+    const collapsed = !!(state.arCollapsed && state.arCollapsed[b.key]);
+    const show = (state.arPage && state.arPage[b.key]) || PAGE;
+    const visible = collapsed ? [] : grows.slice(0, show);
+    const more = grows.length - (collapsed ? grows.length : visible.length);
+    const contaLbl = conta ? `<span class="ar-g-conta">${ic("arrow-right", 12)} ${_esc(conta.nome)}</span>` : `<span class="ar-g-warn">${ic("circle-alert", 12)} sem conta — mapeie acima</span>`;
+    const acceptBtn = gPend ? `<button class="mini-btn" data-ar-accept-broker="${attr(b.key)}">${ic("check", 13)} Aceitar ${gPend}</button>` : "";
+    return `<div class="ar-group">
+      <div class="ar-group-h" data-ar-toggle="${attr(b.key)}">
+        <span class="ar-g-caret">${ic(collapsed ? "arrow-right" : "chevron-down", 15)}</span>
+        <div class="ar-g-title"><b>${_esc(b.key)}</b>${contaLbl}</div>
+        <span class="ar-g-sum">${gConc} aceitos · ${gPend} pend.${gIgn ? ` · ${gIgn} ign.` : ""} · ${grows.length} no total</span>
+        ${acceptBtn}
+      </div>
+      ${collapsed ? "" : `<div class="recon-list">${visible.map(assetReconCard).join("")}</div>${more > 0 ? `<button class="ar-more" data-ar-more="${attr(b.key)}">${ic("chevron-down", 14)} Mostrar mais ${Math.min(PAGE, more)} — faltam ${more}</button>` : ""}`}
+    </div>`;
+  }).join("");
+  return bar + `<div class="ar-groups">${groups}</div>`;
 }
 function viewConciliacao() {
   if (!state.imported) {
@@ -2396,7 +2423,8 @@ function renderPop() {
       const prov = m.tipo === "provento", venda = m.tipo === "venda", cor = prov || venda ? "var(--pos)" : "var(--neg)";
       const total = numOr0(m.qtd) * numOr0(m.preco);
       const label = prov ? "Provento" : venda ? "Venda" : "Compra";
-      const meta = prov ? "recebido" : `${(Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 })} × ${fmtNum(m.preco)}`;
+      const qm = (Math.round(numOr0(m.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+      const meta = prov ? (numOr0(m.qtd) > 1 ? `${qm} cotas` : "recebido") : `${qm} × ${fmtNum(m.preco)}`;
       return `<div class="mini-row"><div class="mini-l"><div><div class="mini-desc">${label} · ${_esc(m.ticker || "?")}</div><div class="mini-meta">${m.iso ? dataBR(m.iso) : "—"} · ${meta}</div></div></div><div class="inv-move-r"><span class="num" style="color:${cor};font-weight:600">${fmtNum(total)}</span><button class="pop-danger sm" data-inv-del="${attr(m.id)}" title="Excluir">${ic("archive", 14)}</button></div></div>`;
     }).join("") || `<div class="empty-mini">Sem lançamentos.</div>`}</div>`;
     foot = `<button class="mini-btn primary" data-inv-add="${attr(p.contaId)}">${ic("plus", 14)} Novo lançamento</button>`;
@@ -2589,9 +2617,18 @@ function openAssetRecon(kind, fileName, moves) {
   const brokerMap = {}; order.forEach((b) => { brokerMap[b] = b3AcctForBroker(b); });
   const rows = moves.map((m, i) => Object.assign({ id: "ar" + i, status: "pendente", broker: m.broker || "Instituição não identificada" }, m));
   state.assetRecon = { kind, fileName, rows, brokers: order.map((b) => ({ key: b, count: counts[b] })), brokerMap };
+  state.arCollapsed = {}; state.arPage = {}; // colapso e paginação por corretora na lista da conciliação
   assetReconDedupAll();
   state.editing = null; closePop(); renderView();
 }
+// aceita todos os pendentes (com conta mapeada) de UMA corretora
+function assetReconAcceptBroker(broker) {
+  const ar = state.assetRecon; if (!ar) return;
+  ar.rows.forEach((r) => { if (r.broker === broker && r.status === "pendente" && r.contaId) r.status = "conciliado"; });
+  state.editing = null; renderView();
+}
+function assetReconToggleGroup(broker) { state.arCollapsed = state.arCollapsed || {}; state.arCollapsed[broker] = !state.arCollapsed[broker]; renderView(); }
+function assetReconMoreGroup(broker) { state.arPage = state.arPage || {}; state.arPage[broker] = (state.arPage[broker] || 30) + 30; renderView(); }
 // (re)calcula, por linha: a conta destino (via broker→conta) e se já existe naquela conta (dedup). Chamado ao
 // abrir e a cada mudança do mapa — não roda a cada render (senão apagaria aceitar/ignorar manuais).
 function assetReconDedupAll(onlyBroker) {
@@ -2636,7 +2673,7 @@ function assetReconProjByConta() {
     const posArr = Object.values(pos).filter((o) => Math.abs(o.proj) > 1e-9 || Math.abs(o.atual) > 1e-9).sort((a, b) => String(a.ticker).localeCompare(b.ticker));
     const n0 = assetMoves.length;
     meus.forEach((r, i) => assetMoves.push(r.tipo === "provento"
-      ? { id: "__proj" + i, contaId: cid, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
+      ? Object.assign({ id: "__proj" + i, contaId: cid, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: "provento" }, provStore(r.valor, r.qtd))
       : { id: "__proj" + i, contaId: cid, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) }));
     const totals = { caixa: carteiraCaixa(a), aplicado: computePositions(cid).reduce((s, p) => s + p.investido, 0), mercado: invInvestido(a), total: acctTotal(a) };
     assetMoves.length = n0;
@@ -2664,13 +2701,18 @@ function assetReconAccept(id) {
 function assetReconIgnore(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "ignorado"; state.editing = null; renderView(); }
 function assetReconReactivate(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "pendente"; state.editing = null; renderView(); }
 function assetReconAcceptAll() { state.assetRecon.rows.forEach((r) => { if (r.status === "pendente" && r.contaId) r.status = "conciliado"; }); state.editing = null; renderView(); }
+// provento → {qtd, preco} guardados no ledger. Guardamos a QUANTIDADE de ativos que gerou o provento
+// (ex.: 44 cotas) e o preço = valor/qtd, pra qtd×preco reproduzir o valor LÍQUIDO recebido (no JCP o
+// "preço unitário" da B3 é bruto, antes do IR — por isso derivamos do valor líquido). Sem qtd → qtd=1.
+const provStore = (valor, shares) => { const sh = numOr0(shares); return sh > 0 ? { qtd: sh, preco: numOr0(valor) / sh } : { qtd: 1, preco: numOr0(valor) }; };
 function assetReconCommit() {
   const ar = state.assetRecon; if (!ar) return;
   const base = Date.now();
   ar.rows.filter((r) => r.status === "conciliado" && r.contaId).forEach((r, i) => {
+    const meta = { id: "am" + (base + i), contaId: r.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe };
     const mv = r.tipo === "provento"
-      ? { id: "am" + (base + i), contaId: r.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
-      : { id: "am" + (base + i), contaId: r.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) };
+      ? Object.assign(meta, { tipo: "provento" }, provStore(r.valor, r.qtd))
+      : Object.assign(meta, { tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) });
     assetMoves.push(mv);
   });
   state.assetRecon = null; state.editing = null; refreshSideNet(); scheduleSave(); renderView();
@@ -3183,7 +3225,8 @@ function b3ParseMovXlsx(rows) {
     const valor = b3Num(row[iVal]);
     if (cls.tipo === "provento") {
       if (!valor) continue;
-      out.push({ iso, tipo: "provento", ticker, nome, classe: b3Classe(ticker, false), instituicao, broker, valor: cls.sign * valor });
+      const qAtivo = b3Num(row[iQtd]); // quantidade de ativos que gerou o provento (ex.: 44 cotas → dividendo)
+      out.push({ iso, tipo: "provento", ticker, nome, classe: b3Classe(ticker, false), instituicao, broker, valor: cls.sign * valor, qtd: qAtivo && qAtivo > 0 ? qAtivo : undefined });
     } else {
       const qtd = b3Num(row[iQtd]), preco = b3Num(row[iPU]);
       if (!qtd || qtd <= 0 || !preco || preco <= 0) continue; // trade real tem qtd e preço (empréstimo/custódia não)
@@ -3409,6 +3452,12 @@ function wire() {
     if (arIg) { assetReconIgnore(arIg.dataset.arIgnore); return; }
     const arRe = e.target.closest("[data-ar-reactivate]");
     if (arRe) { assetReconReactivate(arRe.dataset.arReactivate); return; }
+    const arAB = e.target.closest("[data-ar-accept-broker]");
+    if (arAB) { assetReconAcceptBroker(arAB.dataset.arAcceptBroker); return; }
+    const arMore = e.target.closest("[data-ar-more]");
+    if (arMore) { assetReconMoreGroup(arMore.dataset.arMore); return; }
+    const arTog = e.target.closest("[data-ar-toggle]");
+    if (arTog) { assetReconToggleGroup(arTog.dataset.arToggle); return; }
     if (e.target.closest("[data-ar-accept-all]")) { assetReconAcceptAll(); return; }
     if (e.target.closest("[data-ar-commit]")) { assetReconCommit(); return; }
     if (e.target.closest("[data-ar-cancel]")) { assetReconCancel(); return; }

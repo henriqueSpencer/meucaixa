@@ -224,8 +224,18 @@ vai pra conta mapeada; sem conta → linha **travada** (Aceitar desabilitado, ta
 mapa re-deduplica só aquele broker (`assetReconDedupAll(broker)` — dedup por-linha contra os `asset_moves` da
 **conta destino da linha**). `assetReconCommit` distribui os aceitos em **múltiplas contas** (`contaId: r.contaId`).
 A validação "Como as carteiras ficam" (`assetReconProjByConta`) mostra **um bloco por conta** mapeada (4 totais +
-posição por ativo). Validado (jsdom, arquivo real): 614 movs → 5 corretoras, prefill casou 3 por nome, XP criou
-carteira na hora, Rico mapeado numa conta existente, commit distribuiu 251/196/108/59 em 4 contas, 0 órfãos.
+posição por ativo). A **lista é agrupada por corretora** (`state.arCollapsed`/`state.arPage`): cada grupo colapsa
+(`assetReconToggleGroup`), **pagina 30 cards** por vez (`assetReconMoreGroup` — evita renderizar centenas) e tem
+**"Aceitar todos desta corretora"** (`assetReconAcceptBroker`). Validado (jsdom, arquivo real): 614 movs → 5
+corretoras, prefill casou 3 por nome, XP criou carteira na hora, Rico mapeado numa conta existente, commit
+distribuiu 251/196/108/59 em 4 contas, 0 órfãos; agrupar cortou o HTML de 1,23M→315K chars.
+**Provento guarda a QUANTIDADE de ativos que o gerou** (`provStore(valor, shares)`): em vez de `qtd:1,
+preco:valor`, guarda `qtd:<cotas>, preco:valor/qtd` — assim `qtd×preco` reproduz o valor **líquido** recebido
+(no JCP o "preço unitário" da B3 é bruto, antes do IR de 15%, então derivamos do valor líquido) **e** a
+quantidade fica visível (card, extrato do ativo, lista de lançamentos mostram "N cotas"). Sem qtd no arquivo
+(PDF, ou coluna vazia) → `qtd:1`. Todo o cálculo de valor já usava `qtd×preco`, então a mudança é transparente.
+**Renda fixa direta (Tesouro/CDB/LCI/CRA/CRI/debênture) NÃO é importada** — vem sem código de negociação da B3
+(`b3Produto` exige ticker) e no app é marcada à mão; ETFs de renda fixa com ticker (ex.: LFTB11) entram normal.
 - **Excel do relatório de Movimentação (`b3ParseMovXlsx`) é a FONTE COMPLETA** e o caminho preferido: traz
   todo o histórico de compra/venda **+** proventos com colunas estruturadas (Entrada/Saída, Data, Movimentação,
   Produto, Quantidade, Preço unitário, Valor). `b3MovClass(mov, es)` classifica o tipo do movimento
