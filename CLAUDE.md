@@ -207,24 +207,42 @@ cache em localStorage `mc_quotes`); histórico mensal via a Pages Function `/api
   suporta Functions); rodar local exige `wrangler pages dev` (ver "Como rodar local").
 
 ### Importar da B3 → tela de conciliação de ativos
-Botão **"Importar da B3"** na seção Ativos lê **PDF da área do investidor** (pdf.js já vendorizado):
-`b3ParseNegPage` (Extrato de **Negociação** → compra/venda, linha única, parse da direita: 2 últimos R$ =
-preço/valor, qtd, ticker=último código-de-negociação) e `b3ParseMovPage` (Extrato de **Movimentação** →
-proventos Dividendo/JCP/Rendimento; multi-linha, âncora no valor da coluna direita x≥500 + tipo/ticker por
-proximidade em y; ignora Empréstimo/Transferência/Amortização e proventos sem ticker). `parseB3PDF` detecta
-o tipo pela pág.1 (`b3Kind`). Depois abre a **tela `viewAssetRecon`** (`state.assetRecon`, take-over da área
+Botão **"Importar da B3"** na seção Ativos lê **PDF** (`.pdf`) **e Excel** (`.xlsx`) da área do investidor.
+`parseB3File(file)` roteia por extensão: `.xlsx` → `readXlsx`+`b3ParseMovXlsx`; senão → `parseB3PDF`.
+- **Excel do relatório de Movimentação (`b3ParseMovXlsx`) é a FONTE COMPLETA** e o caminho preferido: traz
+  todo o histórico de compra/venda **+** proventos com colunas estruturadas (Entrada/Saída, Data, Movimentação,
+  Produto, Quantidade, Preço unitário, Valor). `b3MovClass(mov, es)` classifica o tipo do movimento
+  (Dividendo/Rendimento/JCP/"Pagamento de Juros"/Reembolso/"Leilão de Fração" = **provento**, sinal por
+  Crédito/Débito, "- Cancelado" reverte, ignora "- Transferido"; Compra/Venda e "COMPRA/VENDA"/"Transferência -
+  Liquidação" = **trade**, direção pela coluna **Entrada/Saída** Crédito=compra Débito=venda). `b3Produto`
+  extrai `ticker`+`nome` do "CÓDIGO - Nome" (RF/Tesouro sem código de negociação → sem ticker → ignorado; RF é
+  marcada à mão no app). Trade só entra com qtd **e** preço (custódia/empréstimo/subscrição/bonificação vêm sem
+  preço = `-` → ignorados). Validado no arquivo real: 1392 linhas → **104 compras + 34 vendas + 476 proventos**.
+- **`readXlsx` é um leitor .xlsx puro, SEM lib** (`xlsxUnzip` lê o central-directory do zip, `xlsxInflateRaw`
+  usa `DecompressionStream('deflate-raw')`, o XML de `sharedStrings`+`sheet1` é lido por regex, não DOMParser —
+  roda igual em browser e node). 1ª peça que descompacta zip no app.
+- **PDFs** (pdf.js já vendorizado): `b3ParseNegPage` (Extrato de **Negociação** → compra/venda, linha única,
+  parse da direita: 2 últimos R$ = preço/valor, qtd, ticker=último código-de-negociação) e `b3ParseMovPage`
+  (Extrato de **Movimentação** → proventos + trades com rótulo **explícito** Compra/Venda; multi-linha, âncora
+  no valor da coluna direita x≥500 + tipo/ticker/qtd/preço por proximidade em y). ⚠️ **O PDF de Movimentação NÃO
+  traz a coluna Entrada/Saída** (a direção é cor, não texto), então "Transferência - Liquidação" (a maioria das
+  compras/vendas de ações) fica **sem direção e é ignorada no PDF** — por isso o Excel é o caminho completo.
+  `parseB3PDF` detecta o tipo pela pág.1 (`b3Kind`). Depois abre a **tela `viewAssetRecon`** (`state.assetRecon`, take-over da área
 de conteúdo) — **espelha a conciliação de extrato**: cards editáveis (`assetReconCard`, campos `data-arf`),
 aceitar/ignorar/reativar (`assetReconAccept`/`Ignore`/`Reactivate`/`AcceptAll`), dedup contra os
 `asset_moves` da conta (`assetImportDedup` → o que já existe nasce "ignorado"), trocar carteira re-deduplica
 (`assetReconSetConta`). **Validação de saldo**: painel "Como a carteira fica" com **caixa · aplicado · mercado
 · total projetados** (`assetReconProjTotals` injeta os aceitos no ledger, calcula com a mesma lógica da conta
 e desfaz — não vaza) + **posição por ativo** (`assetReconProjected`, atual→projetada). `assetReconCommit`
-cria os aceitos como `asset_moves`. Validado nos PDFs reais do usuário: Negociação 34 trades, Movimentação
-316 proventos. **Só faz PDF da B3** (Negociação cobre compra/venda; Nota de corretagem e CSV ficaram de fora
-— dá pra somar depois). Os PDFs de exemplo em `arq_exemplo/` são **gitignored** (têm CPF/dados reais; junto
-com `*.xlsx`). **Testar sem browser:** pdf.js roda em node com `global.self=global` +
-`GlobalWorkerOptions.workerSrc` no `.min.js`; extraia os text-items (`{str,x,y}`) dos PDFs e passe pros
-`b3Parse*` via `win.eval` no jsdom (ver `test_fase5.js`/`val_b3.js` no scratchpad).
+cria os aceitos como `asset_moves` (com `nome` preenchido a partir do Excel). Validado nos arquivos reais do
+usuário: Negociação PDF 34 trades, Movimentação PDF 320 proventos, **Movimentação Excel 138 trades + 476
+proventos** (a fonte completa). Formatos de fora: **Negociação em Excel** (colunas diferentes — sem `Produto`;
+cai no "não reconheci"), Nota de corretagem e CSV — dá pra somar depois. Os arquivos de exemplo em `arq_exemplo/`
+são **gitignored** (têm CPF/dados reais; PDFs e `*.xlsx`). **Testar sem browser:** o Excel roda em node
+direto (node 18+ tem `DecompressionStream`/`TextDecoder`) — extraia o bloco de helpers B3 do `app.js` real e
+`eval` com stubs de `parseValor`/`numOr0`, aí chame `readXlsx`+`b3ParseMovXlsx` contra o `.xlsx` real; pdf.js
+roda em node com `global.self=global` + `GlobalWorkerOptions.workerSrc` no `.min.js` (passe os text-items
+`{str,x,y}` pros `b3Parse*`). Ver `xlsx_proto.js`/`classify_test.js` no scratchpad.
 
 ## Importar extrato (tela Conciliação)
 Lê **OFX/CSV/TXT** (`parseOFX`/`parseCSV`, texto) e **PDF** do **Mercado Pago** (`parsePDF`→`mpParsePage`

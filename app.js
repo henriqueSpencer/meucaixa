@@ -1464,7 +1464,10 @@ function viewAssetRecon() {
   const totalR = rows.filter((r) => r.status !== "ignorado").length;
   const ign = rows.filter((r) => r.status === "ignorado").length;
   const nov = rows.filter((r) => !r.dup).length, dup = rows.length - nov, pend = rows.filter((r) => r.status === "pendente").length;
-  const kindLbl = ar.kind === "neg" ? "Negociação · compra/venda" : "Movimentação · proventos";
+  const nTrade = rows.filter((r) => r.tipo !== "provento").length, nProv = rows.length - nTrade;
+  const kindLbl = ar.kind === "neg"
+    ? "Negociação · compra/venda"
+    : "Movimentação · " + [nTrade ? `${nTrade} compra/venda` : "", nProv ? `${nProv} proventos` : ""].filter(Boolean).join(" · ");
   const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === ar.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
   const head = `<div class="card recon-head">
     <div class="rh-l"><span class="acct-ic">${ic(conta ? acctIconOf(conta) : "invest", 18)}</span><div><div class="rh-label">Importando da B3 · ${kindLbl}</div><div class="rh-acct">${_esc(ar.fileName || "")}</div></div></div>
@@ -2396,7 +2399,7 @@ function renderPop() {
     // só estados de leitura/erro — a lista (cards editáveis) é a TELA viewAssetRecon
     title = "Importar da B3";
     if (p.error) {
-      body = `<p class="confirm-lead">${ic("circle-alert", 18)} ${_esc(p.error)}</p><p class="pop-hint">Na área do investidor da B3, baixe em PDF o <b>Extrato de Negociação - Detalhe</b> (compras/vendas) ou o <b>Extrato de Movimentação</b> (proventos).</p>`;
+      body = `<p class="confirm-lead">${ic("circle-alert", 18)} ${_esc(p.error)}</p><p class="pop-hint">Na área do investidor da B3, o jeito mais completo é o relatório de <b>Movimentação em Excel (.xlsx)</b> — traz todo o histórico de compras, vendas e proventos. Também aceito PDF: <b>Extrato de Negociação - Detalhe</b> (compras/vendas) e <b>Extrato de Movimentação</b> (proventos; o PDF não distingue compra/venda nas liquidações).</p>`;
       foot = `<button class="mini-btn primary" data-pop-close>Entendi</button>`;
     } else {
       body = `<div class="ai-loading">${ic("rotate", 18)} Lendo <b>${_esc(p.fileName || "")}</b>… isso pode levar alguns segundos.</div>`;
@@ -2539,19 +2542,19 @@ function saveAssetTag() {
 // escolhe o arquivo, lê o PDF e abre o pop de conciliação de ativos
 function invImportPick(contaId) {
   const inp = document.createElement("input");
-  inp.type = "file"; inp.accept = ".pdf,application/pdf";
+  inp.type = "file"; inp.accept = ".pdf,.xlsx,application/pdf";
   inp.onchange = async () => {
     const f = inp.files && inp.files[0]; if (!f) return;
     state.pop = { kind: "assetImport", contaId, loading: true, fileName: f.name };
     renderPop();
     try {
-      const { kind, moves } = await parseB3PDF(await f.arrayBuffer());
+      const { kind, moves } = await parseB3File(f);
       if (!state.pop || state.pop.kind !== "assetImport") return; // usuário fechou
-      if (!kind) { state.pop.loading = false; state.pop.error = "Não reconheci este PDF como Extrato de Negociação ou de Movimentação da B3."; renderPop(); return; }
+      if (!kind) { state.pop.loading = false; state.pop.error = "Não reconheci este arquivo. Use o PDF de Negociação/Movimentação ou o Excel (.xlsx) de Movimentação da B3."; renderPop(); return; }
       if (!moves.length) { state.pop.loading = false; state.pop.error = "Não encontrei compras/vendas nem proventos neste arquivo."; renderPop(); return; }
       openAssetRecon(contaId, kind, f.name, moves); // abre a tela de conciliação (cards editáveis)
     } catch (e) {
-      if (state.pop && state.pop.kind === "assetImport") { state.pop.loading = false; state.pop.error = "Falha ao ler o PDF: " + String(e).slice(0, 120); renderPop(); }
+      if (state.pop && state.pop.kind === "assetImport") { state.pop.loading = false; state.pop.error = "Falha ao ler o arquivo: " + String(e).slice(0, 120); renderPop(); }
     }
   };
   inp.click();
@@ -2633,8 +2636,8 @@ function assetReconCommit() {
   const base = Date.now();
   ar.rows.filter((r) => r.status === "conciliado").forEach((r, i) => {
     const mv = r.tipo === "provento"
-      ? { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
-      : { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: "", classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) };
+      ? { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
+      : { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) };
     assetMoves.push(mv);
   });
   state.assetRecon = null; state.editing = null; refreshSideNet(); scheduleSave(); renderView();
@@ -2964,6 +2967,7 @@ function b3Kind(firstPageItems) { const t = firstPageItems.map((i) => i.str).joi
 // LFTB11 etc.) vem COM quantidade → entra como ETF (ativo com qtd), não como RF-lump manual; o
 // agrupamento "renda fixa" fica no objetivo/liquidez (independente da classe).
 const b3Classe = (ticker, rf) => rf ? "etf" : (/11$/.test(ticker) ? "fii" : "acao");
+const b3Norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
 // agrupa items por linha (mesmo y) e ordena por x
 function b3Rows(items) {
   const rows = {};
@@ -2992,9 +2996,11 @@ function b3ParseNegPage(items, ctx) {
   }
   return out;
 }
-// MOVIMENTAÇÃO: linhas quebram em várias y. Âncora = valor na coluna direita (x grande, >0); tipo e
-// ticker são achados por proximidade em y. Só proventos (Dividendo/JCP/Rendimento) com ticker entram —
-// Empréstimo/Transferência/Amortização e rendimentos sem ticker são ignorados (best-effort).
+// MOVIMENTAÇÃO (PDF): linhas quebram em várias y. Âncora = valor na coluna direita (x grande, >0); tipo,
+// ticker, qtd e preço são achados por proximidade em y. Captura proventos (Dividendo/JCP/Rendimento/juros/
+// reembolso/leilão) E trades com rótulo EXPLÍCITO Compra/Venda. O PDF NÃO traz a coluna Entrada/Saída, então
+// "Transferência - Liquidação" (a maioria das compras/vendas de ações) fica sem direção e é ignorada aqui —
+// para o histórico COMPLETO de compras/vendas, use o relatório de Movimentação em Excel. Sem ticker = ignora.
 function b3ParseMovPage(items, ctx) {
   ctx = ctx || { data: "" };
   const all = []; items.forEach((it) => { const s = (it.str || "").trim(); if (s) all.push({ x: it.x, y: it.y, s }); });
@@ -3004,11 +3010,18 @@ function b3ParseMovPage(items, ctx) {
     const v = b3Money(t.s);
     if (v === null || v <= 0 || t.x < 500) continue; // só a coluna Valor da Operação
     const near = all.filter((o) => Math.abs(o.y - t.y) <= 10);
-    const typeTok = near.filter((o) => o.x < 110).map((o) => o.s).join(" ");
-    if (!/dividendo|juros sobre|rendimento/i.test(typeTok)) continue; // ignora o resto
+    const typeTok = b3Norm(near.filter((o) => o.x < 110).map((o) => o.s).join(" "));
     let ticker = ""; for (const o of near) { const m = o.s.match(/\b([A-Z0-9]{4,6})\s*-\s/); if (m && b3IsTicker(m[1])) { ticker = m[1]; break; } }
     if (!ticker) continue;
-    out.push({ iso: ctx.data, tipo: "provento", ticker, classe: b3Classe(ticker, false), valor: v });
+    if (/dividendo|rendimento|juros sobre capital|pagamento de juros|leilao de fracao|reembolso/.test(typeTok) && !/transferido/.test(typeTok)) {
+      out.push({ iso: ctx.data, tipo: "provento", ticker, classe: b3Classe(ticker, false), valor: v });
+    } else if (/^(compra|venda)\b/.test(typeTok) && !/compra ?\/ ?venda/.test(typeTok)) {
+      const monies = near.filter((o) => o.x < t.x && b3Money(o.s) !== null).sort((a, b) => b.x - a.x); // R$ à esquerda do valor
+      const preco = monies.length ? b3Money(monies[0].s) : null;
+      const nums = near.filter((o) => o.x < (monies.length ? monies[0].x : t.x) && /^[\d.]+(,\d+)?$/.test(o.s)).sort((a, b) => b.x - a.x);
+      const qtd = nums.length ? parseValor(nums[0].s) : null;
+      if (qtd && preco) out.push({ iso: ctx.data, tipo: /^venda/.test(typeTok) ? "venda" : "compra", ticker, classe: b3Classe(ticker, false), qtd, preco });
+    }
   }
   return out;
 }
@@ -3027,6 +3040,117 @@ async function parseB3PDF(buffer) {
     moves = moves.concat(kind === "neg" ? b3ParseNegPage(items, ctx) : b3ParseMovPage(items, ctx));
   }
   return { kind, moves };
+}
+/* ---------- Excel B3 (relatório de Movimentação, .xlsx): a fonte COMPLETA de compra/venda/provento ---------- */
+// leitor .xlsx puro (sem lib): descompacta o zip com DecompressionStream('deflate-raw') e lê o XML por regex.
+async function xlsxInflateRaw(bytes) {
+  const ds = new DecompressionStream("deflate-raw"), w = ds.writable.getWriter();
+  w.write(bytes); w.close();
+  const chunks = [], reader = ds.readable.getReader();
+  for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); }
+  let len = 0; chunks.forEach((c) => (len += c.length));
+  const out = new Uint8Array(len); let o = 0; chunks.forEach((c) => { out.set(c, o); o += c.length; });
+  return out;
+}
+// descompacta um .xlsx (zip) → { nome: Uint8Array } dos arquivos que interessam (via central directory)
+async function xlsxUnzip(buffer, want) {
+  const u8 = new Uint8Array(buffer), dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= 0 && i > u8.length - 22 - 65536; i--) { if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; } }
+  if (eocd < 0) throw new Error("não é um Excel (.xlsx) válido");
+  const nEntries = dv.getUint16(eocd + 10, true); let p = dv.getUint32(eocd + 16, true);
+  const td = new TextDecoder("utf-8"), out = {};
+  for (let e = 0; e < nEntries && dv.getUint32(p, true) === 0x02014b50; e++) {
+    const method = dv.getUint16(p + 10, true), compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commLen = dv.getUint16(p + 32, true);
+    const localOff = dv.getUint32(p + 42, true), name = td.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    if (!want || want(name)) {
+      const lNameLen = dv.getUint16(localOff + 26, true), lExtraLen = dv.getUint16(localOff + 28, true);
+      const dataStart = localOff + 30 + lNameLen + lExtraLen, comp = u8.subarray(dataStart, dataStart + compSize);
+      out[name] = method === 0 ? comp.slice() : await xlsxInflateRaw(comp);
+    }
+    p += 46 + nameLen + extraLen + commLen;
+  }
+  return out;
+}
+const xmlUnescape = (s) => s.replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+const xlsxColIdx = (ref) => { const m = String(ref).match(/^([A-Z]+)/); if (!m) return 0; let n = 0; for (const ch of m[1]) n = n * 26 + (ch.charCodeAt(0) - 64); return n - 1; };
+// lê a 1ª planilha de um .xlsx → array de linhas (cada linha = array de células string/number)
+async function readXlsx(buffer) {
+  const files = await xlsxUnzip(buffer, (n) => n === "xl/sharedStrings.xml" || /^xl\/worksheets\/sheet\d+\.xml$/.test(n));
+  const td = new TextDecoder("utf-8"), shared = [];
+  if (files["xl/sharedStrings.xml"]) {
+    const xml = td.decode(files["xl/sharedStrings.xml"]); const reSi = /<si>([\s\S]*?)<\/si>/g; let m;
+    while ((m = reSi.exec(xml))) { let txt = ""; const reT = /<t[^>]*>([\s\S]*?)<\/t>/g; let t; while ((t = reT.exec(m[1]))) txt += t[1]; shared.push(xmlUnescape(txt)); }
+  }
+  const sheetName = Object.keys(files).filter((n) => /worksheets/.test(n)).sort()[0];
+  if (!sheetName) throw new Error("planilha vazia");
+  const xml = td.decode(files[sheetName]), rows = [];
+  const reRow = /<row[^>]*>([\s\S]*?)<\/row>/g; let r;
+  while ((r = reRow.exec(xml))) {
+    const cells = []; const reC = /<c\s+([^>]*?)(\/>|>([\s\S]*?)<\/c>)/g; let c;
+    while ((c = reC.exec(r[1]))) {
+      const attrs = c[1], body = c[3] || "";
+      const refM = attrs.match(/r="([A-Z]+\d+)"/), idx = refM ? xlsxColIdx(refM[1]) : cells.length;
+      const tM = attrs.match(/t="([^"]+)"/), type = tM ? tM[1] : "n";
+      let val = null;
+      if (type === "s") { const v = body.match(/<v>([\s\S]*?)<\/v>/); val = v ? shared[+v[1]] : ""; }
+      else if (type === "inlineStr") { let txt = ""; const reT = /<t[^>]*>([\s\S]*?)<\/t>/g; let t; while ((t = reT.exec(body))) txt += t[1]; val = xmlUnescape(txt); }
+      else { const v = body.match(/<v>([\s\S]*?)<\/v>/); val = v ? (type === "str" ? xmlUnescape(v[1]) : parseFloat(v[1])) : null; }
+      cells[idx] = val;
+    }
+    rows.push(cells);
+  }
+  return rows;
+}
+// classifica um movimento do relatório de Movimentação → {tipo} (compra/venda/provento) ou null (ignora).
+// Direção do trade vem de Entrada/Saída (Crédito=compra, Débito=venda) — só o Excel traz essa coluna.
+function b3MovClass(mov, es) {
+  const m = b3Norm(mov), credito = /^cred/.test(b3Norm(es));
+  if (/dividendo|rendimento|juros sobre capital|pagamento de juros|leilao de fracao|reembolso/.test(m) && !/transferido/.test(m))
+    return { tipo: "provento", sign: credito && !/cancel/.test(m) ? 1 : -1 };
+  if (m === "compra") return { tipo: "compra" };
+  if (m === "venda") return { tipo: "venda" };
+  if (/compra ?\/ ?venda|transferencia - liquidacao/.test(m)) return { tipo: credito ? "compra" : "venda" };
+  return null; // empréstimo, transferência simples, subscrição, bonificação, amortização, RF sem ticker…
+}
+// "ABCB2 - BANCO ABC BRASIL S.A." → {ticker, nome}. Produto sem código de negociação (Tesouro/CDB) → ticker "".
+function b3Produto(prod) {
+  const s = String(prod || "").trim(), i = s.indexOf(" - ");
+  if (i < 0) return { ticker: "", nome: s };
+  const code = s.slice(0, i).trim().toUpperCase();
+  return b3IsTicker(code) ? { ticker: code, nome: s.slice(i + 3).trim() } : { ticker: "", nome: s };
+}
+const b3IsoBR = (d) => { const m = String(d || "").trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : ""; };
+const b3Num = (v) => { if (typeof v === "number") return isFinite(v) ? v : null; if (v == null) return null; const s = String(v).replace(/R\$|\s|\./g, "").replace(",", "."); const n = parseFloat(s); return isNaN(n) ? null : n; };
+// relatório de MOVIMENTAÇÃO da B3 em Excel → {kind, moves}. Fonte COMPLETA (compra/venda + proventos, todo o histórico).
+function b3ParseMovXlsx(rows) {
+  const hdr = (rows[0] || []).map(b3Norm), col = (kw) => hdr.findIndex((h) => h.includes(kw));
+  const iES = col("entrada"), iData = col("data"), iMov = col("moviment"), iProd = col("produto"), iQtd = col("quantidade"), iPU = col("preco"), iVal = col("valor");
+  if (iMov < 0 || iProd < 0 || iVal < 0) return { kind: null, moves: [] };
+  const out = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]; if (!row) continue;
+    const cls = b3MovClass(row[iMov], row[iES]); if (!cls) continue;
+    const { ticker, nome } = b3Produto(row[iProd]); if (!ticker) continue; // RF/Tesouro sem código de negociação
+    const iso = b3IsoBR(row[iData]); if (!iso) continue;
+    const valor = b3Num(row[iVal]);
+    if (cls.tipo === "provento") {
+      if (!valor) continue;
+      out.push({ iso, tipo: "provento", ticker, nome, classe: b3Classe(ticker, false), valor: cls.sign * valor });
+    } else {
+      const qtd = b3Num(row[iQtd]), preco = b3Num(row[iPU]);
+      if (!qtd || qtd <= 0 || !preco || preco <= 0) continue; // trade real tem qtd e preço (empréstimo/custódia não)
+      out.push({ iso, tipo: cls.tipo, ticker, nome, classe: b3Classe(ticker, false), qtd, preco });
+    }
+  }
+  return { kind: "mov", moves: out };
+}
+// lê um arquivo da B3 → {kind, moves}: PDF (Negociação/Movimentação) OU Excel (.xlsx, relatório de Movimentação).
+async function parseB3File(file) {
+  const buf = await file.arrayBuffer();
+  if (/\.xlsx$/i.test(file.name || "")) return b3ParseMovXlsx(await readXlsx(buf));
+  return parseB3PDF(buf);
 }
 const RECON_RULES = [
   { kw: ["ifood", "rappi", "restaurante", "lanche", "burger", "pizza", "bar ", "padaria"], cat: "LAZER", sub: "Comer fora" },
