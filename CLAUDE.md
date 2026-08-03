@@ -206,9 +206,26 @@ cache em localStorage `mc_quotes`); histórico mensal via a Pages Function `/api
   o navegador não alcança o Yahoo direto e a brapi passou a cobrar token. Deploy leva junto (Cloudflare Pages
   suporta Functions); rodar local exige `wrangler pages dev` (ver "Como rodar local").
 
-### Importar da B3 → tela de conciliação de ativos
-Botão **"Importar da B3"** na seção Ativos lê **PDF** (`.pdf`) **e Excel** (`.xlsx`) da área do investidor.
-`parseB3File(file)` roteia por extensão: `.xlsx` → `readXlsx`+`b3ParseMovXlsx`; senão → `parseB3PDF`.
+### Importar da B3 → tela de conciliação de ativos (com de-para instituição→conta)
+Vive na **aba Conciliação** (`viewConciliacao`, card `.b3-zone` "Importar investimentos da B3", botão
+`data-b3-import`→`b3ImportPick()`), **não** dentro de uma conta — o arquivo da B3 traz **várias corretoras**
+(coluna "Instituição"), então não faz sentido escolher uma conta só. `b3ImportPick` **não recebe contaId**.
+(A seção Ativos da conta tem só um atalho de navegação `data-goto-b3import` que leva pra aba Conciliação —
+não é um 2º fluxo.) Lê **PDF** (`.pdf`) **e Excel** (`.xlsx`); `parseB3File(file)` roteia por extensão: `.xlsx`
+→ `readXlsx`+`b3ParseMovXlsx`; senão → `parseB3PDF`.
+**De-para instituição→conta** (o coração do fluxo): `b3Broker(inst)` canonicaliza o nome da corretora
+(agrupa variações: "BANCO BTG PACTUAL S/A." / "S.A." → "BTG Pactual"; "XP INVESTIMENTOS CCTVM" / "CORRETORA
+DE CAMBIO" → "XP"; mapa de keywords `B3_BROKERS` + fallback limpando sufixos legais). `openAssetRecon(kind,
+fileName, moves)` monta os brokers distintos e o mapa `brokerMap` **pré-preenchido** por semelhança de nome
+(`b3AcctForBroker`: conta invest cujo `b3Broker(nome)` bate). No `viewAssetRecon`, o cabeçalho mostra o de-para
+(um `<select data-ar-map>` por corretora: contas invest + "(não importar)" + **"+ criar carteira"** = `__new__`,
+que chama `createInvestAccount(broker)` na hora). Cada **linha** (`r.broker`, `r.contaId` = `brokerMap[broker]`)
+vai pra conta mapeada; sem conta → linha **travada** (Aceitar desabilitado, tag "mapeie a corretora"). Trocar o
+mapa re-deduplica só aquele broker (`assetReconDedupAll(broker)` — dedup por-linha contra os `asset_moves` da
+**conta destino da linha**). `assetReconCommit` distribui os aceitos em **múltiplas contas** (`contaId: r.contaId`).
+A validação "Como as carteiras ficam" (`assetReconProjByConta`) mostra **um bloco por conta** mapeada (4 totais +
+posição por ativo). Validado (jsdom, arquivo real): 614 movs → 5 corretoras, prefill casou 3 por nome, XP criou
+carteira na hora, Rico mapeado numa conta existente, commit distribuiu 251/196/108/59 em 4 contas, 0 órfãos.
 - **Excel do relatório de Movimentação (`b3ParseMovXlsx`) é a FONTE COMPLETA** e o caminho preferido: traz
   todo o histórico de compra/venda **+** proventos com colunas estruturadas (Entrada/Saída, Data, Movimentação,
   Produto, Quantidade, Preço unitário, Valor). `b3MovClass(mov, es)` classifica o tipo do movimento

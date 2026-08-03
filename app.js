@@ -1301,9 +1301,9 @@ function invAtivosSection(a) {
     ${table}
     <div class="inv-cart-actions">
       <button class="mini-btn primary" data-inv-add="${a.id}">${ic("plus", 14)} Lançar ativo</button>
-      <button class="mini-btn" data-inv-import="${a.id}">${ic("upload", 13)} Importar da B3</button>
       ${pos.length ? `<button class="mini-btn" data-inv-moves="${a.id}">${ic("list", 14)} Lançamentos</button>` : ""}
       <button class="mini-btn" data-inv-refresh>${ic("undo", 13)} Atualizar cotações</button>
+      <button class="mini-btn" data-goto-b3import title="A importação da B3 agora fica na aba Conciliação (cobre todas as corretoras)">${ic("upload", 13)} Importar da B3…</button>
     </div>
   </div>`;
 }
@@ -1437,9 +1437,14 @@ function assetReconCard(r) {
   const rawDate = r.iso ? r.iso.split("-").reverse().join("/") : "";
   const tipoLabel = prov ? "Provento" : r.tipo === "venda" ? "Venda" : "Compra";
   const qtxt = (Math.round(numOr0(r.qtd) * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
-  const left = `<div class="recon-raw"><div class="raw-label">no arquivo${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${tipoLabel} · ${_esc(r.ticker)}${prov ? "" : ` · ${qtxt} × ${fmtNum(r.preco)}`}</div><div class="raw-val num" style="color:${eff < 0 ? "var(--neg)" : "var(--pos)"}">${eff < 0 ? "− " : "+ "}${fmtNum(Math.abs(eff))}</div></div>`;
+  const brokerTag = r.broker ? `<span class="ar-card-broker">${_esc(r.broker)}</span>` : "";
+  const conta = r.contaId ? acctById(r.contaId) : null;
+  const left = `<div class="recon-raw"><div class="raw-label">no arquivo${rawDate ? ` · ${rawDate}` : ""}${brokerTag}</div><div class="raw-desc">${tipoLabel} · ${_esc(r.ticker)}${prov ? "" : ` · ${qtxt} × ${fmtNum(r.preco)}`}</div><div class="raw-val num" style="color:${eff < 0 ? "var(--neg)" : "var(--pos)"}">${eff < 0 ? "− " : "+ "}${fmtNum(Math.abs(eff))}</div></div>`;
+  const contaTag = conta
+    ? `<div class="recon-match ok">${ic("arrow-right", 12)} ${_esc(conta.nome)}</div>`
+    : `<div class="recon-match warn">${ic("circle-alert", 12)} mapeie “${_esc(r.broker)}” acima</div>`;
   const sug = !isEdit
-    ? `<div class="sug-body"><span class="inv-classe">${CLASSE_LABEL[r.classe] || r.classe}</span>${r.dup ? `<div class="recon-match">${ic("circle-alert", 12)} já existe nesta carteira</div>` : ""}</div>`
+    ? `<div class="sug-body"><span class="inv-classe">${CLASSE_LABEL[r.classe] || r.classe}</span>${contaTag}${r.dup ? `<div class="recon-match">${ic("circle-alert", 12)} já existe nesta carteira</div>` : ""}</div>`
     : `<div class="edit-body">
         <div class="edit-row"><select data-arf="tipo">${[["compra", "Compra"], ["venda", "Venda"], ["provento", "Provento"]].map(([k, l]) => `<option value="${k}"${k === r.tipo ? " selected" : ""}>${l}</option>`).join("")}</select><input type="date" data-arf="data" value="${r.iso || ""}"></div>
         <div class="edit-row"><input data-arf="ticker" value="${attr(r.ticker)}" placeholder="Ticker" style="text-transform:uppercase"><select data-arf="classe">${Object.keys(CLASSE_LABEL).map((k) => `<option value="${k}"${k === r.classe ? " selected" : ""}>${CLASSE_LABEL[k]}</option>`).join("")}</select></div>
@@ -1453,49 +1458,59 @@ function assetReconCard(r) {
       ? `<span class="conc-tag">${ic("check", 14)} Aceito</span><button class="act edit" data-ar-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-ar-ignore="${r.id}" title="Ignorar">${ic("x", 13)}</button>`
       : skip
         ? `<span class="skip-tag">${r.dup ? "Já existe" : "Ignorado"}</span><button class="act edit" data-ar-reactivate="${r.id}">reativar</button>`
-        : `<button class="act accept" data-ar-accept="${r.id}">${ic("check", 14)} Aceitar</button><button class="act edit" data-ar-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-ar-ignore="${r.id}">${ic("x", 13)}</button>`;
+        : `${r.contaId ? `<button class="act accept" data-ar-accept="${r.id}">${ic("check", 14)} Aceitar</button>` : `<button class="act accept" disabled title="Mapeie a corretora acima">${ic("check", 14)} Aceitar</button>`}<button class="act edit" data-ar-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-ar-ignore="${r.id}">${ic("x", 13)}</button>`;
   return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-ar-id="${r.id}"><div class="recon-main">${left}<div class="recon-arrow">${ic("arrow-right", 15)}</div><div class="recon-sug">${sug}</div></div><div class="recon-actions">${actions}</div></div>`;
 }
 function viewAssetRecon() {
-  const ar = state.assetRecon, conta = acctById(ar.contaId);
+  const ar = state.assetRecon;
   const carteiras = accounts.filter((a) => !a.arquivada && a.tipo === "invest");
   const rows = ar.rows;
   const conc = rows.filter((r) => r.status === "conciliado").length;
   const totalR = rows.filter((r) => r.status !== "ignorado").length;
   const ign = rows.filter((r) => r.status === "ignorado").length;
-  const nov = rows.filter((r) => !r.dup).length, dup = rows.length - nov, pend = rows.filter((r) => r.status === "pendente").length;
+  const nov = rows.filter((r) => !r.dup).length, dup = rows.length - nov;
+  const pend = rows.filter((r) => r.status === "pendente" && r.contaId).length; // pendentes que já dá pra aceitar
+  const semConta = rows.filter((r) => !r.contaId && r.status !== "ignorado").length; // linhas travadas (corretora não mapeada)
   const nTrade = rows.filter((r) => r.tipo !== "provento").length, nProv = rows.length - nTrade;
   const kindLbl = ar.kind === "neg"
     ? "Negociação · compra/venda"
     : "Movimentação · " + [nTrade ? `${nTrade} compra/venda` : "", nProv ? `${nProv} proventos` : ""].filter(Boolean).join(" · ");
-  const contaOpts = carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === ar.contaId ? " selected" : ""}>${_esc(a.nome)}</option>`).join("");
-  const head = `<div class="card recon-head">
-    <div class="rh-l"><span class="acct-ic">${ic(conta ? acctIconOf(conta) : "invest", 18)}</span><div><div class="rh-label">Importando da B3 · ${kindLbl}</div><div class="rh-acct">${_esc(ar.fileName || "")}</div></div></div>
-    <label class="fld ar-acct-fld"><span class="fld-label">Carteira de destino</span><select data-ar-acct>${contaOpts}</select></label>
-  </div>`;
-  // validação: posição projetada por ticker (o "saldo" de ativos) + total de proventos aceitos
-  const proj = assetReconProjected();
-  const provAceitos = rows.filter((r) => r.status === "conciliado" && r.tipo === "provento");
-  const provTot = provAceitos.reduce((s, r) => s + numOr0(r.valor), 0);
-  const q = (n) => (Math.round(n * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
-  const projRows = proj.map((p) => {
-    const chg = Math.abs(p.proj - p.atual) > 1e-9;
-    return `<div class="ar-proj-row"><span class="ar-proj-tkr">${_esc(p.ticker)}</span><span class="ar-proj-q">${chg ? `${q(p.atual)} <span class="ar-arrow">→</span> <b>${q(p.proj)}</b>` : q(p.proj)} ${p.isRF ? "" : "cotas"}</span></div>`;
+  // de-para: cada corretora do arquivo → uma conta (pré-preenchida por semelhança de nome). "__new__" cria carteira.
+  const deparaRows = ar.brokers.map((b) => {
+    const cur = ar.brokerMap[b.key] || "";
+    const opts = `<option value=""${!cur ? " selected" : ""}>(não importar)</option>`
+      + carteiras.map((a) => `<option value="${attr(a.id)}"${a.id === cur ? " selected" : ""}>${_esc(a.nome)}</option>`).join("")
+      + `<option value="__new__">+ criar carteira "${_esc(b.key)}"</option>`;
+    return `<div class="ar-dp-row"><div class="ar-dp-broker"><b>${_esc(b.key)}</b><span>${b.count} ${b.count === 1 ? "lançamento" : "lançamentos"}</span></div><span class="ar-dp-arrow">${ic("arrow-right", 15)}</span><select data-ar-map="${attr(b.key)}" class="ar-dp-sel">${opts}</select></div>`;
   }).join("");
-  const t = assetReconProjTotals();
-  const totBlock = t ? `<div class="ar-tot">
-      <div><span>Caixa</span><b class="num">${fmt(t.caixa)}</b></div>
-      <div><span>Aplicado</span><b class="num">${fmt(t.aplicado)}</b></div>
-      <div><span>Mercado</span><b class="num">${fmt(t.mercado)}</b></div>
-      <div class="ar-tot-total"><span>Total</span><b class="num">${fmt(t.total)}</b></div>
-    </div>` : "";
-  const check = `<div class="card recon-check ar-check">
-    <div class="ar-check-h"><b>Como a carteira fica</b><span>projeção depois de aceitar — confira com sua corretora</span></div>
-    ${totBlock}
-    ${proj.length ? `<div class="ar-proj-lbl">Posição por ativo</div><div class="ar-proj">${projRows}</div>` : `<div class="empty-mini">Aceite lançamentos pra ver a posição resultante.</div>`}
-    ${provAceitos.length ? `<div class="ar-prov-tot">${ic("trending-up", 14)} ${provAceitos.length} ${provAceitos.length === 1 ? "provento aceito" : "proventos aceitos"} · ${fmt(provTot)}</div>` : ""}
+  const head = `<div class="card recon-head ar-head">
+    <div class="rh-l"><span class="acct-ic">${ic("upload", 18)}</span><div><div class="rh-label">Importando da B3 · ${kindLbl}</div><div class="rh-acct">${_esc(ar.fileName || "")}</div></div></div>
+    <div class="ar-depara"><div class="ar-dp-h">Corretora no arquivo ${ic("arrow-right", 13)} conta no MeuCaixa</div>${deparaRows}<div class="ar-dp-note">O arquivo da B3 traz várias corretoras (coluna “Instituição”). Cada lançamento vai pra conta mapeada aqui — ajuste se preciso ou crie a carteira na hora.</div></div>
   </div>`;
-  const resumo = `<div class="recon-sum"><b>${rows.length}</b> lidos · <b>${nov}</b> ${nov === 1 ? "novo" : "novos"} · <b>${dup}</b> já ${dup === 1 ? "existe" : "existem"} · ${kindLbl}</div>`;
+  // validação: "como cada carteira fica" — um bloco por conta mapeada (4 totais + posição por ativo)
+  const projByConta = assetReconProjByConta();
+  const q = (n) => (Math.round(n * 1e6) / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 6 });
+  const projBlocks = projByConta.map((pc) => {
+    const projRows = pc.posArr.map((p) => {
+      const chg = Math.abs(p.proj - p.atual) > 1e-9;
+      return `<div class="ar-proj-row"><span class="ar-proj-tkr">${_esc(p.ticker)}</span><span class="ar-proj-q">${chg ? `${q(p.atual)} <span class="ar-arrow">→</span> <b>${q(p.proj)}</b>` : q(p.proj)} ${p.isRF ? "" : "cotas"}</span></div>`;
+    }).join("");
+    return `<div class="ar-proj-conta"><div class="ar-proj-conta-h"><span class="acct-ic small">${ic(acctIconOf(pc.conta), 15)}</span><b>${_esc(pc.conta.nome)}</b></div>
+      <div class="ar-tot">
+        <div><span>Caixa</span><b class="num">${fmt(pc.totals.caixa)}</b></div>
+        <div><span>Aplicado</span><b class="num">${fmt(pc.totals.aplicado)}</b></div>
+        <div><span>Mercado</span><b class="num">${fmt(pc.totals.mercado)}</b></div>
+        <div class="ar-tot-total"><span>Total</span><b class="num">${fmt(pc.totals.total)}</b></div>
+      </div>
+      ${pc.posArr.length ? `<div class="ar-proj-lbl">Posição por ativo</div><div class="ar-proj">${projRows}</div>` : ""}
+      ${pc.nProv ? `<div class="ar-prov-tot">${ic("trending-up", 14)} ${pc.nProv} ${pc.nProv === 1 ? "provento" : "proventos"} · ${fmt(pc.provTot)}</div>` : ""}
+    </div>`;
+  }).join("");
+  const check = `<div class="card recon-check ar-check">
+    <div class="ar-check-h"><b>Como as carteiras ficam</b><span>projeção depois de aceitar — confira com sua corretora</span></div>
+    ${projByConta.length ? projBlocks : `<div class="empty-mini">Aceite lançamentos (com a corretora mapeada) pra ver a posição resultante.</div>`}
+  </div>`;
+  const resumo = `<div class="recon-sum"><b>${rows.length}</b> lidos · <b>${nov}</b> ${nov === 1 ? "novo" : "novos"} · <b>${dup}</b> já ${dup === 1 ? "existe" : "existem"}${semConta ? ` · <b>${semConta}</b> sem conta` : ""} · ${kindLbl}</div>`;
   const acceptAll = pend ? `<button class="ghost" data-ar-accept-all>${ic("check", 14)} Aceitar ${pend} ${pend === 1 ? "pendente" : "pendentes"}</button>` : "";
   const saveLabel = conc ? `Importar ${conc} lançamento${conc > 1 ? "s" : ""}` : "Nada para importar";
   const bar = head + check + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head"><strong>${conc} de ${totalR} aceitos</strong><span>${ign} ignorados</span></div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-ar-cancel>${ic("x", 14)} Cancelar</button>${acceptAll}<button class="recon-save" data-ar-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
@@ -1529,6 +1544,11 @@ function viewConciliacao() {
       <button class="cta big" data-action="import" ${totalN > 0 ? "" : "disabled"}>${ic("sparkles", 16)} ${totalN > 0 ? `Importar ${totalN} lançamentos${files.length > 1 ? ` de ${files.length} arquivos` : ""}` : "Adicione um arquivo para importar"}</button>
       <button class="recon-skip-file" data-action="recon-empty">${ic("arrow-right", 14)} Prosseguir sem arquivo — só conferir o saldo ou lançar à mão</button>
       <span class="import-formats">Mercado Pago · Nubank · Caixa · Itaú · Bradesco · Inter · e outros</span>
+    </div>
+    <div class="import-zone card b3-zone">
+      <h3>${ic("trending-up", 17)} Importar investimentos da B3</h3>
+      <p>Relatório de <b>Movimentação</b> (Excel <b>.xlsx</b> — o mais completo) ou PDF de Negociação/Movimentação da área do investidor. Traz compras, vendas e proventos de <b>todas as corretoras</b> de uma vez — na conciliação você mapeia cada corretora pra uma conta.</p>
+      <button class="cta big" data-b3-import>${ic("upload", 16)} Escolher arquivo da B3</button>
     </div>`;
   }
   const conc = state.recon.filter((r) => r.status === "conciliado").length;
@@ -2538,70 +2558,91 @@ function saveAssetTag() {
   setAssetTag(p.ticker, { objetivo: g("objetivo"), setor: g("setor"), segmento: g("segmento") });
   closePop(); scheduleSave(); renderView();
 }
-/* ---------- importar ativos da B3 (Negociação = compra/venda; Movimentação = proventos) ---------- */
-// escolhe o arquivo, lê o PDF e abre o pop de conciliação de ativos
-function invImportPick(contaId) {
+/* ---------- importar ativos da B3 (Negociação/Movimentação; roda na aba Conciliação, sem escolher conta) ---------- */
+// escolhe o arquivo (PDF/Excel), lê e abre a TELA de conciliação de ativos com o de-para instituição→conta.
+// Não recebe conta: o arquivo da B3 traz VÁRIAS corretoras (coluna "Instituição") — o mapa é montado depois.
+function b3ImportPick() {
   const inp = document.createElement("input");
   inp.type = "file"; inp.accept = ".pdf,.xlsx,application/pdf";
   inp.onchange = async () => {
     const f = inp.files && inp.files[0]; if (!f) return;
-    state.pop = { kind: "assetImport", contaId, loading: true, fileName: f.name };
+    state.pop = { kind: "assetImport", loading: true, fileName: f.name };
     renderPop();
     try {
       const { kind, moves } = await parseB3File(f);
       if (!state.pop || state.pop.kind !== "assetImport") return; // usuário fechou
       if (!kind) { state.pop.loading = false; state.pop.error = "Não reconheci este arquivo. Use o PDF de Negociação/Movimentação ou o Excel (.xlsx) de Movimentação da B3."; renderPop(); return; }
       if (!moves.length) { state.pop.loading = false; state.pop.error = "Não encontrei compras/vendas nem proventos neste arquivo."; renderPop(); return; }
-      openAssetRecon(contaId, kind, f.name, moves); // abre a tela de conciliação (cards editáveis)
+      openAssetRecon(kind, f.name, moves); // abre a tela de conciliação (de-para + cards editáveis)
     } catch (e) {
       if (state.pop && state.pop.kind === "assetImport") { state.pop.loading = false; state.pop.error = "Falha ao ler o arquivo: " + String(e).slice(0, 120); renderPop(); }
     }
   };
   inp.click();
 }
-// marca cada movimento lido como novo ou já-existente (dedup contra os assetMoves da conta escolhida)
-function assetImportDedup(contaId, moves) {
-  return moves.map((m, i) => {
-    const dup = assetMoves.some((x) => x.contaId === contaId && String(x.ticker || "").toUpperCase() === m.ticker && (x.iso || "") === (m.iso || "") && x.tipo === m.tipo
-      && (m.tipo === "provento"
-        ? Math.abs(numOr0(x.qtd) * numOr0(x.preco) - m.valor) < 0.01
-        : Math.abs(numOr0(x.qtd) - m.qtd) < 1e-6 && Math.abs(numOr0(x.preco) - m.preco) < 0.01));
-    return Object.assign({ key: "imp" + i }, m, { dup, accept: !dup });
-  });
-}
-// abre a TELA de conciliação de ativos (página cheia, cards editáveis — igual à conciliação de extrato)
-function openAssetRecon(contaId, kind, fileName, moves) {
-  const dd = assetImportDedup(contaId, moves);
-  const rows = dd.map((m, i) => Object.assign({ id: "ar" + i, status: m.dup ? "ignorado" : "pendente" }, m));
-  state.assetRecon = { contaId, kind, fileName, rows };
+// conta invest cujo nome bate com a corretora (pré-preenche o de-para). Ex.: conta "Carteira BTG" → "BTG Pactual".
+const b3AcctForBroker = (broker) => (accounts.find((a) => !a.arquivada && a.tipo === "invest" && b3Broker(a.nome) === broker) || {}).id || "";
+// abre a TELA de conciliação de ativos (página cheia): monta os brokers distintos + o mapa broker→conta.
+function openAssetRecon(kind, fileName, moves) {
+  const counts = {}, order = [];
+  moves.forEach((m) => { const b = m.broker || "Instituição não identificada"; if (!(b in counts)) { counts[b] = 0; order.push(b); } counts[b]++; });
+  const brokerMap = {}; order.forEach((b) => { brokerMap[b] = b3AcctForBroker(b); });
+  const rows = moves.map((m, i) => Object.assign({ id: "ar" + i, status: "pendente", broker: m.broker || "Instituição não identificada" }, m));
+  state.assetRecon = { kind, fileName, rows, brokers: order.map((b) => ({ key: b, count: counts[b] })), brokerMap };
+  assetReconDedupAll();
   state.editing = null; closePop(); renderView();
 }
-// posição resultante por ticker se os aceitos forem lançados (validação: confira com a corretora)
-function assetReconProjected() {
-  const ar = state.assetRecon; if (!ar) return [];
-  const pos = {};
-  computePositions(ar.contaId).forEach((p) => { pos[p.ticker] = { ticker: p.ticker, atual: p.qtd, proj: p.qtd, isRF: p.isRF }; });
-  ar.rows.filter((r) => r.status === "conciliado" && r.tipo !== "provento").forEach((r) => {
-    const o = pos[r.ticker] || (pos[r.ticker] = { ticker: r.ticker, atual: 0, proj: 0, isRF: semCotacaoClasse(r.classe) });
-    o.proj += (r.tipo === "venda" ? -1 : 1) * numOr0(r.qtd);
+// (re)calcula, por linha: a conta destino (via broker→conta) e se já existe naquela conta (dedup). Chamado ao
+// abrir e a cada mudança do mapa — não roda a cada render (senão apagaria aceitar/ignorar manuais).
+function assetReconDedupAll(onlyBroker) {
+  const ar = state.assetRecon; if (!ar) return;
+  const up = (s) => String(s || "").toUpperCase();
+  ar.rows.forEach((r) => {
+    if (onlyBroker && r.broker !== onlyBroker) return;
+    const conta = ar.brokerMap[r.broker] || ""; r.contaId = conta;
+    r.dup = !!(conta && assetMoves.some((x) => x.contaId === conta && up(x.ticker) === up(r.ticker) && (x.iso || "") === (r.iso || "") && x.tipo === r.tipo
+      && (r.tipo === "provento" ? Math.abs(numOr0(x.qtd) * numOr0(x.preco) - numOr0(r.valor)) < 0.01
+        : Math.abs(numOr0(x.qtd) - numOr0(r.qtd)) < 1e-6 && Math.abs(numOr0(x.preco) - numOr0(r.preco)) < 0.01)));
+    r.status = r.dup ? "ignorado" : "pendente";
   });
-  return Object.values(pos).filter((o) => Math.abs(o.proj) > 1e-9 || Math.abs(o.atual) > 1e-9).sort((a, b) => String(a.ticker).localeCompare(b.ticker));
 }
-// projeta os 4 totais da conta (caixa · aplicado · mercado · total) COMO SE os aceitos fossem lançados.
-// Reaproveita a mesma lógica do cabeçalho da conta injetando os movimentos aceitos no ledger e desfazendo.
-function assetReconProjTotals() {
-  const ar = state.assetRecon; if (!ar) return null;
-  const a = acctById(ar.contaId); if (!a) return null;
-  const pseudo = ar.rows.filter((r) => r.status === "conciliado").map((r, i) => (
-    r.tipo === "provento"
-      ? { id: "__proj" + i, contaId: ar.contaId, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
-      : { id: "__proj" + i, contaId: ar.contaId, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) }
-  ));
-  const n0 = assetMoves.length;
-  pseudo.forEach((m) => assetMoves.push(m));
-  const out = { caixa: carteiraCaixa(a), aplicado: computePositions(a.id).reduce((s, p) => s + p.investido, 0), mercado: invInvestido(a), total: acctTotal(a) };
-  assetMoves.length = n0; // remove os pseudo-movimentos
-  return out;
+// muda o destino de uma corretora no de-para. "__new__" = criar uma carteira nova já com o nome da corretora.
+function assetReconSetBroker(broker, contaId) {
+  const ar = state.assetRecon; if (!ar) return;
+  if (contaId === "__new__") { contaId = createInvestAccount(broker); scheduleSave(); }
+  ar.brokerMap[broker] = contaId;
+  assetReconDedupAll(broker); state.editing = null; renderView();
+}
+// cria uma conta tipo investimento na hora (usada pelo de-para "criar carteira")
+function createInvestAccount(nome) {
+  const o = { id: "u" + Date.now(), nome: String(nome || "Nova carteira").trim(), sub: "Investimento", tipo: "invest", saldo: 0, grupo: "fin", arquivada: false, icon: "invest" };
+  accounts.push(o); reindexAccounts(); refreshSideNet(); return o.id;
+}
+// projeção por CONTA mapeada: 4 totais (caixa·aplicado·mercado·total) + posição por ticker (atual→projetada),
+// COMO SE os aceitos fossem lançados. Injeta os pseudo-movimentos no ledger, calcula e desfaz (não vaza).
+function assetReconProjByConta() {
+  const ar = state.assetRecon; if (!ar) return [];
+  const aceitos = ar.rows.filter((r) => r.status === "conciliado" && r.contaId);
+  const contaIds = [...new Set(aceitos.map((r) => r.contaId))];
+  return contaIds.map((cid) => {
+    const a = acctById(cid); if (!a) return null;
+    const meus = aceitos.filter((r) => r.contaId === cid);
+    const pos = {};
+    computePositions(cid).forEach((p) => { pos[p.ticker] = { ticker: p.ticker, atual: p.qtd, proj: p.qtd, isRF: p.isRF }; });
+    meus.filter((r) => r.tipo !== "provento").forEach((r) => {
+      const o = pos[r.ticker] || (pos[r.ticker] = { ticker: r.ticker, atual: 0, proj: 0, isRF: semCotacaoClasse(r.classe) });
+      o.proj += (r.tipo === "venda" ? -1 : 1) * numOr0(r.qtd);
+    });
+    const posArr = Object.values(pos).filter((o) => Math.abs(o.proj) > 1e-9 || Math.abs(o.atual) > 1e-9).sort((a, b) => String(a.ticker).localeCompare(b.ticker));
+    const n0 = assetMoves.length;
+    meus.forEach((r, i) => assetMoves.push(r.tipo === "provento"
+      ? { id: "__proj" + i, contaId: cid, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
+      : { id: "__proj" + i, contaId: cid, iso: r.iso, ticker: r.ticker, classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) }));
+    const totals = { caixa: carteiraCaixa(a), aplicado: computePositions(cid).reduce((s, p) => s + p.investido, 0), mercado: invInvestido(a), total: acctTotal(a) };
+    assetMoves.length = n0;
+    const provs = meus.filter((r) => r.tipo === "provento");
+    return { conta: a, totals, posArr, nProv: provs.length, provTot: provs.reduce((s, r) => s + numOr0(r.valor), 0), nTrade: meus.length - provs.length };
+  }).filter(Boolean);
 }
 function assetReconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
 function assetReconAccept(id) {
@@ -2618,26 +2659,18 @@ function assetReconAccept(id) {
     else { const q = val("qtd"); if (q != null) r.qtd = parseValor(q); const p = val("preco"); if (p != null) r.preco = parseValor(p); }
     state.editing = null;
   }
-  r.status = "conciliado"; renderView();
+  r.status = r.contaId ? "conciliado" : "pendente"; renderView(); // sem conta mapeada não dá pra aceitar
 }
 function assetReconIgnore(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "ignorado"; state.editing = null; renderView(); }
 function assetReconReactivate(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "pendente"; state.editing = null; renderView(); }
-function assetReconAcceptAll() { state.assetRecon.rows.forEach((r) => { if (r.status === "pendente") r.status = "conciliado"; }); state.editing = null; renderView(); }
-function assetReconSetConta(contaId) {
-  const ar = state.assetRecon; if (!ar) return;
-  ar.contaId = contaId;
-  const ids = ar.rows.map((r) => r.id);
-  const dd = assetImportDedup(contaId, ar.rows.map((r) => Object.assign({}, r)));
-  ar.rows = dd.map((m, i) => Object.assign({}, m, { id: ids[i], status: m.dup ? "ignorado" : "pendente" }));
-  state.editing = null; renderView();
-}
+function assetReconAcceptAll() { state.assetRecon.rows.forEach((r) => { if (r.status === "pendente" && r.contaId) r.status = "conciliado"; }); state.editing = null; renderView(); }
 function assetReconCommit() {
   const ar = state.assetRecon; if (!ar) return;
   const base = Date.now();
-  ar.rows.filter((r) => r.status === "conciliado").forEach((r, i) => {
+  ar.rows.filter((r) => r.status === "conciliado" && r.contaId).forEach((r, i) => {
     const mv = r.tipo === "provento"
-      ? { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
-      : { id: "am" + (base + i), contaId: ar.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) };
+      ? { id: "am" + (base + i), contaId: r.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: "provento", qtd: 1, preco: numOr0(r.valor) }
+      : { id: "am" + (base + i), contaId: r.contaId, iso: r.iso, ticker: r.ticker, nome: r.nome || "", classe: r.classe, tipo: r.tipo, qtd: numOr0(r.qtd), preco: numOr0(r.preco) };
     assetMoves.push(mv);
   });
   state.assetRecon = null; state.editing = null; refreshSideNet(); scheduleSave(); renderView();
@@ -2968,6 +3001,17 @@ function b3Kind(firstPageItems) { const t = firstPageItems.map((i) => i.str).joi
 // agrupamento "renda fixa" fica no objetivo/liquidez (independente da classe).
 const b3Classe = (ticker, rf) => rf ? "etf" : (/11$/.test(ticker) ? "fii" : "acao");
 const b3Norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+// canonicaliza o nome da "Instituição" da B3 num nome curto de corretora (agrupa variações: "BANCO BTG
+// PACTUAL S/A." / "S.A." → "BTG Pactual"; "XP INVESTIMENTOS CCTVM" / "CORRETORA DE CAMBIO" → "XP"). Alimenta
+// o de-para instituição→conta na conciliação. Aplicado também ao NOME das contas p/ pré-preencher o mapa.
+const B3_BROKERS = [[/btg/, "BTG Pactual"], [/\bclear\b/, "Clear"], [/\brico\b/, "Rico"], [/\bxp\b|xp invest/, "XP"], [/\binter\b/, "Inter"], [/genial/, "Genial"], [/rp financeira/, "RP Financeira"], [/nubank|nu invest|nu pagamentos/, "Nubank"], [/itau/, "Itaú"], [/bradesco/, "Bradesco"], [/\bc6\b/, "C6"], [/santander/, "Santander"], [/modal/, "Modal"], [/avenue/, "Avenue"], [/\btoro\b/, "Toro"], [/agora/, "Ágora"], [/guide/, "Guide"], [/warren/, "Warren"], [/mirae/, "Mirae"], [/safra/, "Safra"], [/easynvest/, "Easynvest"], [/banco do brasil/, "Banco do Brasil"], [/caixa economica/, "Caixa"]];
+function b3Broker(inst) {
+  const s = String(inst || "").trim(); if (!s) return "Instituição não identificada";
+  const n = b3Norm(s);
+  for (const [re, name] of B3_BROKERS) if (re.test(n)) return name;
+  const clean = s.replace(/\b(S[\/.]?A\.?|LTDA\.?|CCTVM|CCVM|DTVM|SCFI|CVM|CFI|CORRETORA|DISTRIBUIDORA|TITULOS|VALORES|MOBILIARIOS|INVESTIMENTOS?|DE|E|DO|GRUPO)\b/gi, "").replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+  return clean ? clean.replace(/\b\w/g, (c) => c.toUpperCase()) : s;
+}
 // agrupa items por linha (mesmo y) e ordena por x
 function b3Rows(items) {
   const rows = {};
@@ -3126,7 +3170,7 @@ const b3Num = (v) => { if (typeof v === "number") return isFinite(v) ? v : null;
 // relatório de MOVIMENTAÇÃO da B3 em Excel → {kind, moves}. Fonte COMPLETA (compra/venda + proventos, todo o histórico).
 function b3ParseMovXlsx(rows) {
   const hdr = (rows[0] || []).map(b3Norm), col = (kw) => hdr.findIndex((h) => h.includes(kw));
-  const iES = col("entrada"), iData = col("data"), iMov = col("moviment"), iProd = col("produto"), iQtd = col("quantidade"), iPU = col("preco"), iVal = col("valor");
+  const iES = col("entrada"), iData = col("data"), iMov = col("moviment"), iProd = col("produto"), iInst = col("institui"), iQtd = col("quantidade"), iPU = col("preco"), iVal = col("valor");
   if (iMov < 0 || iProd < 0 || iVal < 0) return { kind: null, moves: [] };
   const out = [];
   for (let r = 1; r < rows.length; r++) {
@@ -3134,14 +3178,16 @@ function b3ParseMovXlsx(rows) {
     const cls = b3MovClass(row[iMov], row[iES]); if (!cls) continue;
     const { ticker, nome } = b3Produto(row[iProd]); if (!ticker) continue; // RF/Tesouro sem código de negociação
     const iso = b3IsoBR(row[iData]); if (!iso) continue;
+    const instituicao = iInst >= 0 ? String(row[iInst] || "").replace(/\s+/g, " ").trim() : "";
+    const broker = b3Broker(instituicao);
     const valor = b3Num(row[iVal]);
     if (cls.tipo === "provento") {
       if (!valor) continue;
-      out.push({ iso, tipo: "provento", ticker, nome, classe: b3Classe(ticker, false), valor: cls.sign * valor });
+      out.push({ iso, tipo: "provento", ticker, nome, classe: b3Classe(ticker, false), instituicao, broker, valor: cls.sign * valor });
     } else {
       const qtd = b3Num(row[iQtd]), preco = b3Num(row[iPU]);
       if (!qtd || qtd <= 0 || !preco || preco <= 0) continue; // trade real tem qtd e preço (empréstimo/custódia não)
-      out.push({ iso, tipo: cls.tipo, ticker, nome, classe: b3Classe(ticker, false), qtd, preco });
+      out.push({ iso, tipo: cls.tipo, ticker, nome, classe: b3Classe(ticker, false), instituicao, broker, qtd, preco });
     }
   }
   return { kind: "mov", moves: out };
@@ -3352,8 +3398,8 @@ function wire() {
     if (iAdd) { openAssetMove(iAdd.dataset.invAdd); return; }
     const iMoves = e.target.closest("[data-inv-moves]");
     if (iMoves) { openAssetMoves(iMoves.dataset.invMoves); return; }
-    const iImp = e.target.closest("[data-inv-import]");
-    if (iImp) { invImportPick(iImp.dataset.invImport); return; }
+    if (e.target.closest("[data-b3-import]")) { b3ImportPick(); return; }
+    if (e.target.closest("[data-goto-b3import]")) { state.tab = "conciliacao"; state.acctDetail = null; renderView(); return; }
     // conciliação de ativos (tela cheia)
     const arAcc = e.target.closest("[data-ar-accept]");
     if (arAcc) { assetReconAccept(arAcc.dataset.arAccept); return; }
@@ -3634,8 +3680,8 @@ function wire() {
       Object.assign(state.pop, patch); renderPop();
     }
     // conciliação de ativos: trocar a carteira de destino → re-dedup
-    const arA = e.target.closest("[data-ar-acct]");
-    if (arA) { assetReconSetConta(arA.value); return; }
+    const arMap = e.target.closest("[data-ar-map]");
+    if (arMap) { assetReconSetBroker(arMap.dataset.arMap, arMap.value); return; }
   });
   // batimento: a cada tecla guarda o saldo do banco e atualiza SÓ o resultado (não a view toda,
   // senão o input é recriado e perde o foco no meio da digitação)
