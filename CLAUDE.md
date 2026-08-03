@@ -210,6 +210,9 @@ cache em localStorage `mc_quotes`); histórico mensal via a Pages Function `/api
 Vive na **aba Conciliação** (`viewConciliacao`, card `.b3-zone` "Importar investimentos da B3", botão
 `data-b3-import`→`b3ImportPick()`), **não** dentro de uma conta — o arquivo da B3 traz **várias corretoras**
 (coluna "Instituição"), então não faz sentido escolher uma conta só. `b3ImportPick` **não recebe contaId**.
+(Gotcha: o `<input type=file>` do `b3ImportPick` **tem que ser anexado ao DOM** antes do `click()` — input
+solto tem o click/change engolido na 1ª vez no Safari/iOS, o bug "só funciona na 2ª vez". E `state.assetRecon`
+entra no `busy` do `onStale`/sync do boot, senão um pull em segundo plano re-renderiza por cima e a tela some.)
 (A seção Ativos da conta tem só um atalho de navegação `data-goto-b3import` que leva pra aba Conciliação —
 não é um 2º fluxo.) Lê **PDF** (`.pdf`) **e Excel** (`.xlsx`); `parseB3File(file)` roteia por extensão: `.xlsx`
 → `readXlsx`+`b3ParseMovXlsx`; senão → `parseB3PDF`.
