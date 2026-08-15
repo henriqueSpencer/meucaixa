@@ -2089,6 +2089,11 @@ function renderView() {
   if (elSub) elSub.textContent = meta[1];
   const pend = state.recon.filter((r) => r.status === "pendente").length;
   if (elBadge) { elBadge.textContent = pend; elBadge.style.display = pend ? "grid" : "none"; }
+  // barra mobile: "Mais" acende p/ abas fora da barra; espelha o badge de conciliação
+  const moreBtn = document.querySelector(".mnav-more");
+  if (moreBtn) moreBtn.classList.toggle("on", !["dashboard", "transacoes", "contas"].includes(state.tab));
+  const mBadge = document.getElementById("mnav-badge");
+  if (mBadge) { mBadge.textContent = pend; mBadge.style.display = pend ? "grid" : "none"; }
   // a conciliação de ativos toma a área de conteúdo inteira (como o detalhe de conta), fora do tab
   elView.innerHTML = state.assetRecon ? viewAssetRecon() : VIEWS[state.tab]();
   scheduleSave();
@@ -3331,8 +3336,10 @@ function wire() {
     if (sdela) { const [tp, pa, su] = sdela.dataset.subDelAsk.split("|"); openSubDelete(tp, pa, su); return; }
     const sdelc = e.target.closest("[data-sub-del-confirm]");
     if (sdelc) { const [tp, pa, su] = sdelc.dataset.subDelConfirm.split("|"); confirmSubDelete(tp, pa, su); return; }
+    if (e.target.closest("[data-nav-toggle]")) { document.querySelector(".fin-root").classList.toggle("nav-open"); return; }
+    if (e.target.closest("[data-nav-close]")) { document.querySelector(".fin-root").classList.remove("nav-open"); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
+    if (tabBtn) { document.querySelector(".fin-root").classList.remove("nav-open"); state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     if (e.target.closest("[data-admin-refresh]")) { loadAdmin(true); return; }
     const hday = e.target.closest("[data-hist-day]");
