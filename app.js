@@ -492,7 +492,7 @@ const C_SALDO = "#8B7BD8"; // linha de saldo (roxo-azulado)
 // combo: barras Receitas/Despesas + linha de Saldo (receita−despesa) + tooltip por mês (hover no desktop,
 // toque no celular via classe .on em state.rdSel). `sel` = índice do mês fixado no toque (ou null).
 function barChartSVG(data, sel) {
-  const W = 560, H = 244, padL = 42, padR = 14, padT = 16, padB = 28;
+  const W = 520, H = 240, padL = 40, padR = 12, padT = 18, padB = 28;
   const n = data.length || 1;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const saldos = data.map((d) => d.receita - d.despesa);
@@ -501,8 +501,10 @@ function barChartSVG(data, sel) {
   const ax = niceAxis(rawLo, rawHi, 4);
   const Y = (v) => padT + plotH - (v - ax.min) / (ax.max - ax.min) * plotH;
   const y0 = Y(0);
-  const slot = plotW / n, gap = Math.min(8, slot * 0.14);
-  const bw = Math.max(2, Math.min(20, slot / 2 - gap));
+  // mesma geometria de barra da versão anterior (barras cheias, vão justo entre o par)
+  const slot = plotW / n, gap = Math.min(6, slot * 0.12);
+  const bwCap = n <= 8 ? 24 : n <= 14 ? 15 : 9;
+  const bw = Math.max(2, Math.min(bwCap, slot / 2 - gap));
   const rx = Math.min(3, bw / 2), lblStep = Math.max(1, Math.ceil(n / 9));
   let g = "";
   // grade em passos redondos
