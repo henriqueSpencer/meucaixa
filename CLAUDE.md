@@ -86,6 +86,19 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   assets; Supabase passa direto pela rede). Ícones em `icons/` (carteira brass 192/512). **Favicon**: o
   Safari ignorava SVG/PNG externo → usa **SVG inline (data-URI)** no `<link rel=icon>` do `index.html`
   (padrão que funciona, igual ao DIVYVAL) + **`/favicon.ico`** na raiz (16/32/48, gerado com Pillow).
+- **Layout mobile (≤760px)**: o desktop fica **intacto** — a camada mobile é só CSS por cima (media
+  query) + markup estático, **sem duplicar telas** (a mesma base `VIEWS`/`app.js` serve os dois). Duas
+  peças: (1) a **sidebar vira gaveta deslizante** (`position:fixed;translateX(-100%)`, aparece com
+  `.fin-root.nav-open`), aberta pelo botão **"Mais"** (`data-nav-toggle`) e fechada pelo **backdrop**
+  (`data-nav-close`) ou ao clicar qualquer aba — mantém TODAS as abas + patrimônio + usuário/sair; (2) a
+  **barra inferior `.mnav`** (fixa, fundo `var(--sidebar)`, brass no ativo, com `safe-area-inset` pro
+  notch): **Início**(dashboard) · **Transações** · **FAB ＋**(`data-action=open-modal`, elevado) ·
+  **Contas** · **Mais**. Markup estático no `index.html` **dentro de `.fin-root`**. Como a navegação é por
+  **delegação `[data-tab]`** (o handler em `app.js` + o toggle `.on` em `renderView`), os botões da barra
+  funcionam **sem lógica nova**; o `renderView` só acende `.mnav-more.on` p/ abas fora da barra e espelha o
+  badge de conciliação em `#mnav-badge`. Fora da barra, os grids empilham (`.kpi-row` 2 col, `.grid-2/2b`
+  1 col) e o topbar-`+` some (redundante com o FAB). Substituiu uma tentativa antiga que só espremia os 8
+  ícones numa fila rolável. Testado sem browser (jsdom: gaveta abre/fecha, aba troca+fecha, estados `.on`).
 
 ## Supabase (projeto `meucaixa`)
 - ref/project_id: **`umvtbondcihigdltspub`** · região sa-east-1 · URL `https://umvtbondcihigdltspub.supabase.co`
