@@ -357,6 +357,14 @@ const attr = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/"
 const numOr0 = (n) => (typeof n === "number" && isFinite(n) ? n : (isFinite(parseFloat(n)) ? parseFloat(n) : 0));
 const fmt = (n) => numOr0(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtShort = (n) => "R$ " + Math.abs(numOr0(n)).toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+// valor compacto p/ eixos e rótulos de barra: 850 · 9,3k · 12k · 1,2M (sem "R$", pra caber no gráfico)
+const fmtCompact = (n) => {
+  const v = Math.abs(numOr0(n));
+  if (v >= 1e6) return (v / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "M";
+  if (v >= 1e4) return Math.round(v / 1e3) + "k";
+  if (v >= 1e3) return (v / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
+  return v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
+};
 const fmtNum = (n) => Math.abs(numOr0(n)).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const TODAY_ISO = new Date().toISOString().slice(0, 10); // data real de hoje (default de nova transação, chips Hoje/Ontem)
 const parseValor = (s) => parseFloat(String(s || "").replace(/\./g, "").replace(",", ".")) || 0;
@@ -467,29 +475,49 @@ function kpi(label, valor, delta, good, iconName, cor) {
 }
 
 /* ---------- 5. gráficos SVG ---------- */
-function barChartSVG(data) {
-  const W = 520, H = 240, padL = 44, padR = 12, padT = 14, padB = 28;
+// escala "redonda": passo e topo em números bonitos (1/2/2,5/5 ×10ⁿ) — barras ocupam melhor a altura
+// e as linhas de grade caem em valores legíveis (sem o degrau fixo de 4000 de antes)
+function niceScale(max, ticks) {
+  ticks = ticks || 4;
+  if (!(max > 0)) return { step: 1, max: ticks };
+  const raw = max / ticks, p = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / p;
+  const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10;
+  const step = nf * p;
+  return { step, max: step * Math.ceil(max / step) };
+}
+// pick = índice do mês "revelado" no toque (mostra o valor no topo mesmo quando há muitos meses); -1 = nenhum
+function barChartSVG(data, pick) {
+  if (typeof pick !== "number") pick = -1;
+  const W = 520, H = 240, padL = 40, padR = 12, padT = 22, padB = 28;
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const max = Math.max(1, ...data.flatMap((d) => [d.receita, d.despesa]));
-  const gridMax = Math.max(4000, Math.ceil(max / 4000) * 4000);
+  const rawMax = Math.max(1, ...data.flatMap((d) => [d.receita, d.despesa]));
+  const sc = niceScale(rawMax, 4), gridMax = sc.max;
   const n = data.length || 1;
   // barras e rótulos se adaptam à quantidade de meses (cabe de 3 a 30+ meses sem sobrepor)
-  const slot = plotW / n, gap = Math.min(4, slot * 0.12);
-  const bw = Math.max(2, Math.min(14, slot / 2 - gap));
+  const slot = plotW / n, gap = Math.min(6, slot * 0.1);
+  const bwCap = n <= 8 ? 26 : n <= 14 ? 14 : 8; // poucos meses ⇒ barras mais gordas (o valor cabe em cima)
+  const bw = Math.max(2, Math.min(bwCap, slot / 2 - gap));
   const rx = Math.min(3, bw / 2), lblStep = Math.max(1, Math.ceil(n / 8));
+  const showVals = n <= 8; // rótulo de valor fixo no topo só quando cabe; senão é no toque (pick)
   let g = "";
-  for (let i = 0; i <= 4; i++) {
-    const val = (gridMax * i) / 4, y = padT + plotH - (val / gridMax) * plotH;
+  // grade em passos redondos
+  for (let v = 0; v <= gridMax + 1e-6; v += sc.step) {
+    const y = padT + plotH - (v / gridMax) * plotH;
     g += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--hair)"/>`;
-    g += `<text x="${padL - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--subtle)">${fmtShort(val)}</text>`;
+    g += `<text x="${padL - 6}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--subtle)">${fmtCompact(v)}</text>`;
   }
   data.forEach((d, i) => {
     const cx = padL + (i + 0.5) * slot;
+    const reveal = showVals || i === pick; // esse mês mostra os valores no topo
+    if (i === pick) g += `<rect x="${cx - slot / 2}" y="${padT}" width="${slot}" height="${plotH}" fill="var(--hair)" opacity="0.5"/>`;
     [["receita", C.receita, -1, "Receitas"], ["despesa", C.despesa, 1, "Despesas"]].forEach(([k, col, side, lbl]) => {
-      const h = (d[k] / gridMax) * plotH, x = side < 0 ? cx - bw - gap / 2 : cx + gap / 2, y = padT + plotH - h;
-      g += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="${rx}" fill="${col}"><title>${lbl} · ${d.mes}: ${fmt(d[k])}</title></rect>`;
+      const val = d[k], h = (val / gridMax) * plotH, x = side < 0 ? cx - bw - gap / 2 : cx + gap / 2, y = padT + plotH - h;
+      g += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="${rx}" fill="${col}"><title>${lbl} · ${d.mes}: ${fmt(val)}</title></rect>`;
+      if (reveal && val > 0) g += `<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" font-size="9" font-weight="700" fill="${col}">${fmtCompact(val)}</text>`;
     });
-    if (i % lblStep === 0 || i === n - 1) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--subtle)">${d.mes}</text>`;
+    if (i % lblStep === 0 || i === n - 1 || i === pick) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${i === pick ? "var(--ink)" : "var(--subtle)"}">${d.mes}</text>`;
+    // área de toque do mês inteiro (revela o valor no celular, onde não há hover)
+    g += `<rect x="${cx - slot / 2}" y="${padT}" width="${slot}" height="${plotH}" fill="transparent" style="cursor:pointer" data-rdpick="${i}"></rect>`;
   });
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" width="100%" height="100%" font-family="Inter,sans-serif">${g}</svg>`;
 }
@@ -550,6 +578,7 @@ function blkReceitaDespesa() {
   const range = valid.includes(state.rdRange) ? state.rdRange : (N > 12 ? "12" : "all");
   const nShow = range === "all" ? N : Math.min(+range, N);
   const s = full.slice(-nShow), n = s.length;
+  const pick = (typeof state.rdPick === "number" && state.rdPick >= 0 && state.rdPick < n) ? state.rdPick : -1;
   const chips = [...opts.map((x) => ({ k: String(x), lb: x + "M" })), { k: "all", lb: "Tudo" }].map((r) => `<button class="pc-range${range === r.k ? " on" : ""}" data-rdrange="${r.k}">${r.lb}</button>`).join("");
   return `<div class="card">
     <div class="card-head">
@@ -557,7 +586,7 @@ function blkReceitaDespesa() {
       <button class="card-sub drill-hint" data-drill="open">detalhar ${ic("arrow-right", 12)}</button>
     </div>
     ${opts.length ? `<div class="pc-ranges"><div class="pc-chips">${chips}</div></div>` : ""}
-    <div class="chart" style="height:260px">${barChartSVG(s)}</div>
+    <div class="chart" style="height:260px">${barChartSVG(s, pick)}</div>
     <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span></div>
   </div>`;
 }
@@ -3530,7 +3559,9 @@ function wire() {
     const pr = e.target.closest("[data-pcrange]");
     if (pr) { state.pcRange = pr.dataset.pcrange; state.pcSel = null; renderView(); return; }
     const rdr = e.target.closest("[data-rdrange]");
-    if (rdr) { state.rdRange = rdr.dataset.rdrange; renderView(); return; }
+    if (rdr) { state.rdRange = rdr.dataset.rdrange; state.rdPick = -1; renderView(); return; }
+    const rdp = e.target.closest("[data-rdpick]");
+    if (rdp) { const i = +rdp.dataset.rdpick; state.rdPick = state.rdPick === i ? -1 : i; renderView(); return; }
     if (e.target.closest("[data-pcsel-clear]")) { state.pcSel = null; renderView(); return; }
     const dm = e.target.closest("[data-donut-month]");
     if (dm) { const [tp, dir] = dm.dataset.donutMonth.split("|"); donutMonthNav(tp, dir); return; }
