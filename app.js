@@ -491,14 +491,16 @@ function barChartSVG(data, pick) {
   const W = 520, H = 240, padL = 40, padR = 12, padT = 22, padB = 28;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const rawMax = Math.max(1, ...data.flatMap((d) => [d.receita, d.despesa]));
-  const sc = niceScale(rawMax, 4), gridMax = sc.max;
+  const sc = niceScale(rawMax, 4);
+  let gridMax = sc.max;
+  if (gridMax <= rawMax + 1e-6) gridMax += sc.step; // folga no topo p/ o rótulo da barra mais alta não cortar
   const n = data.length || 1;
   // barras e rótulos se adaptam à quantidade de meses (cabe de 3 a 30+ meses sem sobrepor)
   const slot = plotW / n, gap = Math.min(6, slot * 0.1);
   const bwCap = n <= 8 ? 26 : n <= 14 ? 14 : 8; // poucos meses ⇒ barras mais gordas (o valor cabe em cima)
   const bw = Math.max(2, Math.min(bwCap, slot / 2 - gap));
   const rx = Math.min(3, bw / 2), lblStep = Math.max(1, Math.ceil(n / 8));
-  const showVals = n <= 8; // rótulo de valor fixo no topo só quando cabe; senão é no toque (pick)
+  const dense = n > 8; // muitos meses ⇒ rótulo de valor na vertical (economiza largura); senão na horizontal
   let g = "";
   // grade em passos redondos
   for (let v = 0; v <= gridMax + 1e-6; v += sc.step) {
@@ -508,12 +510,16 @@ function barChartSVG(data, pick) {
   }
   data.forEach((d, i) => {
     const cx = padL + (i + 0.5) * slot;
-    const reveal = showVals || i === pick; // esse mês mostra os valores no topo
     if (i === pick) g += `<rect x="${cx - slot / 2}" y="${padT}" width="${slot}" height="${plotH}" fill="var(--hair)" opacity="0.5"/>`;
     [["receita", C.receita, -1, "Receitas"], ["despesa", C.despesa, 1, "Despesas"]].forEach(([k, col, side, lbl]) => {
       const val = d[k], h = (val / gridMax) * plotH, x = side < 0 ? cx - bw - gap / 2 : cx + gap / 2, y = padT + plotH - h;
       g += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" rx="${rx}" fill="${col}"><title>${lbl} · ${d.mes}: ${fmt(val)}</title></rect>`;
-      if (reveal && val > 0) g += `<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" font-size="9" font-weight="700" fill="${col}">${fmtCompact(val)}</text>`;
+      if (val > 0) { // valor no topo da barra: horizontal quando há espaço, vertical no denso
+        const bx = x + bw / 2, ty = y - 3;
+        g += dense
+          ? `<text x="${bx}" y="${ty}" transform="rotate(-90 ${bx} ${ty})" text-anchor="start" font-size="8" font-weight="700" fill="${col}">${fmtCompact(val)}</text>`
+          : `<text x="${bx}" y="${y - 4}" text-anchor="middle" font-size="9" font-weight="700" fill="${col}">${fmtCompact(val)}</text>`;
+      }
     });
     if (i % lblStep === 0 || i === n - 1 || i === pick) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="${i === pick ? "var(--ink)" : "var(--subtle)"}">${d.mes}</text>`;
     // área de toque do mês inteiro (revela o valor no celular, onde não há hover)
