@@ -12,7 +12,7 @@
   <link rel="icon" href="/favicon.ico" sizes="32x32">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23211E16'/><g transform='translate(4 4)' fill='none' stroke='%23C6A24E' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'><path d='M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2'/><path d='M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z'/><circle cx='16.5' cy='13' r='1.35' fill='%23C6A24E' stroke='none'/></g></svg>" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="styles.css?v=72">
+  <link rel="stylesheet" href="styles.css?v=73">
 </head>
 <body>
   <div class="fin-root">
@@ -116,6 +116,31 @@
       <div class="content" id="view"></div>
     </main>
 
+    <!-- ===== barra de navegação mobile (só no celular; a sidebar vira gaveta em "Mais") ===== -->
+    <nav class="mnav" aria-label="Navegação">
+      <button class="mnav-i" data-tab="dashboard">
+        <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        <span>Início</span>
+      </button>
+      <button class="mnav-i" data-tab="transacoes">
+        <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 8 16 13"/><line x1="21" y1="8" x2="4" y2="8"/><polyline points="8 11 3 16 8 21"/><line x1="3" y1="16" x2="20" y2="16"/></svg>
+        <span>Transações</span>
+      </button>
+      <button class="mnav-fab" data-action="open-modal" aria-label="Nova transação">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button class="mnav-i" data-tab="contas">
+        <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h13a1 1 0 0 1 1 1v2"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a1 1 0 0 0-1-1H5a2 2 0 0 1-2-2z"/><circle cx="16.5" cy="13" r="1.1" fill="currentColor" stroke="none"/></svg>
+        <span>Contas</span>
+      </button>
+      <button class="mnav-i mnav-more" data-nav-toggle>
+        <svg xmlns="http://www.w3.org/2000/svg" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+        <span>Mais</span>
+        <span class="mnav-badge" id="mnav-badge">0</span>
+      </button>
+    </nav>
+    <div class="nav-backdrop" data-nav-close></div>
+
     <!-- pontos de montagem de modais (DENTRO de .fin-root p/ herdar os tokens de cor) -->
     <div id="modal-root"></div>
     <div id="drill-root"></div>
@@ -126,7 +151,7 @@
 
   <script src="vendor/supabase.js"></script>
   <script src="store.js?v=14"></script>
-  <script src="app.js?v=98"></script>
+  <script src="app.js?v=99"></script>
   <script>if ("serviceWorker" in navigator) { window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {})); }</script>
 </body>
 </html>
