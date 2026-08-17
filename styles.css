@@ -590,6 +590,8 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .pc-xl{position:absolute;transform:translateX(-50%);font-size:11px;color:var(--subtle)}
 /* rótulos do eixo Y: chip à esquerda, alinhado a cada linha de grade */
 .pc-yl{position:absolute;left:0;transform:translateY(-50%);font-size:9.5px;font-weight:500;color:var(--subtle);background:var(--card);padding:0 5px 0 1px;line-height:1.1;pointer-events:none;z-index:2;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pc-yl-top{transform:translateY(0)}      /* topo: fica logo abaixo da linha */
+.pc-yl-bot{transform:translateY(-100%)}  /* base (0): fica logo acima da linha */
 /* período + seleção por arrasto */
 .pc-ranges{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 0 8px;flex-wrap:wrap}
 .pc-chips{display:inline-flex;gap:6px;background:var(--card-2);border-radius:10px;padding:3px}

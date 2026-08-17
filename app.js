@@ -802,16 +802,16 @@ function blkPatrimonio() {
   const comp = mode === "comp" ? s.map((d) => { const c = patCompAt(d.ym, d.valor); return { mes: d.mes, parts: c.parts, real: c.real, valor: PAT_STACK.reduce((a, b) => a + numOr0(c.parts[b.k]), 0) }; }) : null;
   const series = comp || s;
   const xP = (i) => (n === 1 ? 50 : (i / (n - 1)) * 100);
-  // escala Y em números redondos (niceAxis) → grade e rótulos legíveis; comp começa em 0
-  let rawLo, rawHi;
-  if (mode === "comp") { rawLo = 0; rawHi = Math.max(1, ...series.map((d) => d.valor)); }
-  else { const vals = s.map((d) => d.valor); rawLo = Math.min(...vals); rawHi = Math.max(...vals); }
+  // escala Y ancorada no 0 (mostra o 0 e dá folga no topo), em números redondos (niceAxis)
+  const vals = series.map((d) => d.valor);
+  const rawLo = Math.min(0, ...vals), rawHi = Math.max(1, ...vals);
   const yax = niceAxis(rawLo, rawHi, 4);
-  const yMin = mode === "comp" ? 0 : yax.min, yMax = yax.max;
+  const yMin = yax.min, yMax = yax.max;
   const yP = (v) => 100 - ((v - yMin) / (yMax - yMin)) * 100;
   const yticks = []; for (let v = yMin; v <= yMax + 1e-6; v += yax.step) yticks.push(v);
   const grid = yticks.map((v) => `<line x1="0" y1="${yP(v).toFixed(2)}" x2="100" y2="${yP(v).toFixed(2)}" stroke="var(--hair)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join("");
-  const yls = yticks.map((v) => `<span class="pc-yl" style="top:${yP(v).toFixed(2)}%">${fmtCompact(v)}</span>`).join("");
+  // rótulos: os das pontas ancoram pra dentro (topo desce, base sobe) p/ não cortarem na borda
+  const yls = yticks.map((v, i) => `<span class="pc-yl${i === 0 ? " pc-yl-bot" : i === yticks.length - 1 ? " pc-yl-top" : ""}" style="top:${yP(v).toFixed(2)}%">${fmtCompact(v)}</span>`).join("");
   // corpo do gráfico: bandas empilhadas (comp) ou área única (total)
   let body = "";
   if (mode === "comp") {
