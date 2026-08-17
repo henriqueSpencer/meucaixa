@@ -797,7 +797,7 @@ function blkPatrimonio() {
   const range = valid.includes(state.pcRange) ? state.pcRange : (N > 12 ? "12" : "all");
   const nShow = range === "all" ? N : Math.min(+range, N);
   const s = full.slice(-nShow), n = s.length;
-  const mode = state.pcMode === "total" ? "total" : "comp"; // padrão: Composição
+  const mode = state.pcMode === "comp" ? "comp" : "total"; // padrão: Total
   // no modo Composição, cada mês vira as bandas (híbrido snapshot/reconstrução); o topo = patrimônio do mês
   const comp = mode === "comp" ? s.map((d) => { const c = patCompAt(d.ym, d.valor); return { mes: d.mes, parts: c.parts, real: c.real, valor: PAT_STACK.reduce((a, b) => a + numOr0(c.parts[b.k]), 0) }; }) : null;
   const series = comp || s;
