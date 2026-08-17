@@ -2271,7 +2271,7 @@ function renderView() {
   if (elBadge) { elBadge.textContent = pend; elBadge.style.display = pend ? "grid" : "none"; }
   // barra mobile: "Mais" acende p/ abas fora da barra; espelha o badge de conciliação
   const moreBtn = document.querySelector(".mnav-more");
-  if (moreBtn) moreBtn.classList.toggle("on", !["dashboard", "transacoes", "contas"].includes(state.tab));
+  if (moreBtn) moreBtn.classList.toggle("on", !["dashboard", "contas", "categorias"].includes(state.tab));
   const mBadge = document.getElementById("mnav-badge");
   if (mBadge) { mBadge.textContent = pend; mBadge.style.display = pend ? "grid" : "none"; }
   // a conciliação de ativos toma a área de conteúdo inteira (como o detalhe de conta), fora do tab
