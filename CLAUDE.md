@@ -82,6 +82,14 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   `TODAY_ISO` = data real de hoje (era fixa). Totais das categorias vêm de `catTotals()` (as linhas do
   banco têm `total:0`). Sem lançamentos → zero/vazio (não os antigos 15.800/8.900). Os `const` mock
   (`monthly`/`receitasMes`/etc.) só sobrevivem como fallback do modo dev com `OF_DATA`.
+- **Gráficos SVG puro (sem lib)**: helpers `fmtCompact` (9,3k · 12k · 1,2M — eixos e rótulos, sem "R$") e
+  `niceAxis(lo,hi,ticks)` (passo/piso/topo redondos 1/2/2,5/5×10ⁿ, suporta faixa negativa). **Receitas ×
+  Despesas** (`barChartSVG`, `blkReceitaDespesa`) é um **combo**: barras (viewBox fixo **520×240** — mexer
+  nisso encolhe o desenho no container por causa do `preserveAspectRatio="meet"`; geometria de barra por
+  nº de meses via `bwCap`) + **linha de Saldo** roxa (`C_SALDO`) + **tooltip por mês** (hover no desktop via
+  CSS `.rd-col:hover`, toque no celular via `state.rdSel`/`.on` — sem re-render no hover) + **3 cards** de
+  resumo (`rdStats`: guardado/média/poupança, só **meses fechados**, exclui o corrente). Não há rótulo fixo
+  no topo nem scroll (tentativas anteriores). O **saldo negativo** desce abaixo de zero (eixo via `niceAxis`).
 - **PWA**: `manifest.json` + `sw.js` (shell offline: network-first no HTML, stale-while-revalidate nos
   assets; Supabase passa direto pela rede). Ícones em `icons/` (carteira brass 192/512). **Favicon**: o
   Safari ignorava SVG/PNG externo → usa **SVG inline (data-URI)** no `<link rel=icon>` do `index.html`
@@ -214,6 +222,15 @@ cache em localStorage `mc_quotes`); histórico mensal via a Pages Function `/api
   reconstruída do histórico (`heldAt`/`investedMarketAt` × `PRICE_HIST`), proventos 12m (de `asset_moves`
   provento; fallback: receita marcada dividendo/rendimento), rentabilidade real vs IPCA/CDI. Metas/snapshots/
   premissas/tags/rfValores ficam todos em **`prefs`** (sincronizado via currentModel/applyModel).
+- **Evolução do patrimônio** (`blkPatrimonio`, bloco do dashboard) tem **2 modos** (`state.pcMode`, toggle
+  Composição/Total; **default Total**): _Total_ = área única do líquido (`netWorthSeries`); _Composição_ =
+  **área empilhada por classe** (`PAT_STACK`: imóvel/rf/ações/fii/etf/caixa/outro — só as bandas com valor).
+  Já reaproveita header valor+delta, chips de período (`pcRange`), **seleção de trecho arrastando** (`pcSel`,
+  `pcDrawBand`) e tooltip (`pcShow`) — no modo comp o tooltip ganha o **breakdown por classe** (`data-parts`
+  no `.pc-dot`, `PAT_COR`) + Δ no mês. **Fonte HÍBRIDA** (`patCompAt(ym,L)`): usa o snapshot se ele guardou
+  `comp` (real); senão **reconstrói** — ativos por classe via `heldAt`×`histPriceAt`, imóvel/carro **achatados**
+  no valor atual, e **caixa = resíduo** que fecha o topo no líquido `L`. `registrarMes` passou a gravar
+  `comp: patAlloc().val` no snapshot; o subtítulo mostra "trechos estimados" quando há reconstrução.
 - **Pages Function `functions/api/history/[ticker].js`**: 1ª peça de servidor no MeuCaixa (antes era estático
   puro + Supabase). Proxy do histórico mensal de fechamento do Yahoo (CORS liberado, cache no edge 6h) porque
   o navegador não alcança o Yahoo direto e a brapi passou a cobrar token. Deploy leva junto (Cloudflare Pages
