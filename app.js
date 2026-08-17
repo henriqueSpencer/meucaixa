@@ -679,6 +679,35 @@ function netWorthSeries() {
   for (let i = months.length - 2; i >= 0; i--) val[i] = val[i + 1] - (flow[months[i + 1]] || 0);
   return months.map((ym, i) => ({ ym, mes: mesAbbrev(ym), valor: Math.round(val[i] * 100) / 100 }));
 }
+// bandas do gráfico empilhado de patrimônio (de baixo p/ cima) + cor por label p/ o tooltip
+const PAT_STACK = [
+  { k: "imovel", label: "Imóvel/físico", cor: "#C0873C" },
+  { k: "rf", label: "Renda fixa", cor: "#5E9E7E" },
+  { k: "acao", label: "Ações", cor: "#3E7CB1" },
+  { k: "fii", label: "FIIs", cor: "#B0863A" },
+  { k: "etf", label: "ETF/Exterior", cor: "#9070B4" },
+  { k: "caixa", label: "Caixa", cor: "#7C89A0" },
+  { k: "outro", label: "Outro", cor: "#9A9B8C" },
+];
+const PAT_COR = Object.fromEntries(PAT_STACK.map((b) => [b.label, b.cor]));
+// composição no fim do mês `ym`. HÍBRIDO: usa o snapshot (real) se ele guardou `comp`; senão RECONSTRÓI
+// (ativos pelo histórico de cotação; imóvel/carro achatados no valor atual; caixa = resíduo p/ fechar em L).
+function patCompAt(ym, L) {
+  const parts = { imovel: 0, rf: 0, acao: 0, etf: 0, fii: 0, caixa: 0, outro: 0 };
+  const snap = patSnaps().find((x) => x.ym === ym && x.comp);
+  if (snap) { Object.keys(parts).forEach((k) => parts[k] = numOr0(snap.comp[k])); return { parts, real: true }; }
+  parts.imovel = accounts.filter((a) => !a.arquivada && a.tipo === "patrimonio").reduce((s, a) => s + Math.max(0, acctTotal(a)), 0);
+  const tkCl = {}; assetMoves.forEach((m) => { const t = String(m.ticker || "").toUpperCase(); if (t) tkCl[t] = m.classe || tkCl[t]; });
+  const held = heldAt(null, ym);
+  Object.keys(held).forEach((tk) => {
+    const o = held[tk], price = histPriceAt(tk, ym), pm = o.qtd > 0 ? o.custo / o.qtd : 0;
+    const mv = o.qtd * (price != null ? price : pm), cl = parts[tkCl[tk]] != null ? tkCl[tk] : "outro";
+    parts[cl] += mv;
+  });
+  const known = Object.values(parts).reduce((s, x) => s + x, 0);
+  parts.caixa += Math.max(0, numOr0(L) - known); // resíduo: fecha o topo no patrimônio líquido reconstruído
+  return { parts, real: false };
+}
 function pcIdxAt(pc, clientX) {
   const r = pc.getBoundingClientRect(), n = pc.querySelectorAll(".pc-dot").length;
   if (!r.width || !n) return 0;
@@ -768,39 +797,67 @@ function blkPatrimonio() {
   const range = valid.includes(state.pcRange) ? state.pcRange : (N > 12 ? "12" : "all");
   const nShow = range === "all" ? N : Math.min(+range, N);
   const s = full.slice(-nShow), n = s.length;
-  const vals = s.map((d) => d.valor), dMin = Math.min(...vals), dMax = Math.max(...vals);
-  const pad = (dMax - dMin) * 0.35 || Math.abs(dMax) * 0.1 || 1, yMin = dMin - pad, yMax = dMax + pad;
+  const mode = state.pcMode === "total" ? "total" : "comp"; // padrão: Composição
+  // no modo Composição, cada mês vira as bandas (híbrido snapshot/reconstrução); o topo = patrimônio do mês
+  const comp = mode === "comp" ? s.map((d) => { const c = patCompAt(d.ym, d.valor); return { mes: d.mes, parts: c.parts, real: c.real, valor: PAT_STACK.reduce((a, b) => a + numOr0(c.parts[b.k]), 0) }; }) : null;
+  const series = comp || s;
   const xP = (i) => (n === 1 ? 50 : (i / (n - 1)) * 100);
+  let yMin, yMax;
+  if (mode === "comp") { const mx = Math.max(1, ...series.map((d) => d.valor)); yMin = 0; yMax = mx * 1.08; }
+  else { const vals = s.map((d) => d.valor), dMin = Math.min(...vals), dMax = Math.max(...vals); const pad = (dMax - dMin) * 0.35 || Math.abs(dMax) * 0.1 || 1; yMin = dMin - pad; yMax = dMax + pad; }
   const yP = (v) => 100 - ((v - yMin) / (yMax - yMin)) * 100;
-  const line = "M" + s.map((d, i) => `${xP(i).toFixed(2)} ${yP(d.valor).toFixed(2)}`).join(" L ");
-  const area = `${line} L 100 100 L 0 100 Z`;
   const grid = [0, 33, 66, 100].map((g) => `<line x1="0" y1="${g}" x2="100" y2="${g}" stroke="var(--hair)" stroke-width="1" vector-effect="non-scaling-stroke"/>`).join("");
-  const dots = s.map((d, i) => `<button class="pc-dot" data-pt="${i}" data-mes="${d.mes}" data-val="${d.valor}" data-delta="${i > 0 ? (d.valor - s[i - 1].valor).toFixed(2) : 0}" data-x="${xP(i).toFixed(2)}" style="left:${xP(i)}%;top:${yP(d.valor)}%" aria-label="${d.mes}: ${fmt(d.valor)}"></button>`).join("");
+  // corpo do gráfico: bandas empilhadas (comp) ou área única (total)
+  let body = "";
+  if (mode === "comp") {
+    const active = PAT_STACK.filter((b) => comp.some((c) => numOr0(c.parts[b.k]) > 0.005));
+    let prev = comp.map(() => 0);
+    body = active.map((b) => {
+      const top = comp.map((c, i) => prev[i] + numOr0(c.parts[b.k]));
+      const fwd = comp.map((c, i) => `${xP(i).toFixed(2)} ${yP(top[i]).toFixed(2)}`).join(" L ");
+      const bwd = comp.map((c, i) => i).reverse().map((i) => `${xP(i).toFixed(2)} ${yP(prev[i]).toFixed(2)}`).join(" L ");
+      prev = top;
+      return `<path d="M${fwd} L ${bwd} Z" fill="${b.cor}" fill-opacity="0.92"/>`;
+    }).join("");
+    body += `<path d="M${series.map((d, i) => `${xP(i).toFixed(2)} ${yP(d.valor).toFixed(2)}`).join(" L ")}" fill="none" stroke="var(--ink)" stroke-opacity="0.35" stroke-width="1.2" vector-effect="non-scaling-stroke"/>`;
+  } else {
+    const line = "M" + s.map((d, i) => `${xP(i).toFixed(2)} ${yP(d.valor).toFixed(2)}`).join(" L ");
+    body = `<path d="${line} L 100 100 L 0 100 Z" fill="url(#pcg)"/><path d="${line}" fill="none" stroke="var(--brand)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`;
+  }
+  const dots = series.map((d, i) => {
+    const parts = comp ? PAT_STACK.map((b) => [b.label, numOr0(comp[i].parts[b.k])]).filter((r) => r[1] > 0.005) : null;
+    const pAttr = parts ? ` data-parts='${attr(JSON.stringify(parts))}' data-real="${comp[i].real ? 1 : 0}"` : "";
+    return `<button class="pc-dot" data-pt="${i}" data-mes="${d.mes}" data-val="${d.valor}" data-delta="${i > 0 ? (d.valor - series[i - 1].valor).toFixed(2) : 0}" data-x="${xP(i).toFixed(2)}"${pAttr} style="left:${xP(i)}%;top:${yP(d.valor)}%" aria-label="${d.mes}: ${fmt(d.valor)}"></button>`;
+  }).join("");
   const step = Math.max(1, Math.ceil(n / 7));
-  const xls = s.map((d, i) => (i % step === 0 || i === n - 1) ? `<span class="pc-xl" style="left:${xP(i)}%">${d.mes}</span>` : "").join("");
-  const first = s[0].valor, last = s[n - 1].valor, delta = last - first, pct = first ? (delta / first) * 100 : 0;
+  const xls = series.map((d, i) => (i % step === 0 || i === n - 1) ? `<span class="pc-xl" style="left:${xP(i)}%">${d.mes}</span>` : "").join("");
+  const first = series[0].valor, last = series[n - 1].valor, delta = last - first, pct = first ? (delta / first) * 100 : 0;
   const sel = state.pcSel && state.pcSel.a < n && state.pcSel.b < n && state.pcSel.a !== state.pcSel.b ? state.pcSel : null;
   let band = `<div class="pc-band" hidden></div>`, selbar = "";
   if (sel) {
     const a = Math.min(sel.a, sel.b), b = Math.max(sel.a, sel.b), xa = xP(a), xb = xP(b);
     band = `<div class="pc-band" style="left:${xa}%;width:${xb - xa}%"></div>`;
-    const dR = s[b].valor - s[a].valor, p2 = s[a].valor ? (dR / s[a].valor) * 100 : 0;
-    selbar = `<div class="pc-selbar"><span class="ps-range">${s[a].mes} → ${s[b].mes}</span><span class="ps-delta num ${dR >= 0 ? "up" : "down"}">${dR >= 0 ? "▲ +" : "▼ −"}${fmtNum(dR)} · ${p2 >= 0 ? "+" : ""}${p2.toFixed(1)}%</span><button class="ps-clear" data-pcsel-clear aria-label="Limpar seleção">${ic("x", 14)}</button></div>`;
+    const dR = series[b].valor - series[a].valor, p2 = series[a].valor ? (dR / series[a].valor) * 100 : 0;
+    selbar = `<div class="pc-selbar"><span class="ps-range">${series[a].mes} → ${series[b].mes}</span><span class="ps-delta num ${dR >= 0 ? "up" : "down"}">${dR >= 0 ? "▲ +" : "▼ −"}${fmtNum(dR)} · ${p2 >= 0 ? "+" : ""}${p2.toFixed(1)}%</span><button class="ps-clear" data-pcsel-clear aria-label="Limpar seleção">${ic("x", 14)}</button></div>`;
   }
   const chips = [...opts.map((x) => ({ k: String(x), lb: x + "M" })), { k: "all", lb: "Tudo" }].map((r) => `<button class="pc-range${range === r.k ? " on" : ""}" data-pcrange="${r.k}">${r.lb}</button>`).join("");
+  const modeChips = [["comp", "Composição"], ["total", "Total"]].map(([k, lb]) => `<button class="pc-range${mode === k ? " on" : ""}" data-pcmode="${k}">${lb}</button>`).join("");
+  const legend = mode === "comp" ? `<div class="pc-legend">${PAT_STACK.filter((b) => comp.some((c) => numOr0(c.parts[b.k]) > 0.005)).map((b) => `<span><i style="background:${b.cor}"></i>${b.label}</span>`).join("")}</div>` : "";
+  const estNote = mode === "comp" && comp.some((c) => !c.real) ? ` · <span title="Meses sem 'Registrar mês' são reconstruídos (imóvel/carro achatados, caixa aproximado)">trechos estimados</span>` : "";
   return `<div class="card">
     <div class="card-head">
-      <div><h3>Evolução do patrimônio</h3><span class="card-sub">líquido · ${n} ${n === 1 ? "mês" : "meses"}</span></div>
+      <div><h3>Evolução do patrimônio</h3><span class="card-sub">${mode === "comp" ? "composição" : "líquido"} · ${n} ${n === 1 ? "mês" : "meses"}${estNote}</span></div>
       <div class="pc-summary"><span class="pc-cur num">${fmtShort(last)}</span><span class="pc-delta num ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "▲" : "▼"} ${fmtShort(delta)} · ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%</span></div>
     </div>
-    <div class="pc-ranges"><div class="pc-chips">${chips}</div><span class="pc-draghint">arraste no gráfico pra medir um período</span></div>
+    <div class="pc-ranges"><div class="pc-chips">${chips}</div><div class="pc-chips">${modeChips}</div></div>
     <div class="pchart">
-      <svg class="pc-svg" viewBox="0 0 100 100" preserveAspectRatio="none"><defs><linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--brand)" stop-opacity="0.20"/><stop offset="100%" stop-color="var(--brand)" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${area}" fill="url(#pcg)"/><path d="${line}" fill="none" stroke="var(--brand)" stroke-width="2.5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>
+      <svg class="pc-svg" viewBox="0 0 100 100" preserveAspectRatio="none"><defs><linearGradient id="pcg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--brand)" stop-opacity="0.20"/><stop offset="100%" stop-color="var(--brand)" stop-opacity="0"/></linearGradient></defs>${grid}${body}</svg>
       ${band}
       <div class="pc-guide" hidden></div>
       ${dots}
       <div class="pc-tip" hidden></div>
     </div>
+    ${legend}
     <div class="pc-xls">${xls}</div>
     ${selbar}
   </div>`;
@@ -960,7 +1017,7 @@ function carteiraSerie(n) {
 function registrarMes() {
   const ym = TODAY_ISO.slice(0, 7), a = patAlloc();
   const snaps = ((state.prefs.patSnaps || []).filter((x) => x.ym !== ym));
-  snaps.push({ ym, liquido: a.liquido, bruto: a.bruto, passivos: a.passivos });
+  snaps.push({ ym, liquido: a.liquido, bruto: a.bruto, passivos: a.passivos, comp: a.val });
   state.prefs.patSnaps = snaps.sort((x, y) => String(x.ym).localeCompare(String(y.ym)));
   scheduleSave(); renderView();
 }
@@ -2162,7 +2219,7 @@ const state = {
   // donuts de categoria (despesas e ganhos), cada um com mês/seleção/drill próprios
   donut: { despesa: { month: null, active: null, drill: null }, receita: { month: null, active: null, drill: null } },
   // gráfico de patrimônio (período + seleção por arrasto)
-  pcRange: null, pcSel: null,
+  pcRange: null, pcSel: null, pcMode: null,
 };
 let pcDrag = null;
 const freshForm = () => {
@@ -2966,7 +3023,12 @@ function pcShow(pc, i) {
   if (guide) { guide.hidden = false; guide.style.left = dot.style.left; }
   if (tip) {
     tip.hidden = false; tip.style.left = dot.style.left; tip.style.top = dot.style.top;
-    tip.innerHTML = `<b>${dot.dataset.mes}</b><span class="num">${fmt(val)}</span>${delta ? `<span class="num pc-d ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "+" : "−"} ${fmtNum(delta)}</span>` : ""}`;
+    let brk = "";
+    if (dot.dataset.parts) {
+      try { brk = JSON.parse(dot.dataset.parts).map(([lb, v]) => `<span class="pcbrk"><i style="background:${PAT_COR[lb] || "#9A9B8C"}"></i>${lb}<b class="num">${fmt(v)}</b></span>`).join(""); } catch (e) {}
+    }
+    const deltaHTML = delta ? `<span class="num pc-d ${delta >= 0 ? "up" : "down"}">${delta >= 0 ? "+" : "−"} ${fmtNum(delta)}${brk ? " no mês" : ""}</span>` : "";
+    tip.innerHTML = `<b>${dot.dataset.mes}</b><span class="num pc-tot">${fmt(val)}</span>${brk}${deltaHTML}`;
   }
 }
 function pcHide(pc) { if (!pc) return; pc.querySelectorAll(".pc-dot.on").forEach((d) => d.classList.remove("on")); const g = pc.querySelector(".pc-guide"), t = pc.querySelector(".pc-tip"); if (g) g.hidden = true; if (t) t.hidden = true; }
@@ -3598,6 +3660,8 @@ function wire() {
     if (e.target.closest("[data-cat-form-save]")) { saveCatForm(); return; }
     const pr = e.target.closest("[data-pcrange]");
     if (pr) { state.pcRange = pr.dataset.pcrange; state.pcSel = null; renderView(); return; }
+    const pm = e.target.closest("[data-pcmode]");
+    if (pm) { state.pcMode = pm.dataset.pcmode; renderView(); return; }
     const rdr = e.target.closest("[data-rdrange]");
     if (rdr) { state.rdRange = rdr.dataset.rdrange; state.rdSel = null; renderView(); return; }
     const rds = e.target.closest("[data-rdsel]");
