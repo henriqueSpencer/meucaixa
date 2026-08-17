@@ -8,7 +8,7 @@ html,body{margin:0;padding:0;background:#F1EEE4}
   --ink:#1B1D17;--sub:#6C6E62;--subtle:#9A9B8C;
   --sidebar:#16160F;--radius:11px;--elev:#FFFFFF;   /* superfície de modal (destaca no overlay) */
   --pos:#2E9E6B;--neg:#C24A38;     /* entra / sai */
-  font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);min-height:100vh;display:flex;-webkit-font-smoothing:antialiased}
+  font-family:'Inter',system-ui,sans-serif;color:var(--ink);background:var(--bg);min-height:100vh;display:flex;overflow-x:clip;-webkit-font-smoothing:antialiased}
 @media(prefers-color-scheme:dark){
   html,body{background:#121109}
   .fin-root{
@@ -221,7 +221,7 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 
 /* table */
-.table-card{padding:4px 4px}
+.table-card{padding:4px 4px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .tbl{width:100%;border-collapse:collapse}
 .tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--subtle);font-weight:600;padding:14px 16px;border-bottom:1px solid var(--border)}
 .tbl th.r{text-align:right}.tbl th.c{text-align:center}
@@ -829,6 +829,8 @@ html,body{margin:0;padding:0;background:#F1EEE4}
   .topbar p{font-size:12px}
   .top-right .cta{display:none}
   .content{padding:16px 16px calc(80px + env(safe-area-inset-bottom))}
+  /* tabela de transações rola dentro do card (não espreme as colunas nem estoura a página) */
+  .table-card .tbl{min-width:560px}
 
   /* barra inferior */
   .mnav{display:flex;position:fixed;bottom:0;left:0;right:0;z-index:50;
