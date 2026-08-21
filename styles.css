@@ -1275,12 +1275,10 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .imv-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px}
 .imv-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
 .imv-panel-head p{color:var(--sub);font-size:12.5px;margin:2px 0 0} .imv-phint{color:var(--sub);font-size:12.5px;margin:0 0 14px}
-.imv-catlock{display:flex;gap:10px;align-items:flex-start;background:rgba(168,130,60,.10);border:1px solid rgba(168,130,60,.30);border-radius:12px;padding:11px 13px;margin:0 0 14px}
-.imv-catlock-ic{font-size:18px;line-height:1.2;flex-shrink:0}
-.imv-catlock-cat{font-size:13px;color:var(--ink);display:flex;align-items:center;flex-wrap:wrap;gap:8px}
-.imv-catlock-cat b{color:var(--brand)}
-.imv-catlock-badge{font-size:10.5px;font-weight:600;color:var(--brand);background:rgba(168,130,60,.16);border-radius:20px;padding:2px 8px;white-space:nowrap}
-.imv-catlock-why{color:var(--sub);font-size:12px;line-height:1.45;margin-top:3px}
+/* campo Categoria "travado" no modal de lançamento do imóvel: parece um select desabilitado */
+.imv-lockfield{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;background:color-mix(in srgb,var(--brand) 9%,var(--bg));border:1px dashed rgba(168,130,60,.45);color:var(--ink);border-radius:9px;padding:9px 11px;font-size:14px;cursor:not-allowed}
+.imv-lockfield-ic{font-size:12px;opacity:.7}
+.imv-lockhint{color:var(--sub);font-size:11.5px;line-height:1.45;margin:-4px 0 12px} .imv-lockhint b{color:var(--brand)}
 .imv-seg{display:inline-flex;background:var(--card-2);border:1px solid var(--border);border-radius:9px;padding:3px}
 .imv-seg button{background:transparent;border:0;color:var(--sub);padding:5px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
 .imv-seg button.on{background:color-mix(in srgb,var(--brand) 16%,transparent);color:var(--brand)}
