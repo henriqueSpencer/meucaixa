@@ -22,3 +22,6 @@ arq_exemplo/
 # planilhas de extrato (dados pessoais)
 *.xlsx
 *.xls
+
+# protótipo standalone da feature de imóveis (superado pelo módulo integrado imoveis.js)
+imoveis.html

@@ -292,7 +292,7 @@ function applyTxToBalance(tx, sign) {
   if (!tx) return;
   // conta de patrimônio: transferir dinheiro pra ela é ALOCAR — mexe no alocado também
   // (mantém a relação Valor atual = Valor alocado + Custos).
-  const bump = (a, delta) => { if (!a) return; a.saldo += delta; if (a.tipo === "patrimonio" && a.alocado != null) a.alocado += delta; };
+  const bump = (a, delta) => { if (!a) return; a.saldo += delta; if ((a.tipo === "patrimonio" || a.tipo === "imovel") && a.alocado != null) a.alocado += delta; };
   if (tx.tipo === "transferencia") {
     const amt = Math.abs(tx.valor);
     bump(acctByName(tx.origem), -sign * amt);
@@ -326,18 +326,20 @@ const TIPOS = {
   transferencia: { label: "Transferência", cor: C.transfer, icon: "transfer" },
   reembolso: { label: "Reembolso", cor: C.reembolso, icon: "undo" },
 };
-const ACCT_ICON = { banco: "landmark", cartao: "credit-card", dinheiro: "banknote", invest: "invest", patrimonio: "car" };
+const ACCT_ICON = { banco: "landmark", cartao: "credit-card", dinheiro: "banknote", invest: "invest", patrimonio: "car", imovel: "landmark" };
 // descrição de cada tipo de conta (usada nos modais e na ajuda da aba Contas)
 const TIPO_INFO = {
   banco: { label: "Conta / banco", desc: "Conta corrente, poupança, banco digital ou dinheiro em espécie. Saldo = soma dos seus lançamentos." },
   invest: { label: "Investimento", desc: "Corretora/carteira. Só aqui você lança ativos (ações, ETFs, FIIs): a conta passa a separar caixa e o valor a mercado dos ativos, sem precisar lançar valorização à mão." },
   cartao: { label: "Cartão de crédito", desc: "Fatura do cartão (costuma ficar negativa). Na conciliação, o pagamento da fatura vira transferência automática; saldo negativo conta como passivo no patrimônio." },
   patrimonio: { label: "Patrimônio (bem)", desc: "Carro, imóvel, bens. Mostra Valor alocado · Custos · Valor atual. Comprar o bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio." },
+  imovel: { label: "Imóvel de renda", desc: "Imóvel alugado, gerido na aba Imóveis. O total = caixa operacional (aluguéis − despesas) + valor de mercado. Aluguéis e despesas são lançamentos normais desta conta." },
 };
 const tipoHintHTML = (tipo) => `<p class="fld-hint" data-tipo-hint>${(TIPO_INFO[tipo] || TIPO_INFO.banco).desc}</p>`;
 const PAGE = {
   dashboard: ["Visão geral", "Como está seu dinheiro em Julho de 2026"],
   patrimonial: ["Visão patrimonial", "Cockpit · consolidado em BRL"],
+  imoveis: ["Imóveis", "Aluguéis, inquilinos, contratos e rentabilidade"],
   contas: ["Contas", "Saldos e alocações de patrimônio"],
   transacoes: ["Transações", "Receitas, despesas, transferências e reembolsos"],
   conciliacao: ["Conciliação", "Importe o extrato e confirme as sugestões"],
@@ -696,7 +698,7 @@ function patCompAt(ym, L) {
   const parts = { imovel: 0, rf: 0, acao: 0, etf: 0, fii: 0, caixa: 0, outro: 0 };
   const snap = patSnaps().find((x) => x.ym === ym && x.comp);
   if (snap) { Object.keys(parts).forEach((k) => parts[k] = numOr0(snap.comp[k])); return { parts, real: true }; }
-  parts.imovel = accounts.filter((a) => !a.arquivada && a.tipo === "patrimonio").reduce((s, a) => s + Math.max(0, acctTotal(a)), 0);
+  parts.imovel = accounts.filter((a) => !a.arquivada && (a.tipo === "patrimonio" || a.tipo === "imovel")).reduce((s, a) => s + Math.max(0, acctTotal(a)), 0);
   const tkCl = {}; assetMoves.forEach((m) => { const t = String(m.ticker || "").toUpperCase(); if (t) tkCl[t] = m.classe || tkCl[t]; });
   const held = heldAt(null, ym);
   Object.keys(held).forEach((tk) => {
@@ -953,7 +955,7 @@ function patAlloc() {
   let passivos = 0;
   accounts.filter((a) => !a.arquivada).forEach((a) => {
     const t = acctTotal(a);
-    if (a.tipo === "patrimonio") { t >= 0 ? (val.imovel += t) : (passivos += -t); return; }
+    if (a.tipo === "patrimonio" || a.tipo === "imovel") { t >= 0 ? (val.imovel += t) : (passivos += -t); return; }
     if (a.tipo === "invest") {
       if (temAtivos(a)) {
         const cx = carteiraCaixa(a); cx >= 0 ? (val.caixa += cx) : (passivos += -cx);
@@ -1149,7 +1151,7 @@ function viewDashboard() {
   ${edit ? dashEditor() : `<div class="dash-grid">${state.dashOrder.map((k) => DASH_BLOCKS[k].render()).join("")}</div>`}`;
 }
 
-const chipLabel = (t) => (t === "cartao" ? "cartão" : t === "invest" ? "investimento" : t);
+const chipLabel = (t) => (t === "cartao" ? "cartão" : t === "invest" ? "investimento" : t === "imovel" ? "imóvel" : t);
 
 function acctMenuHTML(a) {
   if (state.acctMenu !== a.id) return "";
@@ -1167,6 +1169,12 @@ function acctEditForm(a) {
 function acctCard(a) {
   const kebab = `<button class="acct-kebab" data-acct-menu="${a.id}" title="Opções">${ic("more-vertical", 18)}</button>`;
   const editing = state.acctEdit === a.id;
+  if (a.tipo === "imovel") {
+    const p = imvPropOfAccount(a.id);
+    const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="alloc-lines"><div><span>Valor investido</span><b class="num">${fmt(a.alocado)}</b></div><div><span>Custos/benfeitorias</span><b class="num" style="color:${C.despesa}">${fmt(a.custo)}</b></div></div><div class="alloc-val"><span>Valor atual</span><strong class="num" style="color:${C.patrimonio}">${fmt(acctTotal(a))}</strong></div>`;
+    const drop = p ? unitDrop(p, !!(state.acctUnitsOpen && state.acctUnitsOpen[a.id]), `data-acct-units="${a.id}"`) : "";
+    return `<div class="card acct alloc-card"><div class="acct-top"><span class="acct-ic pat">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip patrimonio">imóvel</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>${drop}`}${acctMenuHTML(a)}</div>`;
+  }
   if (a.grupo === "pat") {
     const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="alloc-lines"><div><span>Valor alocado</span><b class="num">${fmt(a.alocado)}</b></div><div><span>Custos lançados</span><b class="num" style="color:${C.despesa}">${fmt(a.custo)}</b></div></div><div class="alloc-val"><span>Valor atual</span><strong class="num" style="color:${C.patrimonio}">${fmt(a.saldo)}</strong></div>`;
     return `<div class="card acct alloc-card"><div class="acct-top"><span class="acct-ic pat">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip patrimonio">patrimônio</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
@@ -1326,14 +1334,16 @@ function viewContas() {
   const active = accounts.filter((a) => !a.arquivada);
   const fin = active.filter((a) => a.grupo === "fin");
   const pat = active.filter((a) => a.grupo === "pat");
+  const patTotal = pat.reduce((s, a) => s + acctTotal(a), 0);
+  const finTotal = fin.reduce((s, a) => s + acctTotal(a), 0);
   const archived = accounts.filter((a) => a.arquivada);
   const archBlock = archived.length ? `
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:var(--subtle)">Arquivadas</span><p>Ocultas do dia a dia e fora do patrimônio. Reative quando quiser.</p></div></div>
   <div class="archived-list">${archived.map((a) => `<div class="arch-row"><span class="acct-ic small">${ic(acctIconOf(a), 16)}</span><div class="arch-info"><div class="arch-name">${a.nome}</div><div class="acct-sub">${a.sub}</div></div><span class="num arch-saldo">${fmt(acctTotal(a))}</span><button class="mini-btn" data-acct-archive="${a.id}">${ic("archive", 13)} Desarquivar</button></div>`).join("")}</div>` : "";
   return `
-  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar, reordenar ou arquivar.</p></div><button class="mini-btn" data-tipos-help>${ic("book", 13)} Sobre os tipos de conta</button></div>
+  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar, reordenar ou arquivar.</p></div><div class="lead-aside">${fin.length ? `<div class="lead-total"><span>Total</span><strong class="num">${fmt(finTotal)}</strong></div>` : ""}<button class="mini-btn" data-tipos-help>${ic("book", 13)} Sobre os tipos de conta</button></div></div>
   <div class="acct-grid">${fin.map(acctCard).join("")}</div>
-  <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:${C.patrimonio}">Alocações de patrimônio</span><p>Comprar um bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio.</p></div></div>
+  <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:${C.patrimonio}">Alocações de patrimônio</span><p>Comprar um bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio.</p></div>${pat.length ? `<div class="lead-total"><span>Total</span><strong class="num">${fmt(patTotal)}</strong></div>` : ""}</div>
   <div class="acct-grid">${pat.map(acctCard).join("")}<button class="card acct add-acct" data-add-acct>${ic("plus", 22)}<span>Nova conta ou alocação</span></button></div>
   ${archBlock}`;
 }
@@ -1853,7 +1863,7 @@ function viewCategorias() {
     const totals = catTotals(tipo); // total real (todo o histórico) por categoria, das transações
     const tot = (c) => totals[c.nome] || 0;
     const maxT = Math.max(...catTree[tipo].map(tot), 1);
-    const nodes = catTree[tipo].map((c) => `<div class="cat-node"><div class="cat-node-head cn-click" data-cat-detail="${tipo}|${c.nome}"><span class="cn-ic">${ic(catIconOf(c), 15)}</span><span class="cn-name">${c.nome}</span><span class="cn-actions"><button class="cn-btn" data-cat-edit="${tipo}|${c.nome}" title="Editar">${ic("pencil", 13)}</button><button class="cn-btn" data-cat-del="${tipo}|${c.nome}" title="Excluir">${ic("archive", 13)}</button></span><span class="cn-total num" style="color:${tot(c) ? cor : "var(--line-strong)"}">${tot(c) ? fmtShort(tot(c)) : "—"}</span></div><div class="cn-bar"><span style="width:${(tot(c) / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<button class="sub-pill" data-cat-detail="${tipo}|${c.nome}|${s}" title="Ver lançamentos">${s}</button>`).join("")}<button class="sub-add" data-add-sub="${tipo}|${c.nome}">${ic("plus", 11)} subcategoria</button></div></div>`).join("");
+    const nodes = catTree[tipo].map((c) => `<div class="cat-node"><div class="cat-node-head cn-click" data-cat-detail="${tipo}|${c.nome}"><span class="cn-ic">${ic(catIconOf(c), 15)}</span><span class="cn-name">${c.nome}</span><span class="cn-actions"><button class="cn-btn" data-cat-edit="${tipo}|${c.nome}" title="Editar">${ic("pencil", 13)}</button><button class="cn-btn" data-cat-del="${tipo}|${c.nome}" title="Excluir">${ic("archive", 13)}</button></span><span class="cn-total num" style="color:${tot(c) ? cor : "var(--line-strong)"}">${tot(c) ? fmtShort(tot(c)) : "—"}</span></div><div class="cn-bar"><span style="width:${(tot(c) / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<span class="sub-chip"><button class="sub-pill" data-cat-detail="${tipo}|${c.nome}|${s}" title="Ver lançamentos">${s}</button><button class="sub-ed" data-sub-edit="${tipo}|${c.nome}|${s}" title="Editar / mover / excluir">${ic("pencil", 10)}</button></span>`).join("")}<button class="sub-add" data-add-sub="${tipo}|${c.nome}">${ic("plus", 11)} subcategoria</button></div></div>`).join("");
     return `<div class="card cat-col"><div class="cat-col-head" style="border-color:${cor}33"><span class="cat-dot" style="background:${cor}"></span><h3>${titulo}</h3><span class="cat-count">${catTree[tipo].length} categorias</span></div><div class="cat-tree">${nodes}</div><button class="cat-add" style="color:${cor}" data-add-cat="${tipo}">${ic("plus", 14)} Nova categoria de ${tipo === "receita" ? "receita" : "despesa"}</button></div>`;
   }).join("");
   return `<div class="cat-cols">${cols}</div>`;
@@ -2033,6 +2043,11 @@ function viewConfig() {
       ${state.prefs && state.prefs.demo ? `<div class="cfg-demo-note"><div class="cfg-demo-txt">${ic("sparkles", 14)}<span><b>Você está vendo dados de exemplo.</b> Quando quiser começar do zero com os seus números, é só limpar.</span></div><button class="pop-danger sm" data-config-cleardemo>${ic("trash", 14)} Zerar dados de exemplo</button></div>` : ""}
     </div>
     <div class="card cfg-card">
+      <div class="cfg-head"><span class="cfg-ic" style="font-size:16px">🏠</span><h3>Imóveis de renda</h3></div>
+      <p class="cfg-p">Módulo para gerenciar imóveis alugados: contas por imóvel, inquilinos com histórico e documentos, modelos de contrato, vencimentos com avisos e rentabilidade. Ao ativar, aparece a aba <b>Imóveis</b>.</p>
+      <label class="imv-switch"><input type="checkbox" data-imv-enable ${imvEnabled() ? "checked" : ""}><span class="imv-switch-tr"></span><span>${imvEnabled() ? "Módulo ativado" : "Ativar módulo de imóveis"}</span></label>
+    </div>
+    <div class="card cfg-card">
       <div class="cfg-head"><span class="cfg-ic">${ic("sparkles", 17)}</span><h3>Apresentação</h3></div>
       <p class="cfg-p">Refaça o tour guiado pelas principais telas do Meu Caixa quando quiser.</p>
       <button class="ghost" data-tour-start>${ic("play-circle", 15)} Rever apresentação</button>
@@ -2101,7 +2116,7 @@ function commitImport() {
   renderView(); renderModal(); renderPop();
 }
 
-const VIEWS = { dashboard: viewDashboard, patrimonial: viewPatrimonial, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig, admin: viewAdmin };
+const VIEWS = { dashboard: viewDashboard, patrimonial: viewPatrimonial, imoveis: viewImoveis, contas: viewContas, transacoes: viewTransacoes, conciliacao: viewConciliacao, categorias: viewCategorias, historico: viewHistorico, config: viewConfig, admin: viewAdmin };
 
 /* ---------- drill-down do gráfico Receitas × Despesas ---------- */
 function renderDrill() {
@@ -2186,6 +2201,7 @@ function modalHTML() {
       <div class="form2">
         <label class="fld"><span class="fld-label">Descrição</span><input data-field="desc" value="${attr(f.desc)}" placeholder="Ex.: Mercado, cliente X, aporte…"></label>
         <div class="fld-row">${contaField}<label class="fld"><span class="fld-label">Data</span><div class="date-wrap">${ic("calendar", 16)}<input type="date" data-field="data" value="${f.data || TODAY_ISO}"></div><div class="date-quick"><button class="date-chip ${(f.data || TODAY_ISO) === TODAY_ISO ? "on" : ""}" data-date-set="0" type="button">Hoje</button><button class="date-chip ${f.data === isoPlusDays(TODAY_ISO, -1) ? "on" : ""}" data-date-set="-1" type="button">Ontem</button></div></label></div>
+        ${showCat ? imvTxFieldHTML(f) : ""}
       </div>
       <div class="tx-note" style="background:${t.cor}12;color:${t.cor}"><span class="tx-note-ic">${ic("circle-alert", 14)}</span><span>${note}</span></div>
     </div>
@@ -2231,7 +2247,7 @@ let pcDrag = null;
 const freshForm = () => {
   const ativas = accounts.filter((a) => !a.arquivada);
   const c0 = ativas[0] ? ativas[0].nome : "Conta Corrente", c1 = ativas[1] ? ativas[1].nome : c0;
-  return { desc: "", valor: "", cat: "", sub: "", conta: c0, data: TODAY_ISO, origem: c0, destino: c1, reembolso: false };
+  return { desc: "", valor: "", cat: "", sub: "", conta: c0, data: TODAY_ISO, origem: c0, destino: c1, reembolso: false, imovelId: "", unidadeId: "" };
 };
 // opções de conta: só as ativas + a atual (mesmo arquivada) pra não perder a seleção ao editar
 function acctOptions(selected) {
@@ -2269,6 +2285,10 @@ function saveState() { if (window.Store && Store.isAuthed()) Store.saveSnapshot(
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
 
 function renderView() {
+  // módulo de imóveis é opcional (flag em Configurações): esconde a aba e cai no dashboard se desligado
+  const niEl = document.getElementById("nav-imoveis"); if (niEl) niEl.style.display = imvEnabled() ? "" : "none";
+  if (imvEnabled()) { let ch = imvEnsureCategories(); ch = imvLinkOrphanAccounts() || ch; if (ch) scheduleSave(); }
+  if (state.tab === "imoveis" && !imvEnabled()) state.tab = "dashboard";
   document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === state.tab));
   const meta = PAGE[state.tab];
   if (elTitle) elTitle.textContent = meta[0];
@@ -2298,7 +2318,7 @@ function openEditTx(id) {
     desc: t.desc || "", valor: fmtNum(Math.abs(t.valor)),
     cat: t.cat || "", sub: t.sub || "", conta: t.conta || "Conta Corrente",
     data: t.iso || TODAY_ISO, origem: t.origem || "Conta Corrente", destino: t.destino || "Investimentos",
-    reembolso: t.tipo === "reembolso",
+    reembolso: t.tipo === "reembolso", imovelId: t.imovelId || "", unidadeId: t.unidadeId || "",
   };
   state.pop = null; state.modal = true; state.modalRecon = false;
   renderPop(); renderModal();
@@ -2340,6 +2360,7 @@ function saveTx() {
     const list = tipo === "receita" ? catTree.receita : catTree.despesa;
     const catObj = list.find((c) => c.nome === state.form.cat) || list[0];
     tx = { ...base, cat: catObj.nome, sub: state.form.sub || catObj.subs[0], conta: state.form.conta || "Conta Corrente", valor: tipo === "despesa" ? -Math.abs(v) : Math.abs(v) };
+    if (imvEnabled() && state.form.imovelId) { tx.imovelId = state.form.imovelId; if (state.form.unidadeId) tx.unidadeId = state.form.unidadeId; }
   }
   if (orig) applyTxToBalance(orig, -1); // reverte o efeito antigo (edição)
   applyTxToBalance(tx, 1);              // aplica o efeito novo no saldo das contas
@@ -2454,11 +2475,13 @@ function renderPop() {
       ${t.tipo !== "transferencia" ? linha("Conta", t.conta || "—") : ""}
       ${linha("Data", t.iso ? t.iso.split("-").reverse().join("/") : t.data)}
       ${linha("Status", t.status)}`;
-    foot = `<button class="pop-danger" data-tx-del="${t.id}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-tx-edit="${t.id}">${ic("pencil", 15)} Editar</button>`;
+    foot = p.confirmDel
+      ? `<span class="pop-confirm-q">Excluir este lançamento?</span><button class="mini-btn" data-tx-del-cancel>Cancelar</button><button class="pop-danger" data-tx-del-yes="${t.id}">${ic("trash", 15)} Excluir</button>`
+      : `<button class="pop-danger" data-tx-del-ask="${t.id}">${ic("trash", 15)} Excluir</button><button class="mini-btn primary" data-tx-edit="${t.id}">${ic("pencil", 15)} Editar</button>`;
   } else if (p.kind === "acctForm") {
     title = "Nova conta";
     body = `<label class="fld"><span class="fld-label">Nome</span><input data-af="nome" placeholder="Ex.: Conta corrente" autocomplete="off"></label>
-      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-af="tipo"><option value="banco">Conta / banco</option><option value="invest">Investimento</option><option value="cartao">Cartão de crédito</option><option value="patrimonio">Patrimônio (bem)</option></select></label><label class="fld"><span class="fld-label">Saldo inicial</span><input data-af="saldo" inputmode="decimal" placeholder="0,00" autocomplete="off"></label></div>
+      <div class="fld-row"><label class="fld"><span class="fld-label">Tipo</span><select data-af="tipo"><option value="banco">Conta / banco</option><option value="invest">Investimento</option><option value="cartao">Cartão de crédito</option><option value="patrimonio">Patrimônio (bem)</option><option value="imovel">Imóvel de renda</option></select></label><label class="fld"><span class="fld-label">Saldo inicial</span><input data-af="saldo" inputmode="decimal" placeholder="0,00" autocomplete="off"></label></div>
       ${tipoHintHTML("banco")}`;
     foot = `<button class="mini-btn primary" data-acct-form-save>Adicionar conta</button><button class="mini-btn" data-pop-close>Cancelar</button>`;
   } else if (p.kind === "tiposHelp") {
@@ -2488,7 +2511,7 @@ function renderPop() {
     const others = catTree[p.tipo].filter((c) => c.nome !== p.nome);
     title = "Excluir categoria";
     body = others.length
-      ? `<p class="pop-hint">Todos os lançamentos de <b>${p.nome}</b> serão transferidos para outra categoria (transbordo).</p><label class="fld"><span class="fld-label">Transferir tudo para</span><select data-cd="target">${others.map((c) => `<option>${c.nome}</option>`).join("")}</select></label>`
+      ? `<p class="pop-hint">Todos os lançamentos de <b>${p.nome}</b> serão transferidos (transbordo).</p><label class="fld"><span class="fld-label">Transferir para a categoria</span><select data-cd="target">${others.map((c) => `<option>${c.nome}</option>`).join("")}</select></label><label class="fld"><span class="fld-label">Subcategoria</span><select data-cd="target-sub">${subOptionsHTML(p.tipo, others[0].nome, "", null)}</select></label>`
       : `<p class="pop-hint">Crie outra categoria de ${p.tipo} antes — os lançamentos precisam de um destino.</p>`;
     foot = others.length
       ? `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-cat-del-confirm="${p.tipo}|${p.nome}">Excluir e transferir</button>`
@@ -2496,13 +2519,12 @@ function renderPop() {
   } else if (p.kind === "subEdit") {
     title = "Editar subcategoria";
     const seOpts = catTree[p.tipo].map((c) => `<option${c.nome === p.parent ? " selected" : ""}>${c.nome}</option>`).join("");
-    body = `<label class="fld"><span class="fld-label">Nome</span><input data-se="nome" value="${attr(p.sub)}" autocomplete="off"></label><label class="fld"><span class="fld-label">Categoria</span><select data-se="parent">${seOpts}</select></label>`;
+    body = `<label class="fld"><span class="fld-label">Nome</span><input data-se="nome" value="${attr(p.sub)}" autocomplete="off"></label><label class="fld"><span class="fld-label">Categoria (mover para)</span><select data-se="parent">${seOpts}</select></label><p class="pop-hint">Trocar a categoria move a subcategoria — e todos os lançamentos dela — para a categoria escolhida.</p>`;
     foot = `<button class="pop-danger" data-sub-del-ask="${p.tipo}|${p.parent}|${p.sub}">${ic("archive", 15)} Excluir</button><button class="mini-btn primary" data-sub-rename-save>Salvar</button>`;
   } else if (p.kind === "subDelete") {
-    const node = catTree[p.tipo].find((c) => c.nome === p.parent);
-    const others = node ? node.subs.filter((s) => s !== p.sub) : [];
     title = "Excluir subcategoria";
-    body = `<p class="pop-hint">Os lançamentos de <b>${p.sub}</b> (em ${p.parent}) vão para:</p><label class="fld"><span class="fld-label">Transferir para</span><select data-sd="target"><option value="">Sem subcategoria</option>${others.map((s) => `<option>${s}</option>`).join("")}</select></label>`;
+    const catOpts = catTree[p.tipo].map((c) => `<option${c.nome === p.parent ? " selected" : ""}>${c.nome}</option>`).join("");
+    body = `<p class="pop-hint">Os lançamentos de <b>${p.sub}</b> (em ${p.parent}) vão para:</p><label class="fld"><span class="fld-label">Categoria</span><select data-sd="cat">${catOpts}</select></label><label class="fld"><span class="fld-label">Subcategoria</span><select data-sd="target">${subOptionsHTML(p.tipo, p.parent, "", p.sub)}</select></label>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-sub-del-confirm="${p.tipo}|${p.parent}|${p.sub}">Excluir e transferir</button>`;
   } else if (p.kind === "acctEdit") {
     const a = acctById(p.id);
@@ -2659,11 +2681,13 @@ function saveAcctForm() {
   const g = (s) => document.querySelector(`[data-af="${s}"]`);
   const nome = g("nome").value.trim(); if (!nome) { g("nome").focus(); return; }
   const tipo = g("tipo").value, saldo = parseValor(g("saldo").value);
-  const grupo = tipo === "patrimonio" ? "pat" : "fin";
-  const sub = { invest: "Investimento", cartao: "Cartão", patrimonio: "Patrimônio", dinheiro: "Dinheiro", banco: "Conta" }[tipo];
-  const o = { id: "u" + Date.now(), nome, sub, tipo, saldo, grupo, arquivada: false };
+  const grupo = (tipo === "patrimonio" || tipo === "imovel") ? "pat" : "fin";
+  const sub = { invest: "Investimento", cartao: "Cartão", patrimonio: "Patrimônio", imovel: "Imóvel de renda", dinheiro: "Dinheiro", banco: "Conta" }[tipo];
+  const o = { id: (tipo === "imovel" ? "imv" : "u") + Date.now(), nome, sub, tipo, saldo, grupo, arquivada: false };
   if (grupo === "pat") { o.alocado = saldo; o.custo = 0; }
-  accounts.push(o); reindexAccounts(); refreshSideNet(); closePop(); renderView();
+  accounts.push(o); reindexAccounts();
+  if (tipo === "imovel") { imvData().enabled = true; imvLinkOrphanAccounts(); } // conta de imóvel também vira um imóvel no módulo
+  refreshSideNet(); closePop(); renderView();
 }
 // saldo/caixa inicial da conta (abertura) — editar re-baseia o saldo pra fechar mês negativo
 function openAbertura(nome) {
@@ -2958,6 +2982,12 @@ function donutDrill(tipo, cat) { const st = state.donut[tipo]; st.drill = cat; s
 function donutBack(tipo) { const st = state.donut[tipo]; st.drill = null; st.active = null; renderView(); }
 function resetDonuts() { state.donut.despesa.active = state.donut.despesa.drill = null; state.donut.receita.active = state.donut.receita.drill = null; }
 /* editar / excluir categorias e subcategorias (com transbordo) */
+// <option>s de subcategoria de uma categoria (destino de transbordo). excludeSub tira a própria sub sendo excluída.
+function subOptionsHTML(tipo, catName, selected, excludeSub) {
+  const node = catTree[tipo].find((c) => c.nome === catName);
+  const subs = node ? node.subs.filter((s) => s !== excludeSub) : [];
+  return `<option value=""${!selected ? " selected" : ""}>Sem subcategoria</option>` + subs.map((s) => `<option${s === selected ? " selected" : ""}>${_esc(s)}</option>`).join("");
+}
 function openCatEdit(tipo, nome) { const node = catTree[tipo].find((c) => c.nome === nome); state.pop = { kind: "catEdit", tipo, nome, curName: nome, editIcon: catIconOf(node) }; renderPop(); }
 function saveCatRename() {
   const p = state.pop, inp = document.querySelector('[data-ce="nome"]'), nv = inp ? inp.value.trim() : (p.curName || "");
@@ -2976,9 +3006,10 @@ function saveCatRename() {
 function openCatDelete(tipo, nome) { state.pop = { kind: "catDelete", tipo, nome }; renderPop(); }
 function confirmCatDelete(tipo, nome) {
   const sel = document.querySelector('[data-cd="target"]'), tgt = sel ? sel.value : null;
+  const selS = document.querySelector('[data-cd="target-sub"]'), tgtSub = selS ? selS.value : "";
   if (!tgt) return;
   const arr = catTree[tipo], node = arr.find((c) => c.nome === nome), tnode = arr.find((c) => c.nome === tgt);
-  state.tx.forEach((t) => { if (t.cat === nome) { t.cat = tgt; t.sub = ""; } });
+  state.tx.forEach((t) => { if (t.cat === nome) { t.cat = tgt; t.sub = tgtSub; } });
   if (tnode && node) tnode.total = (tnode.total || 0) + (node.total || 0);
   catTree[tipo] = arr.filter((c) => c.nome !== nome);
   if (state.catDetail && state.catDetail.cat === nome) state.catDetail = null;
@@ -3013,10 +3044,12 @@ function saveSubRename() {
 }
 function openSubDelete(tipo, parent, sub) { state.pop = { kind: "subDelete", tipo, parent, sub }; renderPop(); }
 function confirmSubDelete(tipo, parent, sub) {
+  const selC = document.querySelector('[data-sd="cat"]'), tgtCat = selC ? selC.value : parent;
   const sel = document.querySelector('[data-sd="target"]'), tgt = sel ? sel.value : "";
   const node = catTree[tipo].find((c) => c.nome === parent);
-  if (node) { node.subs = node.subs.filter((s) => s !== sub); state.tx.forEach((t) => { if (t.cat === parent && t.sub === sub) t.sub = tgt; }); }
+  if (node) { node.subs = node.subs.filter((s) => s !== sub); state.tx.forEach((t) => { if (t.cat === parent && t.sub === sub) { t.cat = tgtCat; t.sub = tgt; } }); }
   if (state.catDetail && state.catDetail.cat === parent && state.catDetail.sub === sub) state.catDetail = null;
+  resetDonuts();
   closePop(); renderView();
 }
 /* ---------- hover do gráfico de patrimônio ---------- */
@@ -3586,8 +3619,11 @@ function wire() {
     if (e.target.closest("[data-pop-close]")) { closePop(); return; }
     const txo = e.target.closest("[data-tx-open]");
     if (txo) { openTxPop(txo.dataset.txOpen); return; }
-    const txd = e.target.closest("[data-tx-del]");
-    if (txd) { delTx(txd.dataset.txDel); return; }
+    const txda = e.target.closest("[data-tx-del-ask]");
+    if (txda) { if (state.pop && state.pop.kind === "tx") { state.pop.confirmDel = true; renderPop(); } return; }
+    if (e.target.closest("[data-tx-del-cancel]")) { if (state.pop) state.pop.confirmDel = false; renderPop(); return; }
+    const txdy = e.target.closest("[data-tx-del-yes]");
+    if (txdy) { delTx(txdy.dataset.txDelYes); return; }
     const txe = e.target.closest("[data-tx-edit]");
     if (txe) { openEditTx(txe.dataset.txEdit); return; }
     if (e.target.closest("[data-add-acct]")) { openAcctForm(); return; }
@@ -3796,6 +3832,7 @@ function wire() {
     let v = f.value;
     if (f.dataset.field === "valor") { const clean = v.replace(/[^0-9.,]/g, ""); if (clean !== v) f.value = clean; v = clean; }
     state.form[f.dataset.field] = v;
+    if (f.dataset.field === "imovelId") { state.form.unidadeId = ""; renderModal(); return; } // mostra/oculta a unidade
     updateSaveEnabled();
   });
   document.addEventListener("keydown", (e) => {
@@ -3895,6 +3932,12 @@ function wire() {
     // conciliação de ativos: trocar a carteira de destino → re-dedup
     const arMap = e.target.closest("[data-ar-map]");
     if (arMap) { assetReconSetBroker(arMap.dataset.arMap, arMap.value); return; }
+    // excluir categoria: trocar a categoria de destino → repopula as subcategorias
+    const cdTgt = e.target.closest('[data-cd="target"]');
+    if (cdTgt && state.pop) { const ss = document.querySelector('[data-cd="target-sub"]'); if (ss) ss.innerHTML = subOptionsHTML(state.pop.tipo, cdTgt.value, "", null); return; }
+    // excluir subcategoria: trocar a categoria de destino → repopula as subcategorias
+    const sdCat = e.target.closest('[data-sd="cat"]');
+    if (sdCat && state.pop) { const ss = document.querySelector('[data-sd="target"]'); if (ss) ss.innerHTML = subOptionsHTML(state.pop.tipo, sdCat.value, "", sdCat.value === state.pop.parent ? state.pop.sub : null); return; }
   });
   // batimento: a cada tecla guarda o saldo do banco e atualiza SÓ o resultado (não a view toda,
   // senão o input é recriado e perde o foco no meio da digitação)
@@ -4307,4 +4350,5 @@ async function submitSetPass() {
     setTimeout(hideAuth, 1400);
   } catch (e) { if (msgEl) { msgEl.textContent = "Não consegui salvar. Tente novamente."; msgEl.className = "auth-msg err"; } }
 }
+
 document.addEventListener("DOMContentLoaded", init);

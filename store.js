@@ -40,7 +40,8 @@
       rows.transactions.push({
         id: String(t.id), tipo: t.tipo, iso: t.iso || null, descricao: t.desc || null, valor: num(t.valor),
         cat: t.cat || null, sub: t.sub || null, conta: t.conta || null,
-        origem: t.origem || null, destino: t.destino || null, status: t.status || null, deleted: false,
+        origem: t.origem || null, destino: t.destino || null, status: t.status || null,
+        imovel_id: t.imovelId || null, unidade_id: t.unidadeId || null, deleted: false,
       });
     });
     // movimentos de ativos (compra/venda) — a posição/preço-médio é DERIVADA disto no app
@@ -84,6 +85,8 @@
       const o = { id: idFix(t.id), tipo: t.tipo, iso: t.iso || "", data: t.iso ? t.iso.slice(8, 10) + "/" + t.iso.slice(5, 7) : "", desc: t.descricao || "", valor: num(t.valor), status: t.status || "conciliado" };
       if (t.tipo === "transferencia") { o.origem = t.origem || ""; o.destino = t.destino || ""; }
       else { o.cat = t.cat || ""; o.sub = t.sub || ""; o.conta = t.conta || ""; }
+      if (t.imovel_id) o.imovelId = t.imovel_id;
+      if (t.unidade_id) o.unidadeId = t.unidade_id;
       return o;
     });
     const assetMoves = live(rows.asset_moves).map((m) => ({
@@ -184,7 +187,9 @@
   // Bump quando um bug de sync exigir descartar o cache local e re-puxar tudo.
   // v2: correção do limite de 1000 linhas (snapshots antigos vinham truncados/vazios).
   // v3: cache passa a ser por-usuário — limpa qualquer snapshot de outro usuário no mesmo aparelho.
-  const SYNC_VERSION = 3;
+  // v4/v5: feature de imóveis (transações ganham imovel_id/unidade_id; asset_moves; categorias
+  //        de imóvel agrupadas) — força re-puxar tudo pra popular os novos campos no snapshot local.
+  const SYNC_VERSION = 5;
   let sb = null, userId = null, user = null, syncing = false, syncTimer = null;
   // coordenação entre ABAS: cada gravação de snapshot incrementa "snapVersion" no IndexedDB.
   // _snapVer = a versão que ESTA aba viu por último. Se o IndexedDB estiver numa versão MAIOR na
@@ -395,9 +400,26 @@
     return sync();
   }
 
+  // ---- documentos no Supabase Storage (bucket privado 'imovel-docs'; RLS por pasta = user_id) ----
+  // O banco (prefs) guarda só metadados {path,nome,tipo,size}; os bytes ficam no Storage.
+  async function uploadDoc(file) {
+    if (!sb || !userId) throw new Error("sem sessão");
+    const safe = String(file.name || "arquivo").replace(/[^\w.\-]+/g, "_").slice(-80);
+    const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
+    const { error } = await sb.storage.from("imovel-docs").upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+    if (error) throw error;
+    return { path, nome: file.name, tipo: file.type || "", size: file.size || 0 };
+  }
+  async function docSignedUrl(path) {
+    if (!sb) return null;
+    const { data, error } = await sb.storage.from("imovel-docs").createSignedUrl(path, 3600);
+    return error ? null : data.signedUrl;
+  }
+  async function deleteDoc(path) { if (sb) { try { await sb.storage.from("imovel-docs").remove([path]); } catch (e) {} } }
+
   window.Store = {
     init, onAuth, onStale, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, updateName, fetchAudit, isAdmin, adminOverview, signOut,
-    loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed,
+    loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed, uploadDoc, docSignedUrl, deleteDoc,
     get userId() { return userId; },
     get user() { return user; },
     // puros (p/ testes)
