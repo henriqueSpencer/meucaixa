@@ -479,7 +479,7 @@ function imvModalLanc(prefill, propOverride){
   const today=new Date().toISOString().slice(0,10);
   const valInit=pf.valor?String(pf.valor).replace(".",","):"";
   imvOpenModal(`<button class="imv-x big" data-imv-close>×</button><h3>${pf.title||"Novo lançamento"}</h3>
-    <p class="imv-phint">O dinheiro entra/sai de uma conta de verdade; o lançamento fica <b>etiquetado</b> a este imóvel. Tudo cai na categoria <b>${IMV_CAT}</b> (subcategoria abaixo).</p>
+    <div class="imv-catlock"><span class="imv-catlock-ic">🏠</span><div class="imv-catlock-txt"><div class="imv-catlock-cat">Categoria: <b>${IMV_CAT}</b><span class="imv-catlock-badge">🔒 preenchida</span></div><div class="imv-catlock-why">Todo lançamento feito dentro de <b>${imvE(p.nome)}</b> entra nesta categoria — assim os custos e ganhos dos seus imóveis ficam somados num lugar só. Escolha só a subcategoria abaixo.</div></div></div>
     <div class="imv-seg" id="imv_ltipo"><button data-lt="receita" class="${tipo==="receita"?"on":""}">Receita</button><button data-lt="despesa" class="${tipo==="despesa"?"on":""}">Despesa</button></div>
     <div class="imv-f2"><div class="imv-field"><label>Data</label><input type="date" id="imv_ldata" value="${pf.iso||today}"></div><div class="imv-field"><label>Valor (R$)</label><input id="imv_lvalor" inputmode="decimal" placeholder="0,00" value="${valInit}"></div></div>
     <div class="imv-f2"><div class="imv-field"><label>Subcategoria</label><select id="imv_lcat">${subOpts(tipo,pf.sub||pf.cat)}</select></div><div class="imv-field"><label>Conta (dinheiro)</label><select id="imv_lconta">${contaOpts||`<option>Conta Corrente</option>`}</select></div></div>
