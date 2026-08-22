@@ -2016,6 +2016,7 @@ function viewConfig() {
   const nAcc = accounts.filter((a) => !a.arquivada).length;
   const nCat = catTree.receita.length + catTree.despesa.length;
   const nTx = state.tx.length;
+  const nImov = (state.prefs && state.prefs.imoveis && Array.isArray(state.prefs.imoveis.props)) ? state.prefs.imoveis.props.length : 0;
   return `<div class="cfg">
     <div class="card cfg-card">
       <div class="cfg-head"><span class="cfg-ic">${ic("user", 17)}</span><h3>Perfil</h3></div>
@@ -2034,7 +2035,8 @@ function viewConfig() {
     </div>
     <div class="card cfg-card">
       <div class="cfg-head"><span class="cfg-ic">${ic("download", 17)}</span><h3>Seus dados</h3></div>
-      <p class="cfg-p"><b>${nAcc}</b> ${nAcc === 1 ? "conta" : "contas"} · <b>${nCat}</b> categorias · <b>${nTx}</b> ${nTx === 1 ? "lançamento" : "lançamentos"}. O backup em JSON inclui <b>tudo</b>: contas, categorias, lançamentos, investimentos (ativos e proventos) e suas preferências (metas, snapshots, classificações).</p>
+      <p class="cfg-p"><b>${nAcc}</b> ${nAcc === 1 ? "conta" : "contas"} · <b>${nCat}</b> categorias · <b>${nTx}</b> ${nTx === 1 ? "lançamento" : "lançamentos"}${nImov ? ` · <b>${nImov}</b> ${nImov === 1 ? "imóvel" : "imóveis"}` : ""}. O backup em JSON inclui contas, categorias, lançamentos (com as etiquetas de imóvel), investimentos (ativos e proventos), imóveis (inquilinos, histórico, contratos) e suas preferências (metas, snapshots, classificações).</p>
+      <p class="cfg-p cfg-sub">Os <b>arquivos</b> de documentos anexados (RG, contratos…) ficam guardados no armazenamento seguro, não no .json — o backup guarda a referência a eles.</p>
       <div class="cfg-actions">
         <button class="ghost" data-config-export>${ic("download", 15)} Exportar backup (.json)</button>
         <button class="ghost" data-config-import>${ic("upload", 15)} Importar backup</button>
@@ -2098,6 +2100,7 @@ function importBackup(file) {
       nCat: (model.catTree.receita.length + model.catTree.despesa.length),
       nTx: model.tx.length,
       nAsset: Array.isArray(model.assetMoves) ? model.assetMoves.length : 0,
+      nImov: (model.prefs && model.prefs.imoveis && Array.isArray(model.prefs.imoveis.props)) ? model.prefs.imoveis.props.length : 0,
     };
     renderPop();
   };
@@ -2655,7 +2658,7 @@ function renderPop() {
   } else if (p.kind === "confirmImport") {
     title = "Importar backup";
     body = `<p class="confirm-lead">${ic("upload", 18)} Restaurar este backup?</p>
-      <p class="pop-hint">O arquivo tem <b>${p.nAcc} ${p.nAcc === 1 ? "conta" : "contas"}</b> · <b>${p.nCat} categorias</b> · <b>${p.nTx.toLocaleString("pt-BR")} ${p.nTx === 1 ? "lançamento" : "lançamentos"}</b>${p.nAsset ? ` · <b>${p.nAsset} ${p.nAsset === 1 ? "movimento de ativo" : "movimentos de ativos"}</b>` : ""}.</p>
+      <p class="pop-hint">O arquivo tem <b>${p.nAcc} ${p.nAcc === 1 ? "conta" : "contas"}</b> · <b>${p.nCat} categorias</b> · <b>${p.nTx.toLocaleString("pt-BR")} ${p.nTx === 1 ? "lançamento" : "lançamentos"}</b>${p.nAsset ? ` · <b>${p.nAsset} ${p.nAsset === 1 ? "movimento de ativo" : "movimentos de ativos"}</b>` : ""}${p.nImov ? ` · <b>${p.nImov} ${p.nImov === 1 ? "imóvel" : "imóveis"}</b>` : ""}.</p>
       <div class="lock-note">${ic("circle-alert", 14)}<div><b>Substitui todos os seus dados atuais</b> por este backup (sincroniza em todos os aparelhos). Se quiser guardar o que tem hoje, exporte antes.</div></div>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-import-confirm>${ic("upload", 15)} Substituir pelos dados do arquivo</button>`;
   } else if (p.kind === "confirmClearDemo") {
