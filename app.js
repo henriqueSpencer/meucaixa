@@ -1794,13 +1794,13 @@ function viewConciliacao() {
     const curCat = catList.find((c) => c.nome === r.sug.cat);
     const subs = curCat ? curCat.subs : [];
     const sug = !isEdit
-      ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat}${r.sug.sub ? ` <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span>` : ""} <span class="dot">·</span> ${r.sug.conta}</span>`}</div>`
+      ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat}${r.sug.sub ? ` <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span>` : ""} <span class="dot">·</span> ${r.sug.conta}</span>`}${imvReconTag(r.sug)}</div>`
       : `<div class="edit-body">
           <input data-recon-field="desc" value="${attr(r.raw)}" placeholder="Descrição">
           <div class="edit-row"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><input type="date" data-recon-field="data" value="${r.iso || ""}"></div>
           ${r.sug.tipo === "transferencia"
             ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
-            : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>`}
+            : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>${imvReconFieldHTML(r.sug)}`}
         </div>`;
     const match = r.match && !isEdit ? `<div class="recon-match${r.matchId != null ? " click" : ""}"${r.matchId != null ? ` data-tx-open="${r.matchId}"` : ""}>${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b>${r.matchId != null ? ` ${ic("arrow-right", 12)}` : ""}</div>` : "";
     const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
@@ -3084,7 +3084,8 @@ function reconFieldChange(id, field, value) {
   if (field === "destino") { r.sug.destino = value; return; }
   if (field === "desc") { r.raw = value; return; }
   if (field === "data") { r.iso = value; return; }
-  // tipo/cat mudam os selects dependentes → preserva desc/data digitados e re-renderiza
+  if (field === "unidadeId") { r.sug.unidadeId = value; return; }
+  // tipo/cat/imóvel mudam os selects dependentes → preserva desc/data digitados e re-renderiza
   const scope = document.querySelector(`[data-recon-id="${id}"]`);
   if (scope) { const d = scope.querySelector('[data-recon-field="desc"]'); if (d) r.raw = d.value; const dt = scope.querySelector('[data-recon-field="data"]'); if (dt) r.iso = dt.value; }
   if (field === "tipo") {
@@ -3093,6 +3094,7 @@ function reconFieldChange(id, field, value) {
     if (tipoKey !== "transferencia") { const list = catTree[tipoKey === "receita" ? "receita" : "despesa"]; r.sug.cat = list[0] ? list[0].nome : ""; r.sug.sub = ""; }
     else { const ativas = accounts.filter((a) => !a.arquivada); r.sug.origem = r.sug.origem || r.sug.conta || state.reconAccount || (ativas[0] && ativas[0].nome); r.sug.destino = r.sug.destino || (ativas.find((a) => a.nome !== r.sug.origem) || {}).nome || ""; }
   } else if (field === "cat") { r.sug.cat = value; r.sug.sub = ""; }
+  else if (field === "imovelId") { r.sug.imovelId = value; r.sug.unidadeId = ""; } // troca imóvel → some/aparece a unidade
   renderView();
 }
 function reconAccept(id) {
@@ -3103,7 +3105,7 @@ function reconAccept(id) {
     if (scope) {
       const val = (f) => { const el = scope.querySelector(`[data-recon-field="${f}"]`); return el ? el.value : null; };
       const tipoKey = Object.keys(TIPOS).find((k) => TIPOS[k].label === val("tipo")) || r0.sug.tipo;
-      patch = { sug: { ...r0.sug, tipo: tipoKey, cat: val("cat") || r0.sug.cat, sub: val("sub") != null ? val("sub") : r0.sug.sub, conta: val("conta") || r0.sug.conta, origem: val("origem") || r0.sug.origem, destino: val("destino") || r0.sug.destino } };
+      patch = { sug: { ...r0.sug, tipo: tipoKey, cat: val("cat") || r0.sug.cat, sub: val("sub") != null ? val("sub") : r0.sug.sub, conta: val("conta") || r0.sug.conta, origem: val("origem") || r0.sug.origem, destino: val("destino") || r0.sug.destino, imovelId: val("imovelId") != null ? val("imovelId") : r0.sug.imovelId, unidadeId: val("unidadeId") != null ? val("unidadeId") : r0.sug.unidadeId } };
       const desc = val("desc"); if (desc != null && desc.trim()) patch.raw = desc.trim();
       const data = val("data"); if (data) patch.iso = data;
     }
@@ -3516,7 +3518,11 @@ function buildRecon(parsed, account) {
     const match = findReconMatch({ iso: p.iso, valor }, used);
     if (match) { used.add(match.id); status = "ignorado"; } // já existe um lançamento igual → vem marcado com X (reative p/ contar)
     const conf = Math.min((rule ? 85 : 55) + (match ? 12 : 0), 99);
-    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug: { tipo, cat, sub, conta: account }, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado };
+    const sug = { tipo, cat, sub, conta: account };
+    // palpite de imóvel: se a descrição traz o nome do imóvel/inquilino, já pré-preenche (editável)
+    const guess = imvGuessFromText(p.desc, tipo);
+    if (guess) { sug.imovelId = guess.imovelId; if (guess.unidadeId) sug.unidadeId = guess.unidadeId; }
+    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado };
   });
 }
 let _manSeq = 0;
@@ -3542,7 +3548,9 @@ function formToRecon() {
   }
   const signed = tipo === "despesa" ? -Math.abs(v) : Math.abs(v);
   const match = findReconMatch({ iso, valor: signed }, reconUsedIds());
-  return { id, raw, valor: signed, iso, sug: { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount }, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true };
+  const sug = { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount };
+  if (imvEnabled() && state.form.imovelId) { sug.imovelId = state.form.imovelId; if (state.form.unidadeId) sug.unidadeId = state.form.unidadeId; } // leva a etiqueta de imóvel do modal
+  return { id, raw, valor: signed, iso, sug, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true };
 }
 // cria o lançamento de ajuste (plug) do valor exato da diferença com o banco, como item pendente
 // (aceitar/editar/ignorar). Positivo ⇒ receita; negativo ⇒ despesa. Categoria default = a 1ª do tipo
@@ -3567,7 +3575,9 @@ function reconToTx(r) {
   const base = { id: Date.now() + (_txSeq++), data: dataBR(iso), iso, desc: r.raw || TIPOS[tipo].label, tipo, status: "conciliado" };
   if (tipo === "transferencia") return { ...base, origem: r.sug.origem || r.sug.conta, destino: r.sug.destino || "—", valor: Math.abs(r.valor) };
   const list = tipo === "receita" ? catTree.receita : catTree.despesa, catObj = list.find((c) => c.nome === r.sug.cat);
-  return { ...base, cat: r.sug.cat, sub: r.sug.sub || (catObj && catObj.subs[0]) || "", conta: r.sug.conta, valor: tipo === "despesa" ? -Math.abs(r.valor) : Math.abs(r.valor) };
+  const tx = { ...base, cat: r.sug.cat, sub: r.sug.sub || (catObj && catObj.subs[0]) || "", conta: r.sug.conta, valor: tipo === "despesa" ? -Math.abs(r.valor) : Math.abs(r.valor) };
+  if (imvEnabled() && r.sug.imovelId) { tx.imovelId = r.sug.imovelId; if (r.sug.unidadeId) tx.unidadeId = r.sug.unidadeId; } // etiqueta o lançamento ao imóvel
+  return tx;
 }
 function addReconFile(file) {
   state.reconDone = null;

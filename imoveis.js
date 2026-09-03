@@ -114,6 +114,45 @@ function imvTxFieldHTML(f){
     : "";
   return `<div class="fld-row"><label class="fld"><span class="fld-label">Imóvel <span class="lbl-hint">· opcional</span></span><select data-field="imovelId"><option value="">— nenhum —</option>${props.map((p) => `<option value="${p.id}" ${f.imovelId === p.id ? "selected" : ""}>${attr(p.nome)}</option>`).join("")}</select></label>${uni}</div>`;
 }
+// nome de um imóvel/unidade pelo id (usado na conciliação e nos resumos)
+function imvNameOf(id){ if(!imvEnabled()||!id) return ""; const p=imvProps().find((x)=>x.id===id); return p?p.nome:""; }
+function imvUnitNameOf(imovelId,unidadeId){ if(!imvEnabled()||!imovelId||!unidadeId) return ""; const p=imvProps().find((x)=>x.id===imovelId); if(!p) return ""; const u=p.units.find((x)=>x.id===unidadeId); return u?u.nome:""; }
+// mesmo campo "Imóvel (opcional)" do modal, porém para a edição inline da CONCILIAÇÃO
+// (usa data-recon-field e escreve em r.sug — não toca no state.form/renderModal do modal)
+function imvReconFieldHTML(sug){
+  if(!imvEnabled()) return "";
+  if(!sug || (sug.tipo!=="receita" && sug.tipo!=="despesa")) return "";
+  const props = imvProps(); if(!props.length) return "";
+  const sel = props.find((x) => x.id === sug.imovelId);
+  const uni = sel && sel.units.length > 1
+    ? `<select data-recon-field="unidadeId"><option value="">— imóvel todo —</option>${sel.units.map((u) => `<option value="${u.id}" ${sug.unidadeId === u.id ? "selected" : ""}>${attr(u.nome)}</option>`).join("")}</select>`
+    : "";
+  return `<div class="edit-row"><select data-recon-field="imovelId"><option value="">🏠 — sem imóvel —</option>${props.map((p) => `<option value="${p.id}" ${sug.imovelId === p.id ? "selected" : ""}>${attr(p.nome)}</option>`).join("")}</select>${uni}</div>`;
+}
+// tag "🏠 imóvel · unidade" para o resumo colapsado do item de conciliação
+function imvReconTag(sug){
+  if(!imvEnabled()||!sug||!sug.imovelId) return "";
+  const nome = imvNameOf(sug.imovelId); if(!nome) return "";
+  const uni = imvUnitNameOf(sug.imovelId, sug.unidadeId);
+  return `<span class="sug-imv">🏠 ${_esc(nome)}${uni?` · ${_esc(uni)}`:""}</span>`;
+}
+// palpite de imóvel a partir do texto do extrato (nome do imóvel ou do inquilino aparece na descrição)
+function imvGuessFromText(text, tipo){
+  if(!imvEnabled() || (tipo!=="receita" && tipo!=="despesa")) return null;
+  const norm = (s)=> (s||"").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const hay = norm(text); if(hay.length<4) return null;
+  for(const p of imvProps()){
+    // 1) nome de inquilino de alguma unidade (o mais forte — PIX de aluguel costuma trazer o nome)
+    for(const u of p.units){
+      const inq = u.inquilino && u.inquilino.nome ? norm(u.inquilino.nome) : "";
+      if(inq && inq.length>=5 && hay.includes(inq)) return { imovelId:p.id, unidadeId:(p.units.length>1?u.id:"") };
+    }
+    // 2) nome do imóvel
+    const pn = norm(p.nome);
+    if(pn.length>=5 && hay.includes(pn)) return { imovelId:p.id, unidadeId:"" };
+  }
+  return null;
+}
 // linhas de unidade (usadas no dropdown das abas Contas e Imóveis)
 function imvUnitRows(p){
   const moradia = imvIsMoradia(p);
