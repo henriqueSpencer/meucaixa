@@ -1800,7 +1800,7 @@ function viewConciliacao() {
           <div class="edit-row"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><input type="date" data-recon-field="data" value="${r.iso || ""}"></div>
           ${r.sug.tipo === "transferencia"
             ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
-            : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>${imvReconFieldHTML(r.sug)}`}
+            : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>${imvReconFieldHTML(r.sug)}<button class="sp-open-btn" data-recon-split="${r.id}" title="Ex.: um PIX que junta dois aluguéis">✂ Dividir em vários lançamentos</button>`}
         </div>`;
     const match = r.match && !isEdit ? `<div class="recon-match${r.matchId != null ? " click" : ""}"${r.matchId != null ? ` data-tx-open="${r.matchId}"` : ""}>${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b>${r.matchId != null ? ` ${ic("arrow-right", 12)}` : ""}</div>` : "";
     const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
@@ -2666,15 +2666,31 @@ function renderPop() {
     body = `<p class="confirm-lead">${ic("trash", 18)} Começar do zero?</p>
       <p class="pop-hint">Remove todas as contas e lançamentos <b>de exemplo</b> e deixa um começo limpo: duas contas zeradas (Conta Corrente e Carteira) e as categorias padrão, prontas pra você lançar os <b>seus</b> números.</p>`;
     foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="pop-danger" data-clear-demo-confirm>${ic("trash", 15)} Zerar e começar</button>`;
+  } else if (p.kind === "reconSplit") {
+    title = "Dividir em vários lançamentos";
+    const catList = p.tipo === "receita" ? catTree.receita : catTree.despesa;
+    const partsHTML = p.parts.map((part, idx) => {
+      const cur = catList.find((c) => c.nome === part.cat);
+      const subs = cur ? cur.subs : [];
+      return `<div class="sp-part"><div class="sp-part-head"><span>Parte ${idx + 1}</span>${p.parts.length > 2 ? `<button class="sp-del" data-sp-del="${idx}" title="Remover">${ic("x", 13)}</button>` : ""}</div>
+        <div class="sp-row"><div class="sp-val-wrap"><span>R$</span><input data-sp="${idx}|valor" value="${attr(part.valor)}" inputmode="decimal" placeholder="0,00"></div><select data-sp="${idx}|conta">${acctOptions(part.conta)}</select></div>
+        <div class="sp-row"><select data-sp="${idx}|cat">${catList.map((c) => `<option ${c.nome === part.cat ? "selected" : ""}>${_esc(c.nome)}</option>`).join("")}</select><select data-sp="${idx}|sub">${["", ...subs].map((s) => `<option value="${attr(s)}" ${s === (part.sub || "") ? "selected" : ""}>${s ? _esc(s) : "— sem subcategoria —"}</option>`).join("")}</select></div>
+        ${imvSplitFieldHTML(idx, part)}</div>`;
+    }).join("");
+    body = `<div class="sp-orig">Dividindo <b>${_esc(p.raw || "lançamento")}</b> · <b class="num">${fmtNum(p.total)}</b></div>
+      <div class="sp-parts">${partsHTML}</div>
+      <button class="sp-add" data-sp-add>${ic("plus", 14)} Adicionar parte</button>
+      <div data-sp-sum>${reconSplitSumHTML()}</div>`;
+    foot = `<button class="mini-btn" data-pop-close>Cancelar</button><button class="mini-btn primary" data-sp-commit ${reconSplitSumInfo().ok ? "" : "disabled"}>${ic("check", 15)} Dividir</button>`;
   } else if (p.kind === "importErr") {
     title = "Importar backup";
     body = `<p class="confirm-lead">${ic("circle-alert", 18)} Não consegui ler este arquivo.</p>
       <p class="pop-hint">Escolha um arquivo <b>.json</b> exportado pelo próprio Meu Caixa (botão “Exportar backup”). Ele precisa ter contas, categorias e lançamentos.</p>`;
     foot = `<button class="mini-btn primary" data-pop-close>Entendi</button>`;
   }
-  const wide = p.kind === "assetImport" ? " wide" : "";
+  const wide = (p.kind === "assetImport" || p.kind === "reconSplit") ? " wide" : "";
   el.innerHTML = `<div class="overlay" id="pop-overlay"><div class="modal pop-modal${wide}"><div class="modal-head"><h3>${title}</h3><button class="x" data-pop-close>${ic("x", 18)}</button></div><div class="pop-body">${body}</div>${foot ? `<div class="pop-foot">${foot}</div>` : ""}</div></div>`;
-  if (p.kind !== "assetImport") { const first = el.querySelector("input"); if (first) first.focus(); }
+  if (p.kind !== "assetImport" && p.kind !== "reconSplit") { const first = el.querySelector("input"); if (first) first.focus(); }
 }
 function closePop() { state.pop = null; renderPop(); }
 function openTxPop(id) { state.pop = { kind: "tx", id: String(id) }; renderPop(); }
@@ -3145,6 +3161,73 @@ function reconCommit() {
   renderView();
 }
 function reconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
+
+/* ---------- dividir um item da conciliação em vários lançamentos ----------
+   ex.: um PIX de 1950 que junta o aluguel de dois imóveis. Cada parte vira um item de conciliação
+   independente (mesmo tipo do original), com seu valor/categoria/imóvel. A soma tem que bater. */
+const _brVal = (v) => (Math.round(numOr0(v) * 100) / 100).toFixed(2).replace(".", ",");
+function openReconSplit(id) {
+  const r = state.recon.find((x) => String(x.id) === String(id)); if (!r) return;
+  if (r.sug.tipo === "transferencia") return; // transferência não se divide em categorias
+  const total = Math.round(Math.abs(numOr0(r.valor)) * 100) / 100;
+  const half = Math.round(total / 2 * 100) / 100;
+  const mk = (v) => ({ valor: _brVal(v), cat: r.sug.cat, sub: r.sug.sub || "", conta: r.sug.conta || state.reconAccount, imovelId: r.sug.imovelId || "", unidadeId: r.sug.unidadeId || "" });
+  state.pop = { kind: "reconSplit", id: String(id), tipo: r.sug.tipo, total, raw: r.raw, iso: r.iso, parts: [mk(half), mk(Math.round((total - half) * 100) / 100)] };
+  state.editing = null; renderPop();
+}
+function reconSplitParts() { return (state.pop && state.pop.kind === "reconSplit") ? state.pop.parts : []; }
+function reconSplitSumInfo() {
+  const p = state.pop; const sum = Math.round(p.parts.reduce((s, x) => s + parseValor(x.valor), 0) * 100) / 100;
+  const diff = Math.round((p.total - sum) * 100) / 100;
+  return { sum, diff, ok: Math.abs(diff) < 0.005 && p.parts.filter((x) => parseValor(x.valor) > 0).length >= 2 };
+}
+function reconSplitSumHTML() {
+  const { sum, diff, ok } = reconSplitSumInfo();
+  const msg = ok ? `${ic("check", 14)} bate certinho` : (diff > 0 ? `faltam ${fmtNum(diff)}` : `sobram ${fmtNum(-diff)}`);
+  return `<div class="sp-sum ${ok ? "ok" : "off"}"><span>Soma das partes: <b class="num">${fmtNum(sum)}</b> de ${fmtNum(state.pop.total)}</span><span class="sp-sum-msg">${msg}</span></div>`;
+}
+function reconSplitRefresh() { // atualiza só a barra de soma + o estado do botão (preserva foco nos inputs)
+  const box = document.querySelector("[data-sp-sum]"); if (box) box.innerHTML = reconSplitSumHTML();
+  const btn = document.querySelector("[data-sp-commit]"); if (btn) btn.disabled = !reconSplitSumInfo().ok;
+}
+function reconSplitField(idx, field, value) {
+  const p = state.pop; if (!p || p.kind !== "reconSplit") return;
+  const part = p.parts[idx]; if (!part) return;
+  part[field] = value;
+  if (field === "cat") part.sub = "";
+  if (field === "imovelId") part.unidadeId = "";
+  if (field === "valor") { reconSplitRefresh(); return; } // não re-renderiza → não perde o foco/cursor
+  if (field === "sub" || field === "conta" || field === "unidadeId") return; // sem selects dependentes
+  renderPop(); // cat/imovelId mudam selects dependentes
+}
+function reconSplitAddPart() {
+  const p = state.pop; if (!p || p.kind !== "reconSplit") return;
+  const { diff } = reconSplitSumInfo();
+  const base = p.parts[p.parts.length - 1] || {};
+  p.parts.push({ valor: diff > 0 ? _brVal(diff) : "0,00", cat: base.cat || "", sub: "", conta: base.conta || state.reconAccount, imovelId: "", unidadeId: "" });
+  renderPop();
+}
+function reconSplitDelPart(idx) {
+  const p = state.pop; if (!p || p.kind !== "reconSplit" || p.parts.length <= 2) return;
+  p.parts.splice(idx, 1); renderPop();
+}
+function reconSplitCommit() {
+  const p = state.pop; if (!p || p.kind !== "reconSplit") return;
+  if (!reconSplitSumInfo().ok) return; // botão já fica desabilitado, mas garante
+  const isDesp = p.tipo === "despesa";
+  const parts = p.parts.filter((x) => parseValor(x.valor) > 0);
+  const items = parts.map((x, i) => {
+    const v = parseValor(x.valor), signed = isDesp ? -v : v;
+    const sug = { tipo: p.tipo, cat: x.cat, sub: x.sub, conta: x.conta || state.reconAccount };
+    if (imvEnabled() && x.imovelId) { sug.imovelId = x.imovelId; if (x.unidadeId) sug.unidadeId = x.unidadeId; }
+    const imvTxt = (imvEnabled() && x.imovelId) ? " · " + imvNameOf(x.imovelId) : ` · parte ${i + 1}/${parts.length}`;
+    const match = findReconMatch({ iso: p.iso, valor: signed }, reconUsedIds());
+    return { id: "sp" + (_manSeq++), raw: (p.raw || "Lançamento") + imvTxt, valor: signed, iso: p.iso, sug, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true, split: true };
+  });
+  const at = state.recon.findIndex((r) => String(r.id) === String(p.id));
+  if (at >= 0) state.recon.splice(at, 1, ...items); else state.recon.unshift(...items);
+  state.pop = null; state.editing = null; renderView();
+}
 
 /* ---------- motor de conciliação (lê OFX/CSV, sugere, casa duplicatas) ---------- */
 let _txSeq = 0;
@@ -3849,12 +3932,21 @@ function wire() {
     if (e.target.closest("[data-recon-done-x]")) { state.reconDone = null; renderView(); return; }
     if (e.target.closest("[data-recon-add]")) { openReconAdd(); return; }
     if (e.target.closest("[data-recon-plug]")) { reconPlug(); return; }
+    const rsp = e.target.closest("[data-recon-split]");
+    if (rsp) { openReconSplit(rsp.dataset.reconSplit); return; }
+    if (e.target.closest("[data-sp-add]")) { reconSplitAddPart(); return; }
+    const spd = e.target.closest("[data-sp-del]");
+    if (spd) { reconSplitDelPart(+spd.dataset.spDel); return; }
+    if (e.target.closest("[data-sp-commit]")) { reconSplitCommit(); return; }
     const act = e.target.closest("[data-action]");
     if (act && ACTIONS[act.dataset.action]) { ACTIONS[act.dataset.action](); return; }
     // clique fora fecha o menu de conta aberto
     if (state.acctMenu && !e.target.closest(".acct-menu")) { state.acctMenu = null; renderView(); }
   });
   document.addEventListener("input", (e) => {
+    // editor de divisão: valor de uma parte (só recalcula a soma, sem re-render → mantém o foco)
+    const sp = e.target.closest("[data-sp]");
+    if (sp) { const [idx, field] = sp.dataset.sp.split("|"); if (field === "valor") { const clean = sp.value.replace(/[^0-9.,]/g, ""); if (clean !== sp.value) sp.value = clean; reconSplitField(+idx, "valor", clean); } return; }
     const f = e.target.closest("[data-field]");
     if (!f) return;
     let v = f.value;
@@ -3945,6 +4037,9 @@ function wire() {
     if (ia) { state.reconAccount = ia.value; return; } // mantém a conta escolhida ao re-renderizar
     const rf = e.target.closest("[data-recon-field]");
     if (rf) { const card = rf.closest("[data-recon-id]"); if (card) reconFieldChange(card.dataset.reconId, rf.dataset.reconField, rf.value); }
+    // editor de divisão: selects de uma parte (cat/sub/conta/imóvel/unidade)
+    const sp = e.target.closest("[data-sp]");
+    if (sp) { const [idx, field] = sp.dataset.sp.split("|"); if (field !== "valor") reconSplitField(+idx, field, sp.value); return; }
     // seletor de tipo de conta (nova conta / editar): atualiza só a descrição, sem re-render
     const ts = e.target.closest('[data-af="tipo"], [data-ae="tipo"]');
     if (ts) { const h = document.querySelector("[data-tipo-hint]"); if (h) h.textContent = (TIPO_INFO[ts.value] || TIPO_INFO.banco).desc; }

@@ -134,6 +134,16 @@ function imvReconFieldHTML(sug){
     : "";
   return `<div class="edit-row"><select data-recon-field="imovelId"><option value="">🏠 — sem imóvel —</option>${props.map((p) => `<option value="${p.id}" ${sug.imovelId === p.id ? "selected" : ""}>${attr(p.nome)}</option>`).join("")}</select>${uni}</div>`;
 }
+// campo imóvel+unidade para o editor de DIVISÃO de item (usa data-sp="<idx>|imovelId" etc.)
+function imvSplitFieldHTML(idx, part){
+  if(!imvEnabled()) return "";
+  const props = imvProps(); if(!props.length) return "";
+  const sel = props.find((x) => x.id === part.imovelId);
+  const uni = sel && sel.units.length > 1
+    ? `<select data-sp="${idx}|unidadeId"><option value="">— imóvel todo —</option>${sel.units.map((u) => `<option value="${u.id}" ${part.unidadeId === u.id ? "selected" : ""}>${attr(imvUnitLabel(u))}</option>`).join("")}</select>`
+    : "";
+  return `<div class="sp-row"><select data-sp="${idx}|imovelId"><option value="">🏠 — sem imóvel —</option>${props.map((p) => `<option value="${p.id}" ${part.imovelId === p.id ? "selected" : ""}>${attr(p.nome)}</option>`).join("")}</select>${uni}</div>`;
+}
 // tag "🏠 imóvel · unidade" para o resumo colapsado do item de conciliação
 function imvReconTag(sug){
   if(!imvEnabled()||!sug||!sug.imovelId) return "";
