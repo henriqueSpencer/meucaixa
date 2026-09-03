@@ -3621,9 +3621,9 @@ function buildRecon(parsed, account) {
       if (pm) used.add(pm.id);
       return { id: "imp" + idx, raw: p.desc, valor: Math.abs(p.valor), iso: p.iso, sug: { tipo: "transferencia", origem: origemPad, destino: account }, conf: 90, match: pm ? `${pm.desc} · ${pm.data}` : null, matchId: pm ? pm.id : null, status: pm ? "ignorado" : "pendente", note: "Pagamento de fatura — transferência, não entra no orçamento (confira a conta de origem)" };
     }
-    // parcelas: no extrato de banco a compra "1/N" aparece uma vez e a gente lança o valor cheio na 1ª.
-    // Na FATURA DE CARTÃO cada parcela já é a cobrança daquele mês (valor de face) — não multiplica nem pula.
-    const inst = (acc && acc.tipo === "cartao") ? null : parseInstallment(p.desc);
+    // parcelas: "1/N" lança o valor CHEIO na 1ª parcela (×N) e as seguintes (n>1) vêm ignoradas —
+    // vale tanto pro extrato de banco quanto pra fatura de cartão (a compra é registrada por inteiro na 1ª).
+    const inst = parseInstallment(p.desc);
     let valor = p.valor * flip, status = "pendente", note = null, pulado = false;
     if (inst) {
       if (inst.n === 1) { valor = valor * inst.m; note = `Parcela 1/${inst.m} — importando o valor cheio (${inst.m}×)`; }
