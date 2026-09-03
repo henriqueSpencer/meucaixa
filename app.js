@@ -3527,7 +3527,16 @@ function buildRecon(parsed, account) {
     const sug = { tipo, cat, sub, conta: account };
     // palpite de imóvel: se a descrição traz o nome do imóvel/inquilino, já pré-preenche (editável)
     const guess = imvGuessFromText(p.desc, tipo);
-    if (guess) { sug.imovelId = guess.imovelId; if (guess.unidadeId) sug.unidadeId = guess.unidadeId; }
+    if (guess) {
+      sug.imovelId = guess.imovelId; if (guess.unidadeId) sug.unidadeId = guess.unidadeId;
+      // casou um imóvel → é lançamento de imóvel de renda: força a categoria certa (senão cairia na 1ª
+      // categoria/regra genérica). Receita de inquilino ⇒ "Aluguel"; despesa do imóvel ⇒ "Outros".
+      if (typeof IMV_CAT !== "undefined" && catExists(tipo, IMV_CAT)) {
+        sug.cat = IMV_CAT;
+        const subs = imvSubsFor(tipo), want = tipo === "receita" ? "Aluguel" : "Outros";
+        sug.sub = subs.includes(want) ? want : (subs.find((s) => s !== IMV_CAT) || "");
+      }
+    }
     return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado };
   });
 }

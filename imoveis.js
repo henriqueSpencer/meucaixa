@@ -110,13 +110,18 @@ function imvTxFieldHTML(f){
   const props = imvProps(); if(!props.length) return "";
   const sel = props.find((x) => x.id === f.imovelId);
   const uni = sel && sel.units.length > 1
-    ? `<label class="fld"><span class="fld-label">Unidade</span><select data-field="unidadeId"><option value="">— imóvel todo —</option>${sel.units.map((u) => `<option value="${u.id}" ${f.unidadeId === u.id ? "selected" : ""}>${attr(u.nome)}</option>`).join("")}</select></label>`
+    ? `<label class="fld"><span class="fld-label">Unidade</span><select data-field="unidadeId"><option value="">— imóvel todo —</option>${sel.units.map((u) => `<option value="${u.id}" ${f.unidadeId === u.id ? "selected" : ""}>${attr(imvUnitLabel(u))}</option>`).join("")}</select></label>`
     : "";
   return `<div class="fld-row"><label class="fld"><span class="fld-label">Imóvel <span class="lbl-hint">· opcional</span></span><select data-field="imovelId"><option value="">— nenhum —</option>${props.map((p) => `<option value="${p.id}" ${f.imovelId === p.id ? "selected" : ""}>${attr(p.nome)}</option>`).join("")}</select></label>${uni}</div>`;
 }
 // nome de um imóvel/unidade pelo id (usado na conciliação e nos resumos)
 function imvNameOf(id){ if(!imvEnabled()||!id) return ""; const p=imvProps().find((x)=>x.id===id); return p?p.nome:""; }
-function imvUnitNameOf(imovelId,unidadeId){ if(!imvEnabled()||!imovelId||!unidadeId) return ""; const p=imvProps().find((x)=>x.id===imovelId); if(!p) return ""; const u=p.units.find((x)=>x.id===unidadeId); return u?u.nome:""; }
+// nome do inquilino ATUAL da unidade (só quando alugada); "" se vaga/própria
+function imvCurTenantName(u){ return u && u.status==="alugado" && u.inquilino && u.inquilino.nome ? u.inquilino.nome : ""; }
+// rótulo da unidade = "Nome - Inquilino atual" (ex.: "Kitnet 01 - João Paulo") p/ facilitar a identificação
+// em dropdowns, listas e tags. Sem inquilino → só o nome.
+function imvUnitLabel(u){ const t=imvCurTenantName(u); return t ? `${u.nome} - ${t}` : u.nome; }
+function imvUnitNameOf(imovelId,unidadeId){ if(!imvEnabled()||!imovelId||!unidadeId) return ""; const p=imvProps().find((x)=>x.id===imovelId); if(!p) return ""; const u=p.units.find((x)=>x.id===unidadeId); return u?imvUnitLabel(u):""; }
 // mesmo campo "Imóvel (opcional)" do modal, porém para a edição inline da CONCILIAÇÃO
 // (usa data-recon-field e escreve em r.sug — não toca no state.form/renderModal do modal)
 function imvReconFieldHTML(sug){
@@ -125,7 +130,7 @@ function imvReconFieldHTML(sug){
   const props = imvProps(); if(!props.length) return "";
   const sel = props.find((x) => x.id === sug.imovelId);
   const uni = sel && sel.units.length > 1
-    ? `<select data-recon-field="unidadeId"><option value="">— imóvel todo —</option>${sel.units.map((u) => `<option value="${u.id}" ${sug.unidadeId === u.id ? "selected" : ""}>${attr(u.nome)}</option>`).join("")}</select>`
+    ? `<select data-recon-field="unidadeId"><option value="">— imóvel todo —</option>${sel.units.map((u) => `<option value="${u.id}" ${sug.unidadeId === u.id ? "selected" : ""}>${attr(imvUnitLabel(u))}</option>`).join("")}</select>`
     : "";
   return `<div class="edit-row"><select data-recon-field="imovelId"><option value="">🏠 — sem imóvel —</option>${props.map((p) => `<option value="${p.id}" ${sug.imovelId === p.id ? "selected" : ""}>${attr(p.nome)}</option>`).join("")}</select>${uni}</div>`;
 }
@@ -368,8 +373,8 @@ function imvViewPropDetail(){
     if(moradia)return `<div class="imv-unit"><div class="imv-badge" style="color:var(--pos)">${u.icon||'🏠'}</div><div class="imv-umain click" data-imv-edit-unit="${u.id}" title="Editar unidade"><div class="un">${imvE(u.nome)}</div><div class="us">${imvE(u.area||"")} · ocupado pelo proprietário</div></div><div class="imv-row"><button class="imv-btn sm" data-imv-edit-unit="${u.id}">Editar</button></div></div>`;
     const occ=u.status==="alugado"; const diff=u.aluguelEsperado?(u.aluguelReal-u.aluguelEsperado):0; const st=imvRentStatus(p,u); const pend=st&&st.kind!=="pago";
     return `<div class="imv-unit"><div class="imv-badge">${u.icon||(occ?'🔑':'—')}</div>
-      <div class="imv-umain click" data-imv-unit-detail="${u.id}" title="Abrir unidade"><div class="un">${imvE(u.nome)} ${occ?'':'<span class="imv-pill neg">vago</span>'}</div>
-      <div class="us">${imvE(u.area||"")}${u.quartos?' · '+u.quartos+' dorm.':''} ${occ?'· '+imvE(u.inquilino.nome)+' · vence dia '+st.dueDay:''}</div>${occ?`<div style="margin-top:6px">${imvRentPill(st)}</div>`:''}</div>
+      <div class="imv-umain click" data-imv-unit-detail="${u.id}" title="Abrir unidade"><div class="un">${imvE(imvUnitLabel(u))} ${occ?'':'<span class="imv-pill neg">vago</span>'}</div>
+      <div class="us">${imvE(u.area||"")}${u.quartos?' · '+u.quartos+' dorm.':''}${occ?' · vence dia '+st.dueDay:''}</div>${occ?`<div style="margin-top:6px">${imvRentPill(st)}</div>`:''}</div>
       <div class="imv-urent"><div class="big">${occ?imvFmt(u.aluguelReal):'—'}</div><div class="sm">esperado ${imvFmt(u.aluguelEsperado)}${diff<0?' · <span class="neg">-'+imvFmt(-diff)+'</span>':''}</div></div>
       <div class="imv-row">${pend?`<button class="imv-btn primary sm" data-imv-pay="${p.id}|${u.id}">Registrar pagamento</button>`:''}<button class="imv-btn sm" data-imv-unit-detail="${u.id}">👤 Inquilino${u.historico&&u.historico.length?` · ${u.historico.length} hist.`:''}</button>${occ?`<button class="imv-btn sm" data-imv-contract-unit="${u.id}">Contrato</button>`:`<button class="imv-btn primary sm" data-imv-edit-unit="${u.id}">Alugar</button>`}</div></div>`;
   }).join("");
@@ -413,7 +418,7 @@ function imvViewUnitDetail(){
       ${h.obs?`<div class="imv-divlabel">Observações</div><p class="imv-phint">${imvE(h.obs)}</p>`:''}
       <div class="imv-divlabel">Documentos</div><label class="imv-docup"><input type="file" data-imv-doc-up="h${i}" multiple style="display:none">📎 Anexar documento deste inquilino</label>${imvDocList(h.docs,"h"+i)}</div>`:''}</div>`; }).join(""):`<div class="imv-empty">Nenhum inquilino anterior.</div>`;
   return `<button class="imv-back" data-imv-unit-back="${propId}">← ${imvE(p.nome)}</button>
-    <div class="imv-head"><div><div class="imv-eyebrow">${imvE(p.nome)}${u.area&&u.area!=='—'?' · '+imvE(u.area):''}${u.quartos?' · '+u.quartos+' dorm.':''}</div><h1>${imvE(u.nome)}</h1><p>${occ?'Inquilino atual, observações, documentos e histórico.':'Unidade vaga — histórico preservado abaixo.'}</p></div><div class="imv-row"><button class="imv-btn" data-imv-edit-unit="${u.id}">✏ Editar unidade</button></div></div>
+    <div class="imv-head"><div><div class="imv-eyebrow">${imvE(p.nome)}${u.area&&u.area!=='—'?' · '+imvE(u.area):''}${u.quartos?' · '+u.quartos+' dorm.':''}</div><h1>${imvE(imvUnitLabel(u))}</h1><p>${occ?'Inquilino atual, observações, documentos e histórico.':'Unidade vaga — histórico preservado abaixo.'}</p></div><div class="imv-row"><button class="imv-btn" data-imv-edit-unit="${u.id}">✏ Editar unidade</button></div></div>
     <div class="imv-panel"><h2>Inquilino atual</h2>${cur}</div>
     <div class="imv-panel" style="margin-top:16px"><h2>Documentos da unidade</h2><p class="imv-phint">Vistoria/laudo, planta, manuais, cópia de chave — específicos desta unidade (independem do inquilino).</p><label class="imv-docup"><input type="file" data-imv-doc-up="unit" multiple style="display:none">📎 Anexar documento da unidade</label>${imvDocList(u.docs,"unit")}</div>
     <div class="imv-panel" style="margin-top:16px"><div class="imv-panel-head"><h2>Histórico de inquilinos</h2><button class="imv-btn sm" data-imv-hist-add>＋ Adicionar ao histórico</button></div><p class="imv-phint">Quem já ocupou esta unidade — clique para ver/editar, anexar documentos e anotações.</p>${hist}</div>`;
@@ -440,7 +445,7 @@ function imvViewContratos(){
   if(imvProps().filter(p=>!imvIsMoradia(p)).length===0) return `<div class="imv-head"><div><h1>Modelos de contrato</h1></div></div><div class="imv-empty">Cadastre um imóvel de aluguel para gerar contratos.</div>`;
   if(!ui.tplPropId){ const first=imvProps().find(p=>!imvIsMoradia(p)); if(first){ui.tplPropId=first.id; ui.tplUnitId=first.units[0].id; imvPrefillTenant();} }
   const tplCards=Object.entries(IMV_TPL).map(([k,tp])=>`<div class="imv-tpl ${ui.tpl===k?'on':''}" data-imv-tpl="${k}"><div class="ti">${tp.icon}</div><h4>${tp.nome}</h4><p>${tp.desc}</p></div>`).join("");
-  const unitOptions=[]; imvProps().filter(p=>!imvIsMoradia(p)).forEach(p=>p.units.forEach(u=>unitOptions.push(`<option value="${p.id}|${u.id}" ${ui.tplPropId===p.id&&ui.tplUnitId===u.id?'selected':''}>${imvE(p.nome)} — ${imvE(u.nome)}</option>`)));
+  const unitOptions=[]; imvProps().filter(p=>!imvIsMoradia(p)).forEach(p=>p.units.forEach(u=>unitOptions.push(`<option value="${p.id}|${u.id}" ${ui.tplPropId===p.id&&ui.tplUnitId===u.id?'selected':''}>${imvE(p.nome)} — ${imvE(imvUnitLabel(u))}</option>`)));
   const T=ui.tenant,C=ui.contract,O=imvOwner();
   return `<div class="imv-head"><div><h1>Modelos de contrato</h1><p>Escolha o modelo, o imóvel e o inquilino. Seus dados de locador já vêm preenchidos. Gera formatado, pronto para imprimir/PDF.</p></div></div>
     <div class="imv-tplgrid">${tplCards}</div>
@@ -518,7 +523,7 @@ function imvModalLanc(prefill, propOverride){
   const pf=prefill||{};
   let tipo = pf.tipo || "receita";
   const subOpts=(tp,sel)=>imvSubsFor(tp).map(s=>`<option ${s===sel?"selected":""}>${imvE(s)}</option>`).join("");
-  const unitOpts=`<option value="">— imóvel todo —</option>`+p.units.map(u=>`<option value="${u.id}" ${pf.unitId===u.id?"selected":""}>${imvE(u.nome)}</option>`).join("");
+  const unitOpts=`<option value="">— imóvel todo —</option>`+p.units.map(u=>`<option value="${u.id}" ${pf.unitId===u.id?"selected":""}>${imvE(imvUnitLabel(u))}</option>`).join("");
   const cashAccts=accounts.filter(a=>!a.arquivada&&a.tipo!=="imovel"&&a.tipo!=="patrimonio");
   const contaOpts=cashAccts.map(a=>`<option ${a.nome===(pf.conta||imvDefaultCashAccount())?"selected":""}>${imvE(a.nome)}</option>`).join("");
   const today=new Date().toISOString().slice(0,10);
