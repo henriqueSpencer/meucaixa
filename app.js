@@ -2327,12 +2327,13 @@ function openEditTx(id) {
   renderPop(); renderModal();
 }
 function closeModal() { state.modal = false; state.modalRecon = false; state.editTx = null; renderModal(); }
-function setTipo(k) { state.modalTipo = k; state.form.cat = ""; state.form.sub = ""; state.form.reembolso = false; renderModal(); }
-function toggleReemb() { state.form.reembolso = !state.form.reembolso; state.form.cat = ""; state.form.sub = ""; renderModal(); }
+function setTipo(k) { state.modalTipo = k; state.form.cat = ""; state.form.sub = ""; state.form.reembolso = false; state.form.imovelId = ""; state.form.unidadeId = ""; renderModal(); }
+function toggleReemb() { state.form.reembolso = !state.form.reembolso; state.form.cat = ""; state.form.sub = ""; state.form.imovelId = ""; state.form.unidadeId = ""; renderModal(); }
 function pickCat(nome) {
   const list = state.modalTipo === "receita" ? catTree.receita : catTree.despesa;
   const obj = list.find((c) => c.nome === nome);
   state.form.cat = nome; state.form.sub = obj ? obj.subs[0] : "";
+  if (nome !== IMV_CAT) { state.form.imovelId = ""; state.form.unidadeId = ""; } // imóvel só na categoria de imóvel de renda
   renderModal();
 }
 function pickSub(s) { state.form.sub = s; renderModal(); }
@@ -2363,7 +2364,7 @@ function saveTx() {
     const list = tipo === "receita" ? catTree.receita : catTree.despesa;
     const catObj = list.find((c) => c.nome === state.form.cat) || list[0];
     tx = { ...base, cat: catObj.nome, sub: state.form.sub || catObj.subs[0], conta: state.form.conta || "Conta Corrente", valor: tipo === "despesa" ? -Math.abs(v) : Math.abs(v) };
-    if (imvEnabled() && state.form.imovelId) { tx.imovelId = state.form.imovelId; if (state.form.unidadeId) tx.unidadeId = state.form.unidadeId; }
+    if (imvEnabled() && state.form.imovelId && tx.cat === IMV_CAT) { tx.imovelId = state.form.imovelId; if (state.form.unidadeId) tx.unidadeId = state.form.unidadeId; }
   }
   if (orig) applyTxToBalance(orig, -1); // reverte o efeito antigo (edição)
   applyTxToBalance(tx, 1);              // aplica o efeito novo no saldo das contas
@@ -3111,6 +3112,8 @@ function reconFieldChange(id, field, value) {
     else { const ativas = accounts.filter((a) => !a.arquivada); r.sug.origem = r.sug.origem || r.sug.conta || state.reconAccount || (ativas[0] && ativas[0].nome); r.sug.destino = r.sug.destino || (ativas.find((a) => a.nome !== r.sug.origem) || {}).nome || ""; }
   } else if (field === "cat") { r.sug.cat = value; r.sug.sub = ""; }
   else if (field === "imovelId") { r.sug.imovelId = value; r.sug.unidadeId = ""; } // troca imóvel → some/aparece a unidade
+  // fora da categoria de imóvel de renda o imóvel não faz sentido → limpa (senão sobraria etiqueta órfã)
+  if (r.sug.cat !== IMV_CAT) { r.sug.imovelId = ""; r.sug.unidadeId = ""; }
   renderView();
 }
 function reconAccept(id) {
@@ -3194,7 +3197,7 @@ function reconSplitField(idx, field, value) {
   const p = state.pop; if (!p || p.kind !== "reconSplit") return;
   const part = p.parts[idx]; if (!part) return;
   part[field] = value;
-  if (field === "cat") part.sub = "";
+  if (field === "cat") { part.sub = ""; if (value !== IMV_CAT) { part.imovelId = ""; part.unidadeId = ""; } } // saiu de imóvel de renda → limpa imóvel
   if (field === "imovelId") part.unidadeId = "";
   if (field === "valor") { reconSplitRefresh(); return; } // não re-renderiza → não perde o foco/cursor
   if (field === "sub" || field === "conta" || field === "unidadeId") return; // sem selects dependentes
@@ -3219,8 +3222,9 @@ function reconSplitCommit() {
   const items = parts.map((x, i) => {
     const v = parseValor(x.valor), signed = isDesp ? -v : v;
     const sug = { tipo: p.tipo, cat: x.cat, sub: x.sub, conta: x.conta || state.reconAccount };
-    if (imvEnabled() && x.imovelId) { sug.imovelId = x.imovelId; if (x.unidadeId) sug.unidadeId = x.unidadeId; }
-    const imvTxt = (imvEnabled() && x.imovelId) ? " · " + imvNameOf(x.imovelId) : ` · parte ${i + 1}/${parts.length}`;
+    const tagImv = imvEnabled() && x.imovelId && x.cat === IMV_CAT;
+    if (tagImv) { sug.imovelId = x.imovelId; if (x.unidadeId) sug.unidadeId = x.unidadeId; }
+    const imvTxt = tagImv ? " · " + imvNameOf(x.imovelId) : ` · parte ${i + 1}/${parts.length}`;
     const match = findReconMatch({ iso: p.iso, valor: signed }, reconUsedIds());
     return { id: "sp" + (_manSeq++), raw: (p.raw || "Lançamento") + imvTxt, valor: signed, iso: p.iso, sug, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true, split: true };
   });
@@ -3647,7 +3651,7 @@ function formToRecon() {
   const signed = tipo === "despesa" ? -Math.abs(v) : Math.abs(v);
   const match = findReconMatch({ iso, valor: signed }, reconUsedIds());
   const sug = { tipo, cat: state.form.cat, sub: state.form.sub, conta: state.form.conta || state.reconAccount };
-  if (imvEnabled() && state.form.imovelId) { sug.imovelId = state.form.imovelId; if (state.form.unidadeId) sug.unidadeId = state.form.unidadeId; } // leva a etiqueta de imóvel do modal
+  if (imvEnabled() && state.form.imovelId && sug.cat === IMV_CAT) { sug.imovelId = state.form.imovelId; if (state.form.unidadeId) sug.unidadeId = state.form.unidadeId; } // etiqueta de imóvel só na categoria certa
   return { id, raw, valor: signed, iso, sug, conf: 100, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status: "pendente", manual: true };
 }
 // cria o lançamento de ajuste (plug) do valor exato da diferença com o banco, como item pendente
@@ -3674,7 +3678,7 @@ function reconToTx(r) {
   if (tipo === "transferencia") return { ...base, origem: r.sug.origem || r.sug.conta, destino: r.sug.destino || "—", valor: Math.abs(r.valor) };
   const list = tipo === "receita" ? catTree.receita : catTree.despesa, catObj = list.find((c) => c.nome === r.sug.cat);
   const tx = { ...base, cat: r.sug.cat, sub: r.sug.sub || (catObj && catObj.subs[0]) || "", conta: r.sug.conta, valor: tipo === "despesa" ? -Math.abs(r.valor) : Math.abs(r.valor) };
-  if (imvEnabled() && r.sug.imovelId) { tx.imovelId = r.sug.imovelId; if (r.sug.unidadeId) tx.unidadeId = r.sug.unidadeId; } // etiqueta o lançamento ao imóvel
+  if (imvEnabled() && r.sug.imovelId && r.sug.cat === IMV_CAT) { tx.imovelId = r.sug.imovelId; if (r.sug.unidadeId) tx.unidadeId = r.sug.unidadeId; } // etiqueta ao imóvel só na categoria certa
   return tx;
 }
 function addReconFile(file) {

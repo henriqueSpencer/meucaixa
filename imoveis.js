@@ -104,9 +104,11 @@ function imvLinkOrphanAccounts(){
   });
   return changed;
 }
-// campo "Imóvel (opcional)" no modal de transação — etiqueta a despesa/receita a um imóvel (+unidade)
+// campo "Imóvel" no modal de transação — só aparece na categoria "Imóveis de renda" (senão daria pra
+// etiquetar um salário a um imóvel por engano). Etiqueta a receita/despesa a um imóvel (+unidade).
 function imvTxFieldHTML(f){
   if(!imvEnabled()) return "";
+  if(f.cat !== IMV_CAT) return ""; // só na categoria de imóvel de renda
   const props = imvProps(); if(!props.length) return "";
   const sel = props.find((x) => x.id === f.imovelId);
   const uni = sel && sel.units.length > 1
@@ -127,6 +129,7 @@ function imvUnitNameOf(imovelId,unidadeId){ if(!imvEnabled()||!imovelId||!unidad
 function imvReconFieldHTML(sug){
   if(!imvEnabled()) return "";
   if(!sug || (sug.tipo!=="receita" && sug.tipo!=="despesa")) return "";
+  if(sug.cat !== IMV_CAT) return ""; // só na categoria de imóvel de renda (evita etiquetar salário a imóvel)
   const props = imvProps(); if(!props.length) return "";
   const sel = props.find((x) => x.id === sug.imovelId);
   const uni = sel && sel.units.length > 1
@@ -137,6 +140,7 @@ function imvReconFieldHTML(sug){
 // campo imóvel+unidade para o editor de DIVISÃO de item (usa data-sp="<idx>|imovelId" etc.)
 function imvSplitFieldHTML(idx, part){
   if(!imvEnabled()) return "";
+  if(part.cat !== IMV_CAT) return ""; // só na categoria de imóvel de renda
   const props = imvProps(); if(!props.length) return "";
   const sel = props.find((x) => x.id === part.imovelId);
   const uni = sel && sel.units.length > 1
