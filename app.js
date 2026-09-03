@@ -3303,15 +3303,44 @@ function mpParsePage(items) {
     return { iso: dt ? dt.iso : "", desc: desc || "Lançamento", valor: a.valor };
   });
 }
+// DD/MM da fatura (sem ano) → ISO. Ano inferido: mês > mês atual ⇒ ano passado (parcelas antigas), senão ano atual.
+function bbCardIso(ddmm) {
+  const m = String(ddmm).match(/^(\d{2})\/(\d{2})$/); if (!m) return "";
+  const dd = m[1], mm = +m[2]; const [cy, cm] = TODAY_ISO.split("-").map(Number);
+  const yr = mm > cm ? cy - 1 : cy;
+  return `${yr}-${String(mm).padStart(2, "0")}-${dd}`;
+}
+// fatura de cartão BB (Ourocard): tabela "Data · Descrição · País · Valor". Cada linha (mesmo y) tem a
+// data DD/MM à esquerda (x<80) e o valor R$ à direita (x≥490); descrição = tokens do meio (x 80–440).
+// Cabeçalhos de categoria (Serviços/Supermercados…) e "Total da Fatura" não têm data → são ignorados.
+function bbCardParsePage(items) {
+  const money = (s) => { const m = String(s).match(/R\$\s*(-?)\s*([\d.]+),(\d{2})/); if (!m) return null; const n = parseFloat(m[2].replace(/\./g, "") + "." + m[3]); return m[1] === "-" ? -n : n; };
+  const rows = {};
+  for (const it of items) { const s = (it.str || "").trim(); if (!s) continue; const y = Math.round(it.y); (rows[y] = rows[y] || []).push({ x: it.x, s }); }
+  const out = [];
+  Object.keys(rows).map(Number).sort((a, b) => b - a).forEach((y) => {
+    const r = rows[y].sort((a, b) => a.x - b.x);
+    const dateItem = r.find((i) => i.x < 80 && /^\d{2}\/\d{2}$/.test(i.s));
+    const valItem = r.find((i) => i.x >= 490 && money(i.s) !== null);
+    if (!dateItem || !valItem) return;
+    const v = money(valItem.s); if (v === null) return;
+    const desc = r.filter((i) => i.x >= 80 && i.x < 440).map((i) => i.s).join(" ").replace(/\s+/g, " ").trim();
+    out.push({ iso: bbCardIso(dateItem.s), desc: desc || "Lançamento", valor: v }); // compras positivas; conta cartão vira despesa no buildRecon
+  });
+  return out;
+}
 async function parsePDF(buffer) {
   const pdfjs = await loadPdfLib();
   const doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-  let out = [];
+  const pages = [];
   for (let p = 1; p <= doc.numPages; p++) {
     const tc = await (await doc.getPage(p)).getTextContent();
-    out = out.concat(mpParsePage(tc.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] }))));
+    pages.push(tc.items.map((it) => ({ str: it.str, x: it.transform[4], y: it.transform[5] })));
   }
-  return out;
+  // detecta a fatura de cartão BB pelo próprio parser (≥3 linhas no formato Data/…/Valor); senão, Mercado Pago
+  const bb = pages.reduce((acc, items) => acc.concat(bbCardParsePage(items)), []);
+  if (bb.length >= 3) return bb;
+  return pages.reduce((acc, items) => acc.concat(mpParsePage(items)), []);
 }
 /* ---------- PDF B3 (área do investidor): Negociação (compra/venda) e Movimentação (proventos) ---------- */
 const B3_MESES = { janeiro: 1, fevereiro: 2, "março": 3, marco: 3, abril: 4, maio: 5, junho: 6, julho: 7, agosto: 8, setembro: 9, outubro: 10, novembro: 11, dezembro: 12 };
@@ -3592,7 +3621,9 @@ function buildRecon(parsed, account) {
       if (pm) used.add(pm.id);
       return { id: "imp" + idx, raw: p.desc, valor: Math.abs(p.valor), iso: p.iso, sug: { tipo: "transferencia", origem: origemPad, destino: account }, conf: 90, match: pm ? `${pm.desc} · ${pm.data}` : null, matchId: pm ? pm.id : null, status: pm ? "ignorado" : "pendente", note: "Pagamento de fatura — transferência, não entra no orçamento (confira a conta de origem)" };
     }
-    const inst = parseInstallment(p.desc);
+    // parcelas: no extrato de banco a compra "1/N" aparece uma vez e a gente lança o valor cheio na 1ª.
+    // Na FATURA DE CARTÃO cada parcela já é a cobrança daquele mês (valor de face) — não multiplica nem pula.
+    const inst = (acc && acc.tipo === "cartao") ? null : parseInstallment(p.desc);
     let valor = p.valor * flip, status = "pendente", note = null, pulado = false;
     if (inst) {
       if (inst.n === 1) { valor = valor * inst.m; note = `Parcela 1/${inst.m} — importando o valor cheio (${inst.m}×)`; }
