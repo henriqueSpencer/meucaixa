@@ -139,15 +139,21 @@ function imvReconTag(sug){
 // palpite de imóvel a partir do texto do extrato (nome do imóvel ou do inquilino aparece na descrição)
 function imvGuessFromText(text, tipo){
   if(!imvEnabled() || (tipo!=="receita" && tipo!=="despesa")) return null;
-  const norm = (s)=> (s||"").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");
+  const norm = (s)=> (s||"").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\s+/g," ").trim();
   const hay = norm(text); if(hay.length<4) return null;
+  const hit = (id,uid,pl)=>({ imovelId:id, unidadeId:(pl>1?uid:"") });
   for(const p of imvProps()){
-    // 1) nome de inquilino de alguma unidade (o mais forte — PIX de aluguel costuma trazer o nome)
+    // 1) nome do inquilino aparece na descricao (PIX de aluguel traz o pagador). O BB TRUNCA o nome no
+    //    extrato (ex.: GIRLEINE VI), entao casa tambem por PREFIXO: a descricao contem os primeiros
+    //    ~10 chars do nome do inquilino (>=8 pra evitar falso positivo).
     for(const u of p.units){
       const inq = u.inquilino && u.inquilino.nome ? norm(u.inquilino.nome) : "";
-      if(inq && inq.length>=5 && hay.includes(inq)) return { imovelId:p.id, unidadeId:(p.units.length>1?u.id:"") };
+      if(!inq || inq.length<5) continue;
+      if(hay.includes(inq)) return hit(p.id,u.id,p.units.length);
+      const pre = inq.slice(0,10);
+      if(pre.length>=8 && hay.includes(pre)) return hit(p.id,u.id,p.units.length);
     }
-    // 2) nome do imóvel
+    // 2) nome do imovel na descricao
     const pn = norm(p.nome);
     if(pn.length>=5 && hay.includes(pn)) return { imovelId:p.id, unidadeId:"" };
   }

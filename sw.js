@@ -1,6 +1,6 @@
 /* Service worker do MeuCaixa — carrega o app offline (o shell). Os dados vêm do IndexedDB (store.js),
  * não daqui. Requisições ao Supabase (cross-origin) passam direto pela rede, nunca são cacheadas. */
-const CACHE = "meucaixa-v6";
+const CACHE = "meucaixa-v7";
 const SHELL = ["./", "./index.html", "./manifest.json", "./favicon.ico", "./vendor/supabase.js", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

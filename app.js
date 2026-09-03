@@ -3156,8 +3156,14 @@ function parseOFX(text) {
     const amt = parseFloat(tag(b, "TRNAMT").replace(",", "."));
     const dt = tag(b, "DTPOSTED").slice(0, 8);
     const iso = dt.length === 8 ? `${dt.slice(0, 4)}-${dt.slice(4, 6)}-${dt.slice(6, 8)}` : "";
-    const desc = tag(b, "NAME") || tag(b, "MEMO") || "Lançamento";
-    if (!isNaN(amt)) out.push({ iso, desc, valor: amt });
+    // BB (e vários bancos): NAME é o tipo genérico ("Pix - Recebido") e MEMO traz o detalhe/pagador
+    // ("01/09 02:03 00044663277691 MARIO AUGUS"). Junta os dois pra a descrição mostrar de quem veio;
+    // no PIX limpa o prefixo "DD/MM HH:MM <docnº>" (o resto — cartão, IOF etc. — não casa e fica intacto).
+    const name = tag(b, "NAME"), memo = tag(b, "MEMO");
+    const memoClean = memo.replace(/^\d{2}\/\d{2}\s+\d{2}:\d{2}\s+(\d{6,}\s+)?/, "").trim() || memo;
+    let desc = name && memoClean && memoClean !== name ? `${name} · ${memoClean}` : (name || memoClean || "Lançamento");
+    // ignora as linhas de saldo do BB (Saldo Anterior/Saldo do dia vêm com TRNAMT 0.00 — não são movimentos)
+    if (!isNaN(amt) && amt !== 0) out.push({ iso, desc, valor: amt });
   });
   return out;
 }
