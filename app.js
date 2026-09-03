@@ -3230,7 +3230,7 @@ function reconSplitCommit() {
   });
   const at = state.recon.findIndex((r) => String(r.id) === String(p.id));
   if (at >= 0) state.recon.splice(at, 1, ...items); else state.recon.unshift(...items);
-  state.pop = null; state.editing = null; renderView();
+  state.pop = null; state.editing = null; renderPop(); renderView(); // renderPop() fecha o pop no DOM
 }
 
 /* ---------- motor de conciliação (lê OFX/CSV, sugere, casa duplicatas) ---------- */
