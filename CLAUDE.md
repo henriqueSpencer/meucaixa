@@ -316,14 +316,25 @@ roda em node com `global.self=global` + `GlobalWorkerOptions.workerSrc` no `.min
 `{str,x,y}` pros `b3Parse*`). Ver `xlsx_proto.js`/`classify_test.js` no scratchpad.
 
 ## Importar extrato (tela Conciliação)
-Lê **OFX/CSV/TXT** (`parseOFX`/`parseCSV`, texto) e **PDF** do **Mercado Pago** (`parsePDF`→`mpParsePage`
-em `app.js`). O PDF é lido por **coordenadas** via **pdf.js** (vendorizado em `vendor/pdf.min.js` +
-`vendor/pdf.worker.min.js`, carregado sob demanda por `import()` dinâmico; `workerSrc` aponta pro
-`.js`). Cada transação é ancorada na **coluna "Valor"** (bandas de x do template MP: Data `x<85`,
-Descrição `85–190`, Valor `270–348`, Saldo `≥348`); data e descrição multilinha casam com a âncora
-mais próxima em y. Não depende de cabeçalho (só a pág. 1 tem). Validação: soma dos movimentos bate com
+Lê **OFX/CSV/TXT** (`parseOFX`/`parseCSV`, texto) e **PDF** (`parsePDF`, pdf.js). O PDF é lido por
+**coordenadas** via **pdf.js** (vendorizado em `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`, carregado
+sob demanda por `import()` dinâmico; `workerSrc` aponta pro `.js`). `parsePDF` **detecta o layout pelo
+próprio parser** (roda cada um e vê qual casa): **Mercado Pago** (`mpParsePage`, bandas de x Data `<85` /
+Descrição `85–190` / Valor `270–348` / Saldo `≥348`) e **fatura de cartão do BB / Ourocard**
+(`bbCardParsePage` — tabela Data(x<80)·Descrição(x 80–440)·País·Valor(x≥490); ≥3 linhas casadas ⇒ é fatura
+BB; cabeçalhos de categoria e "Total da Fatura" não têm data e são ignorados; `bbCardIso` infere o ano do
+`DD/MM` — mês > mês atual ⇒ ano passado, p/ parcelas antigas). Cada transação é ancorada na coluna "Valor";
+data e descrição multilinha casam com a âncora mais próxima em y. Validação: soma dos movimentos bate com
 Entradas−Saídas do extrato. **Não há mais "extrato de exemplo"** — sem arquivo lido, o botão fica
 desabilitado (removidos `initialRecon` e o fallback no action `import`).
+**OFX do BB:** o `<NAME>` é o tipo genérico ("Pix - Recebido") e o **`<MEMO>` traz o pagador**
+("01/09 02:03 <docnº> MARIO AUGUS") — `parseOFX` **junta NAME + MEMO** na descrição (no PIX limpa o prefixo
+`DD/MM HH:MM <docnº>`) e **ignora as linhas de saldo** (Saldo Anterior/do dia vêm com `TRNAMT 0.00`).
+**Fatura de cartão** (conta `tipo:"cartao"`): compras saem positivas e o `buildRecon` inverte o sinal
+(card-flip) → despesa; "PGTO DEBITO CONTA" cai no `isPay` → vira transferência (pagamento de fatura). A
+**lógica de parcela `1/N` vale também no cartão** (a compra é registrada por inteiro na 1ª: valor ×N, e as
+seguintes `n>1` vêm ignoradas) — pedido explícito do usuário (uma tentativa de desativar isso p/ cartão foi
+revertida). `parseInstallment` reconhece "PARC 01/03".
 
 **Status dos itens e saldo projetado** (`buildRecon`/`viewConciliacao`): cada item tem `status`
 (`pendente`/`conciliado`/`ignorado`). `findReconMatch(p, used)` (restrito à conta selecionada,
@@ -389,10 +400,43 @@ sem extrato lido), pra usar o **batimento de saldo** e/ou **lançar à mão** (`
 `nLidos === 0` (nenhum extrato lido), a barra troca "N lançamentos lidos"/"0 de 0 conciliados" por
 "Conferência de saldo · sem arquivo" + texto próprio, e o botão "Reimportar" vira "Importar arquivo".
 
+**Badge de pendentes só vale em sessão ativa** (bug corrigido): o badge do nav conta
+`state.imported ? pendentes : 0` — antes contava `state.recon` cru, então uma conciliação abandonada
+(reimportar/sair sem concluir) deixava "N faltando" aceso pra sempre, fora da conciliação. E o
+`reimport` passou a **limpar `state.recon` também** (antes só zerava `imported`/conta/arquivos, e a lista
+velha segurava o badge). Trocar de aba com import ativo **preserva** a lista (volta pro mesmo ponto); só
+concluir (`reconCommit`) ou voltar (`reimport`) zera.
+
+**Etiquetar imóvel na conciliação + no modal** (feature imóveis de renda): quando o módulo Imóveis está
+ligado, itens de **receita/despesa na categoria "Imóveis de renda"** ganham um seletor **Imóvel (+Unidade)**
+— na edição inline (`imvReconFieldHTML`, `data-recon-field="imovelId"/"unidadeId"`, escreve em `r.sug`, NÃO
+usa o `data-field`/`renderModal` do modal) e no modal de transação (`imvTxFieldHTML`, `data-field`). **Só
+aparece quando `cat === IMV_CAT`** ("Imóveis de renda"); trocar de categoria **limpa** `imovelId/unidadeId`
+(em `reconFieldChange`, `pickCat`/`setTipo`/`toggleReemb`, `reconSplitField`) e há **trava no commit** (só
+grava o imóvel se a categoria for a certa — em `saveTx`/`reconToTx`/`formToRecon`/`reconSplitCommit`) — assim
+um salário nunca sai etiquetado a um imóvel (pedido explícito, reforçado 2×). **Auto-sugestão**
+(`imvGuessFromText`, usada no `buildRecon`): se a descrição traz o nome do imóvel ou do **inquilino** (PIX de
+aluguel), pré-preenche imóvel+unidade **e força `cat=Imóveis de renda`/`sub=Aluguel`** (senão cairia na 1ª
+categoria/regra genérica); casa nome de inquilino **truncado pelo banco** por PREFIXO (BB corta "GIRLEINE VI"
+→ casa com "Girleine Vidal…"; ≥8 chars, conservador — não chuta grafia divergente). Resumo colapsado mostra
+a tag `🏠 imóvel · unidade` (`imvReconTag`). **Unidade sempre exibida como "Nome - Inquilino atual"**
+(`imvUnitLabel`/`imvCurTenantName`) em todos os dropdowns/listas (aba Imóveis, modal, conciliação, divisão);
+`imvUnitNameOf` também retorna esse rótulo.
+
+**Dividir um item em vários lançamentos** (`openReconSplit`→pop `reconSplit`): na edição inline há
+**"✂ Dividir em vários lançamentos"** — abre um editor (pop `wide`) com N partes, cada uma com
+valor·conta·categoria·subcategoria·imóvel·unidade (`imvSplitFieldHTML`, `data-sp="<idx>|<campo>"`); barra de
+soma (`reconSplitSumInfo`) só habilita o botão quando a soma **bate** com o total; ao confirmar
+(`reconSplitCommit`) o item vira **N itens independentes** na conciliação (cada um aceita/edita/ignora e
+vira uma transação no commit). Caso de uso: um PIX que junta dois aluguéis (kitnet + duplex). **Fecha o pop
+com `renderPop()`** no commit (esquecer isso deixava o pop na tela — bug corrigido).
+
 ## Mapa de arquivos
-`index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `store.js` (persistência+sync) ·
-`styles.css` · `vendor/supabase.js` (UMD vendorizado) · `vendor/pdf.min.js` + `vendor/pdf.worker.min.js`
-(pdf.js, leitura de PDF na importação — extrato Mercado Pago **e** B3) ·
+`index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `imoveis.js` (módulo Imóveis de renda —
+script clássico carregado ANTES do `app.js`, escopo global compartilhado; `viewImoveis`, helpers `imv*`) ·
+`store.js` (persistência+sync) · `styles.css` · `vendor/supabase.js` (UMD vendorizado) ·
+`vendor/pdf.min.js` + `vendor/pdf.worker.min.js` (pdf.js, leitura de PDF na importação — extrato Mercado
+Pago, **fatura de cartão do BB** e B3) ·
 `functions/api/history/[ticker].js` (Pages Function serverless: histórico de cotação p/ a Visão
 patrimonial) · `manifest.json` + `sw.js` + `icons/` (PWA) · `gerar_dados.py`→`dados.js` (seed local,
 gitignored) · `arq_exemplo/` + `*.xlsx` (PDFs/planilhas de extrato com dados reais — **gitignored**).
