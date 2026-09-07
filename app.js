@@ -2296,7 +2296,9 @@ function renderView() {
   const meta = PAGE[state.tab];
   if (elTitle) elTitle.textContent = meta[0];
   if (elSub) elSub.textContent = meta[1];
-  const pend = state.recon.filter((r) => r.status === "pendente").length;
+  // badge de pendentes só vale durante uma sessão de import ativa — senão uma conciliação abandonada
+  // (reimportar/sair sem concluir) deixaria o badge aceso pra sempre, mesmo fora da conciliação
+  const pend = state.imported ? state.recon.filter((r) => r.status === "pendente").length : 0;
   if (elBadge) { elBadge.textContent = pend; elBadge.style.display = pend ? "grid" : "none"; }
   // barra mobile: "Mais" acende p/ abas fora da barra; espelha o badge de conciliação
   const moreBtn = document.querySelector(".mnav-more");
@@ -3754,7 +3756,7 @@ const ACTIONS = {
     state.recon = []; state.reconFiles = [];
     state.imported = true; state.editing = null; renderView();
   },
-  "reimport": () => { state.imported = false; state.reconAccount = null; state.reconFiles = []; state.editing = null; state.reconBank = ""; renderView(); },
+  "reimport": () => { state.imported = false; state.recon = []; state.reconAccount = null; state.reconFiles = []; state.editing = null; state.reconBank = ""; renderView(); }, // limpa a lista tb (senão o badge fica aceso)
 };
 
 function wire() {
