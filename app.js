@@ -569,7 +569,7 @@ function rdStats(s) {
   const fech = s.filter((m) => m.ym < cur), base = fech.length ? fech : s;
   const guardado = base.reduce((a, m) => a + (m.receita - m.despesa), 0);
   const recTot = base.reduce((a, m) => a + m.receita, 0);
-  return { guardado, media: guardado / base.length, poupanca: recTot > 0 ? guardado / recTot * 100 : 0, nFech: base.length, todos: !fech.length };
+  return { guardado, media: guardado / base.length, poupanca: recTot > 0 ? guardado / recTot * 100 : 0, recTot, nFech: base.length, todos: !fech.length };
 }
 
 function donutSVG(data, colors) {
@@ -631,10 +631,17 @@ function blkReceitaDespesa() {
   const sel = (typeof state.rdSel === "number" && state.rdSel >= 0 && state.rdSel < n) ? state.rdSel : null;
   const st = rdStats(s), gCls = st.guardado >= 0 ? "pos" : "neg";
   const chips = [...opts.map((x) => ({ k: String(x), lb: x + "M" })), { k: "all", lb: "Tudo" }].map((r) => `<button class="pc-range${range === r.k ? " on" : ""}" data-rdrange="${r.k}">${r.lb}</button>`).join("");
+  const baseTxt = st.todos ? `${n} ${n === 1 ? "mês" : "meses"} (nenhum fechado ainda)` : `${st.nFech} ${st.nFech === 1 ? "mês fechado" : "meses fechados"}`;
   const cards = `<div class="rd-stats">
-    <div class="rd-stat"><span>Guardado no período</span><b class="${gCls}">${fmtSigned(st.guardado)}</b><small>${st.todos ? `${n} ${n === 1 ? "mês" : "meses"}` : `${st.nFech} ${st.nFech === 1 ? "mês fechado" : "meses fechados"}`}</small></div>
-    <div class="rd-stat"><span>Média por mês</span><b>${fmtShort(st.media)}</b><small>do que sobra</small></div>
-    <div class="rd-stat"><span>Taxa de poupança</span><b class="accent">${Math.round(st.poupanca)}%</b><small>da receita</small></div>
+    <div class="rd-stat"><span>Guardado no período ${xp("Guardado no período", "soma de (receitas − despesas) de cada mês",
+      `base: ${baseTxt}<br>resultado acumulado = <b class="num">${fmtSigned(st.guardado)}</b>`,
+      st.todos ? "Ainda não há mês fechado, então o mês corrente entra — e ele está pela metade." : "O mês corrente fica de fora: ele está pela metade e distorceria a soma.")}</span><b class="${gCls}">${fmtSigned(st.guardado)}</b><small>${baseTxt}</small></div>
+    <div class="rd-stat"><span>Média por mês ${xp("Média por mês", "guardado ÷ número de meses da base",
+      `<b class="num">${fmtSigned(st.guardado)}</b> ÷ ${st.nFech} = <b class="num">${fmtShort(st.media)}</b>`,
+      "É quanto sobra num mês típico do período escolhido nos chips acima.")}</span><b>${fmtShort(st.media)}</b><small>do que sobra</small></div>
+    <div class="rd-stat"><span>Taxa de poupança ${xp("Taxa de poupança", "guardado ÷ receitas do período",
+      `<b class="num">${fmtSigned(st.guardado)}</b> ÷ <b class="num">${fmt(st.recTot)}</b> = <b>${Math.round(st.poupanca)}%</b>`,
+      "A métrica que mede decisão sua — diferente do patrimônio, que sobe também quando o mercado sobe.")}</span><b class="accent">${Math.round(st.poupanca)}%</b><small>da receita</small></div>
   </div>`;
   return `<div class="card">
     <div class="card-head">
@@ -644,7 +651,11 @@ function blkReceitaDespesa() {
     ${opts.length ? `<div class="pc-ranges"><div class="pc-chips">${chips}</div></div>` : ""}
     ${cards}
     <div class="chart" style="height:260px">${barChartSVG(s, sel)}</div>
-    <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span><span><i class="line" style="background:${C_SALDO}"></i> Saldo</span></div>
+    <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span><span><i class="line" style="background:${C_SALDO}"></i> Saldo</span>${n >= 4 ? `<span><i class="line dash" style="background:${C.despesa}"></i> Média móvel 3m</span><span><i class="ring"></i> Mês atípico</span>` : ""}</div>
+    ${n >= 4 ? `<div class="legend-note">A linha tracejada é a média das despesas dos 3 últimos meses de cada ponto. O anel marca os meses cuja despesa passou de 1,5 desvio-padrão da média do período — foi um mês fora da curva, não o seu normal. ${xp("Média móvel e mês atípico",
+      "média móvel = média das despesas dos 3 meses até ali",
+      `desvio-padrão das despesas do período: <b class="num">${fmt(Math.sqrt(s.reduce((a, d) => a + (d.despesa - s.reduce((x, y) => x + y.despesa, 0) / n) ** 2, 0) / n))}</b><br>marca o mês que sai de ±1,5 desse valor`,
+      "Serve pra você não ler um mês excepcional como se fosse tendência.")}</div>` : ""}
   </div>`;
 }
 /* meses e despesas por categoria a partir das transações reais */
@@ -795,14 +806,20 @@ function catDonutBlock(tipo) {
     const dCls = delta == null ? "novo" : delta > 0.1 ? "up" : delta < -0.1 ? "down" : "flat";
     const dTxt = delta == null ? "novo" : `${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}%`;
     const serie = catSerie(tipo, ym, drill, d.nome, 12);
-    return `<li class="cat-bar${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${attr(d.nome)}">
-      <div class="cb-top"><span class="cb-nm">${d.nome}</span><span class="cb-sp">${sparkSVG(serie, cor)}</span><b class="cb-delta ${dCls}" title="${md > 0 ? `média dos 3 meses anteriores: ${fmtShort(md)}` : "não aparecia nos 3 meses anteriores"}">${dTxt}</b><b class="num cb-val">${fmtShort(d.valor)}</b></div>
+    const tip = md > 0
+      ? `${d.nome}: ${fmt(d.valor)} neste mês · média dos 3 meses anteriores ${fmt(md)} · diferença ${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}% (${fmtSigned(d.valor - md)})`
+      : `${d.nome}: ${fmt(d.valor)} neste mês · não aparecia nos 3 meses anteriores`;
+    return `<li class="cat-bar${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${attr(d.nome)}" title="${attr(tip)}">
+      <div class="cb-top"><span class="cb-nm">${d.nome}</span><span class="cb-sp" title="${attr(`últimos ${serie.length} meses de ${d.nome}`)}">${sparkSVG(serie, cor)}</span><b class="cb-delta ${dCls}">${dTxt}</b><b class="num cb-val">${fmtShort(d.valor)}</b></div>
       <div class="cb-track"><i style="width:${(d.valor / maxV * 100).toFixed(1)}%;background:${cor}"></i></div>
     </li>`;
   }).join("");
   const head = drill
     ? `<div class="cd-head-l"><button class="cd-back" data-donut-back="${tipo}" aria-label="Voltar">${ic("arrow-left", 16)}</button><div><h3>${drill}</h3><span class="card-sub">subcategorias</span></div></div>`
-    : `<h3>${titleTxt}</h3>`;
+    : `<h3>${titleTxt} ${xp("Como ler esta lista",
+        "barra = tamanho no mês · % = contra a média dos 3 meses anteriores · linha = 12 meses",
+        `mês exibido: <b>${ym ? ymLabel(ym) : "—"}</b><br>a barra é proporcional à maior categoria do mês<br>o % compara com a média dos 3 meses <b>anteriores</b> a este<br>passe o mouse numa linha pra ver os dois valores`,
+        "Barras no lugar da rosca porque ângulo se compara mal. O “% do total” foi tirado de propósito: ele sobe nas outras categorias quando você corta uma, sem ninguém ter gasto mais.")}</h3>`;
   let actions;
   if (active) {
     actions = drill
@@ -949,7 +966,7 @@ function foraDoPadrao() {
     const esperado = mediaMes * frac, exc = atual[c] - esperado;
     // só entra o que vale uma decisão: ≥ R$50 de excedente E ≥25% de um mês típico da categoria
     if (atual[c] > 0 && exc >= 50 && exc >= 0.25 * Math.max(mediaMes, 1)) {
-      out.push({ cat: c, atual: atual[c], esperado, exc, pct: esperado > 0 ? exc / esperado : null, novo: mediaMes <= 0 });
+      out.push({ cat: c, atual: atual[c], esperado, exc, mediaMes, frac, pct: esperado > 0 ? exc / esperado : null, novo: mediaMes <= 0 });
     }
   });
   return out.sort((a, b) => b.exc - a.exc).slice(0, 5);
@@ -957,12 +974,19 @@ function foraDoPadrao() {
 function blkForaDoPadrao() {
   const rows = foraDoPadrao(), p = monthProgress(TODAY_ISO.slice(0, 7));
   const body = rows.length
-    ? rows.map((r) => `<div class="fp-row click" data-cat-detail="despesa|${attr(r.cat)}"><span class="fp-ic">${ic(catIcon(r.cat), 15)}</span>
-        <div class="fp-mid"><div class="fp-nm">${r.cat}</div><div class="fp-sub">${r.novo ? "não costuma aparecer" : `esperado até hoje ${fmtShort(r.esperado)}`}</div></div>
+    ? rows.map((r) => `<div class="fp-row"><span class="fp-ic">${ic(catIcon(r.cat), 15)}</span>
+        <div class="fp-mid"><div class="fp-nm click" data-cat-detail="despesa|${attr(r.cat)}">${r.cat}</div>
+          <div class="fp-sub">${r.novo ? "não aparecia nos meses anteriores" : `você costuma estar em ${fmtShort(r.esperado)} no dia ${p.dia}`} ${xp("Como este alerta é calculado",
+            "gasto de agora − o quanto você costuma ter gasto até este dia",
+            `${_esc(r.cat)}: média de ${_n(r.mediaMes)}/mês<br>até o dia ${p.dia} você costuma ter gasto ${Math.round(r.frac * 100)}% disso = ${_n(r.esperado)}<br>este mês você já está em ${_n(r.atual)}<br><b>excedente ${_n(r.exc)}</b>`,
+            "A régua é o histórico da própria categoria, não a fração do calendário — assim aluguel e assinatura, que caem em dia certo, não viram alarme falso.")}</div></div>
         <div class="fp-right"><b class="num">${fmtNum(r.atual)}</b><span class="fp-delta">${r.pct == null ? "novo" : `+${Math.round(r.pct * 100)}%`}</span></div></div>`).join("")
     : `<div class="empty-mini">${mesesFechados(6).length < 2 ? "Ainda não há meses fechados suficientes para saber o que é o seu padrão." : "Tudo dentro do ritmo por enquanto."}</div>`;
   return `<div class="card">
-    <div class="card-head"><div><h3>Fora do padrão neste mês</h3><span class="card-sub">contra o ritmo dos últimos ${mesesFechados(6).length} meses fechados, no dia ${p.dia} de ${p.dias}</span></div></div>
+    <div class="card-head"><div><h3>Fora do padrão neste mês ${xp("O que entra nesta lista",
+      "categorias em que o gasto de hoje passou do ritmo delas",
+      `base: os últimos ${mesesFechados(6).length} meses fechados<br>entra quem está <b>≥ R$ 50</b> acima do esperado <b>e</b> esse excedente vale <b>≥ 25%</b> de um mês típico da categoria`,
+      "Os dois cortes juntos evitam encher a lista de ruído: R$ 60 a mais numa categoria de R$ 2.000 não muda decisão nenhuma.")}</h3><span class="card-sub">comparado ao ritmo dos últimos ${mesesFechados(6).length} meses fechados, no dia ${p.dia} de ${p.dias}</span></div></div>
     <div class="fp-list">${body}</div>
   </div>`;
 }
@@ -994,9 +1018,12 @@ function blkPotes() {
   const comprometido = d.itens.filter((i) => i.nome === "Fixos").reduce((s, i) => s + i.valor, 0);
   const escolha = d.itens.filter((i) => i.nome === "Lazer").reduce((s, i) => s + i.valor, 0);
   const barras = d.itens.map((i) => `<i style="width:${(i.valor / d.total * 100).toFixed(2)}%;background:${i.cor}" title="${i.nome}: ${fmt(i.valor)}/mês"></i>`).join("");
-  const legenda = d.itens.map((i) => `<li class="click" data-cat-detail="despesa|${attr(i.nome)}"><i style="background:${i.cor}"></i><span>${i.nome}</span><b class="num">${fmtShort(i.valor)}</b><em>${(i.valor / d.total * 100).toFixed(0)}%</em></li>`).join("");
+  const legenda = d.itens.map((i) => `<li class="click" data-cat-detail="despesa|${attr(i.nome)}" title="${attr(i.nome + " — " + i.nota + " · " + fmt(i.valor) + "/mês")}"><i style="background:${i.cor}"></i><span>${i.nome}</span><b class="num">${fmtShort(i.valor)}</b><em>${(i.valor / d.total * 100).toFixed(0)}%</em></li>`).join("");
   return `<div class="card">
-    <div class="card-head"><div><h3>Comprometido × escolha</h3><span class="card-sub">média por mês dos últimos ${d.meses} ${d.meses === 1 ? "mês fechado" : "meses fechados"}</span></div></div>
+    <div class="card-head"><div><h3>Comprometido × escolha ${xp("Como a barra é montada",
+      "gasto de cada pote nos meses fechados ÷ número de meses",
+      d.itens.map((i) => `${_esc(i.nome)}: ${_n(i.valor)}/mês · ${(i.valor / d.total * 100).toFixed(0)}%`).join("<br>") + `<br><b>total ${_n(d.total)}/mês</b>`,
+      `Base: ${d.meses} ${d.meses === 1 ? "mês fechado" : "meses fechados"}, reembolso já abatido. O mês corrente fica fora (está pela metade) e a categoria Patrimônio também — não é gasto, é dinheiro mudando de lugar.`)}</h3><span class="card-sub">média por mês dos últimos ${d.meses} ${d.meses === 1 ? "mês fechado" : "meses fechados"}</span></div></div>
     <div class="potes-bar">${barras}</div>
     <ul class="potes-leg">${legenda}</ul>
     <div class="potes-foot">${comprometido > 0 ? `<b class="num">${fmt(comprometido)}</b> já estavam decididos antes do mês começar.` : ""}${escolha > 0 ? ` O que dá pra mexer é <b class="num">${fmt(escolha)}</b>.` : ""}</div>
@@ -1081,6 +1108,16 @@ const caixaDisponivel = () => accounts.filter((a) => !a.arquivada && a.grupo ===
 // meses de reserva ("runway"): a pergunta mais consequente de finanças pessoais
 function reservaMeses() { const g = gastoMedio(12); return g > 0 ? caixaDisponivel() / g : null; }
 
+/* "?" explicativo: abre a fórmula JÁ PREENCHIDA com os números reais da conta. Hover no desktop,
+   toque no celular (tabindex + :focus-within) — sem JS. O texto fica no DOM, então dá pra ler,
+   conferir a conta e entender de onde saiu cada número em vez de acreditar nele. */
+function xp(titulo, formula, conta, nota) {
+  return `<span class="xp" tabindex="0" role="button" aria-label="Como ${attr(titulo)} é calculado">?<span class="xp-pop">`
+    + `<b>${titulo}</b>${formula ? `<em>${formula}</em>` : ""}`
+    + `${conta ? `<span class="xp-calc">${conta}</span>` : ""}`
+    + `${nota ? `<span class="xp-note">${nota}</span>` : ""}</span></span>`;
+}
+const _n = (v) => `<b class="num">${fmt(v)}</b>`;
 // Faixa do topo: o mês CORRENTE contra o próprio normal. Substituiu o "Patrimônio líquido" em corpo
 // grande — que sobe com aporte, com o mercado e com o imóvel, e não mede escolha nenhuma deste mês.
 function statementBand() {
@@ -1097,26 +1134,40 @@ function statementBand() {
   const rotulo = desvio == null ? "" : desvio > 0.08 ? `${Math.round(desvio * 100)}% acima do normal` : desvio < -0.08 ? `${Math.round(-desvio * 100)}% abaixo do normal` : "no ritmo";
   // barra: o preenchido é o que já foi gasto sobre a média do mês; o traço é onde "deveria" estar hoje
   const escala = Math.max(media, ritmo, gasto, 1);
-  const bar = media > 0 ? `<div class="pace-bar" title="gasto até hoje contra o esperado para o dia ${p.dia}">
+  const pctMes = Math.round(p.frac * 100);
+  const bar = media > 0 ? `<div class="pace-bar">
       <i class="pace-fill ${cls}" style="width:${Math.min(100, gasto / escala * 100).toFixed(1)}%"></i>
       <span class="pace-mark" style="left:${Math.min(100, esperado / escala * 100).toFixed(1)}%"></span>
-    </div><div class="pace-legend"><span>esperado até o dia ${p.dia}: <b class="num">${fmtShort(esperado)}</b></span></div>` : "";
+    </div><div class="pace-legend"><span>▌ o traço é onde você costuma estar no dia ${p.dia}: <b class="num">${fmtShort(esperado)}</b></span>
+      ${xp("Esperado até hoje", "gasto médio do mês × parte do mês que já passou",
+        `${_n(media)} × ${p.dia}/${p.dias} (${pctMes}%) = ${_n(esperado)}`,
+        `Supõe gasto espalhado pelo mês. Serve como referência do topo; o bloco “Fora do padrão” usa uma régua mais fina, por categoria.`)}</div>` : "";
   const res = rec - gasto;
   const poup = rec > 0 ? Math.round(res / rec * 100) : null;
-  const reserva = reservaMeses();
+  const reserva = reservaMeses(), caixa = caixaDisponivel();
+  const nFin = accounts.filter((a) => !a.arquivada && a.grupo === "fin").length;
   return `<div class="statement">
-    <div class="stmt-top"><span class="stmt-eyebrow">Este mês</span><span class="stmt-period">${monthLabel(ym)} · dia ${p.dia} de ${p.dias}</span></div>
+    <div class="stmt-top"><span class="stmt-eyebrow">Este mês</span><span class="stmt-period">${monthLabel(ym)} · dia ${p.dia} de ${p.dias} · ${pctMes}% do mês</span></div>
     <div class="stmt-main">
       <div class="stmt-net">
-        <span class="stmt-lbl">Gasto até agora</span>
+        <span class="stmt-lbl">Gasto até agora ${xp("Gasto até agora", "despesas do mês − reembolsos",
+          `de 01 a ${String(p.dia).padStart(2, "0")}/${ym.slice(5)} = ${_n(gasto)}`,
+          "Transferência e aplicação não entram: dinheiro que muda de lugar não é gasto.")}</span>
         <span class="stmt-big num">${fmt(gasto)}</span>
-        <span class="stmt-pace ${cls}">${rotulo ? `<b class="pace-tag">${rotulo}</b> ` : ""}${txt}</span>
+        <span class="stmt-pace ${cls}">${rotulo ? `<b class="pace-tag">${rotulo}</b> ` : ""}${txt} ${desvio == null ? "" : xp("Ritmo do mês",
+          "gasto até hoje ÷ parte do mês que já passou",
+          `${_n(gasto)} ÷ ${pctMes}% = ${_n(ritmo)} projetados<br>média de ${nFech} ${nFech === 1 ? "mês fechado" : "meses fechados"} = ${_n(media)}<br>diferença = <b>${desvio >= 0 ? "+" : "−"}${Math.abs(Math.round(desvio * 100))}%</b>`,
+          "O mês corrente fica fora da média — ele está pela metade e puxaria o número pra baixo.")}</span>
         ${bar}
       </div>
       <div class="stmt-ledger">
-        <div class="stmt-row"><span class="sl-k">Reserva</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
-        <div class="stmt-row"><span class="sl-k">Receitas do mês</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
-        <div class="stmt-row total"><span class="sl-k">Sobrou até agora</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(Math.abs(res))}${poup != null ? ` <small class="sl-pct">${poup}%</small>` : ""}</span></div>
+        <div class="stmt-row"><span class="sl-k">Reserva ${xp("Reserva", "caixa disponível ÷ gasto médio mensal",
+          `${_n(caixa)} ÷ ${_n(media)} = <b>${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</b>`,
+          `Caixa = as ${nFin} ${nFin === 1 ? "conta financeira" : "contas financeiras"} (cartão entra negativo). Imóvel e alocação de patrimônio ficam fora: não dá pra pagar boleto com apartamento.`)}</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
+        <div class="stmt-row"><span class="sl-k">Receitas do mês ${xp("Receitas do mês", "tudo que entrou como receita de 01 a hoje", `${_n(rec)}`, "Reembolso não conta aqui — ele abate a despesa, não é renda nova.")}</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
+        <div class="stmt-row total"><span class="sl-k">Sobrou até agora ${xp("Sobrou / taxa de poupança", "receitas − gasto, e quanto isso é da receita",
+          `${_n(rec)} − ${_n(gasto)} = ${_n(res)}${poup != null ? `<br>${_n(res)} ÷ ${_n(rec)} = <b>${poup}%</b> da receita` : ""}`,
+          "Parcial do mês: se a maior parte da sua receita cai no início, este número começa alto e desce.")}</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(Math.abs(res))}${poup != null ? ` <small class="sl-pct">${poup}%</small>` : ""}</span></div>
       </div>
     </div>
   </div>`;
