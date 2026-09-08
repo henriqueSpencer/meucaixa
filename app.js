@@ -524,12 +524,17 @@ function barChartSVG(data, sel) {
     });
     if (i % lblStep === 0 || i === n - 1) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--subtle)">${d.mes}</text>`;
   });
-  // média móvel de 3 meses da despesa: a referência visual que faltava ("compared to what?").
-  // Sem ela, 12 barras são 12 números soltos; com ela, dá pra ver o que é normal e o que fugiu.
+  // Três médias móveis de 3 meses — receita, despesa e saldo. É a referência visual que faltava
+  // ("compared to what?"): sem elas, 12 barras são 12 números soltos; com elas dá pra ver o que é
+  // normal e o que fugiu. Calculadas aqui porque o tooltip de cada mês mostra exatamente as mesmas.
+  const val = (d, k) => (k === "saldo" ? d.receita - d.despesa : d[k]);
+  const mm = (k) => data.map((_, i) => { const w = data.slice(Math.max(0, i - 2), i + 1); return w.reduce((s, d) => s + val(d, k), 0) / w.length; });
+  const MM = { receita: mm("receita"), despesa: mm("despesa"), saldo: mm("saldo") };
   if (n >= 4) {
-    const mm = data.map((_, i) => { const w = data.slice(Math.max(0, i - 2), i + 1); return w.reduce((s, d) => s + d.despesa, 0) / w.length; });
-    const mp = mm.map((v, i) => [padL + (i + 0.5) * slot, Y(v)]);
-    g += `<path d="M${mp.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" L ")}" fill="none" stroke="${C.despesa}" stroke-opacity=".5" stroke-width="1.6" stroke-dasharray="5 4" stroke-linejoin="round"/>`;
+    [["receita", C.receita], ["despesa", C.despesa], ["saldo", C_SALDO]].forEach(([k, col]) => {
+      const mp = MM[k].map((v, i) => [padL + (i + 0.5) * slot, Y(v)]);
+      g += `<path d="M${mp.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" L ")}" fill="none" stroke="${col}" stroke-opacity=".45" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round"/>`;
+    });
     // meses atípicos: despesa a mais de 1,5 desvio da média do período — um anel discreto acima da barra
     const desps = data.map((d) => d.despesa), mu = desps.reduce((a, b) => a + b, 0) / n;
     const sd = Math.sqrt(desps.reduce((a, b) => a + (b - mu) ** 2, 0) / n);
@@ -546,15 +551,24 @@ function barChartSVG(data, sel) {
   // overlay de interação: por mês, guia vertical + tooltip + área de toque (hover via CSS, toque via .on)
   data.forEach((d, i) => {
     const cx = padL + (i + 0.5) * slot, saldo = d.receita - d.despesa;
-    const tipW = 150, tipH = 82, flip = cx + 14 + tipW > W - padR;
+    const mmOn = n >= 3;
+    const tipW = mmOn ? 214 : 150, tipH = mmOn ? 106 : 82, flip = cx + 14 + tipW > W - padR;
     const tx = flip ? cx - 14 - tipW : cx + 14, ty = padT + 2;
+    const cV = tipW - (mmOn ? 74 : 12), cM = tipW - 12; // coluna do valor e coluna da média móvel
+    // saldo usa fmtSigned: fmtShort passa Math.abs e um saldo negativo apareceria como positivo
+    const linha = (y, rot, v, m, col, F = fmtShort, forte) =>
+      `<text x="12" y="${y}" font-size="11" fill="var(--sub)">${rot}</text>`
+      + `<text x="${cV}" y="${y}" text-anchor="end" font-size="${forte ? 11.5 : 11}" font-weight="700" fill="${col}">${F(v)}</text>`
+      + (mmOn ? `<text x="${cM}" y="${y}" text-anchor="end" font-size="11" fill="${col}" fill-opacity=".62">${F(m)}</text>` : "");
     const tip = `<g class="rd-tip" transform="translate(${tx.toFixed(1)} ${ty})">`
       + `<rect width="${tipW}" height="${tipH}" rx="9" fill="var(--card)" stroke="var(--border)"/>`
       + `<text x="12" y="19" font-size="11.5" font-weight="700" fill="var(--ink)">${d.mes}</text>`
-      + `<text x="12" y="38" font-size="11" fill="var(--sub)">Receitas</text><text x="${tipW - 12}" y="38" text-anchor="end" font-size="11" font-weight="700" fill="${C.receita}">${fmtShort(d.receita)}</text>`
-      + `<text x="12" y="54" font-size="11" fill="var(--sub)">Despesas</text><text x="${tipW - 12}" y="54" text-anchor="end" font-size="11" font-weight="700" fill="${C.despesa}">${fmtShort(d.despesa)}</text>`
-      + `<line x1="12" y1="62" x2="${tipW - 12}" y2="62" stroke="var(--border)"/>`
-      + `<text x="12" y="76" font-size="11" fill="var(--sub)">Saldo</text><text x="${tipW - 12}" y="76" text-anchor="end" font-size="11.5" font-weight="700" fill="${C_SALDO}">${fmtSigned(saldo)}</text>`
+      + (mmOn ? `<text x="${cV}" y="19" text-anchor="end" font-size="9.5" fill="var(--subtle)">no mês</text>`
+              + `<text x="${cM}" y="19" text-anchor="end" font-size="9.5" fill="var(--subtle)">méd 3m</text>` : "")
+      + linha(mmOn ? 40 : 38, "Receitas", d.receita, MM.receita[i], C.receita)
+      + linha(mmOn ? 58 : 54, "Despesas", d.despesa, MM.despesa[i], C.despesa)
+      + `<line x1="12" y1="${mmOn ? 68 : 62}" x2="${tipW - 12}" y2="${mmOn ? 68 : 62}" stroke="var(--border)"/>`
+      + linha(mmOn ? 86 : 76, "Saldo", saldo, MM.saldo[i], C_SALDO, fmtSigned, true)
       + `</g>`;
     g += `<g class="rd-col${i === sel ? " on" : ""}">`
       + `<line class="rd-guide" x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${padT + plotH}" stroke="${C_SALDO}" stroke-width="1" stroke-dasharray="3 3"/>`
@@ -632,6 +646,10 @@ function blkReceitaDespesa() {
   const iFoco = s.findIndex((d) => d.ym === dashMonthYM());
   const sel = (typeof state.rdSel === "number" && state.rdSel >= 0 && state.rdSel < n) ? state.rdSel : (iFoco >= 0 ? iFoco : null);
   const st = rdStats(s), gCls = st.guardado >= 0 ? "pos" : "neg";
+  // mesmas médias móveis que o gráfico desenha — usadas na explicação da legenda
+  const _mm3 = (k) => { const w = s.slice(-3); return w.length ? w.reduce((a, d) => a + (k === "saldo" ? d.receita - d.despesa : d[k]), 0) / w.length : 0; };
+  const _desps = s.map((d) => d.despesa), _mu = n ? _desps.reduce((a, b) => a + b, 0) / n : 0;
+  const MM_UI = { receita: _mm3("receita"), despesa: _mm3("despesa"), saldo: _mm3("saldo"), sd: n ? Math.sqrt(_desps.reduce((a, b) => a + (b - _mu) ** 2, 0) / n) : 0 };
   const chips = [...opts.map((x) => ({ k: String(x), lb: x + "M" })), { k: "all", lb: "Tudo" }].map((r) => `<button class="pc-range${range === r.k ? " on" : ""}" data-rdrange="${r.k}">${r.lb}</button>`).join("");
   const baseTxt = st.todos ? `${n} ${n === 1 ? "mês" : "meses"} (nenhum fechado ainda)` : `${st.nFech} ${st.nFech === 1 ? "mês fechado" : "meses fechados"}`;
   const cards = `<div class="rd-stats">
@@ -653,11 +671,11 @@ function blkReceitaDespesa() {
     ${opts.length ? `<div class="pc-ranges"><div class="pc-chips">${chips}</div></div>` : ""}
     ${cards}
     <div class="chart" style="height:260px">${barChartSVG(s, sel)}</div>
-    <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span><span><i class="line" style="background:${C_SALDO}"></i> Saldo</span>${n >= 4 ? `<span><i class="line dash" style="background:${C.despesa}"></i> Média móvel 3m</span><span><i class="ring"></i> Mês atípico</span>` : ""}</div>
-    ${n >= 4 ? `<div class="legend-note">A linha tracejada é a média das despesas dos 3 últimos meses de cada ponto. O anel marca os meses cuja despesa passou de 1,5 desvio-padrão da média do período — foi um mês fora da curva, não o seu normal. ${xp("Média móvel e mês atípico",
-      "média móvel = média das despesas dos 3 meses até ali",
-      `desvio-padrão das despesas do período: <b class="num">${fmt(Math.sqrt(s.reduce((a, d) => a + (d.despesa - s.reduce((x, y) => x + y.despesa, 0) / n) ** 2, 0) / n))}</b><br>marca o mês que sai de ±1,5 desse valor`,
-      "Serve pra você não ler um mês excepcional como se fosse tendência.")}</div>` : ""}
+    <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span><span><i class="line" style="background:${C_SALDO}"></i> Saldo</span>${n >= 4 ? `<span><i class="line dash"></i> Média móvel 3m (tracejado, na cor de cada série)</span><span><i class="ring"></i> Mês atípico</span>` : ""}</div>
+    ${n >= 4 ? `<div class="legend-note">Cada série tem sua média móvel de 3 meses tracejada na mesma cor — receitas, despesas e saldo. Passe o mouse (ou toque) num mês para ver os dois números lado a lado. O anel marca os meses cuja despesa passou de 1,5 desvio-padrão da média do período. ${xp("Médias móveis e mês atípico",
+      "média dos 3 últimos meses até cada ponto, em cada série",
+      `no último mês do período:<br>receitas ${_n(MM_UI.receita)} · despesas ${_n(MM_UI.despesa)} · saldo <b class="num">${fmtSigned(MM_UI.saldo)}</b><br>desvio-padrão das despesas: <b class="num">${fmt(MM_UI.sd)}</b> → o anel marca quem sai de ±1,5 disso`,
+      "A média móvel suaviza o mês excepcional: serve pra você não ler um pico isolado como se fosse tendência.")}</div>` : ""}
   </div>`;
 }
 /* meses e despesas por categoria a partir das transações reais */
@@ -1146,7 +1164,7 @@ function statementBand() {
   const txt = desvio == null ? "sem meses fechados antes deste para comparar"
     : p.corrente ? `no ritmo de <b class="num">${fmtShort(ritmo)}</b> · ${mediaTxt}`
     : `mês fechado · ${mediaTxt}`;
-  const rotulo = desvio == null ? "" : desvio > 0.08 ? `${Math.round(desvio * 100)}% acima do normal` : desvio < -0.08 ? `${Math.round(-desvio * 100)}% abaixo do normal` : "no ritmo";
+  const rotulo = desvio == null ? "" : desvio > 0.08 ? `${Math.round(desvio * 100)}% acima do normal` : desvio < -0.08 ? `${Math.round(-desvio * 100)}% abaixo do normal` : (p.corrente ? "no ritmo" : "na média");
   const escala = Math.max(media, ritmo, gasto, 1);
   const pctMes = Math.round(p.frac * 100);
   // a marca do "esperado" só faz sentido no mês em curso; no mês fechado a referência é a média cheia
