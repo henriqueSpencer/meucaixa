@@ -524,6 +524,21 @@ function barChartSVG(data, sel) {
     });
     if (i % lblStep === 0 || i === n - 1) g += `<text x="${cx}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--subtle)">${d.mes}</text>`;
   });
+  // média móvel de 3 meses da despesa: a referência visual que faltava ("compared to what?").
+  // Sem ela, 12 barras são 12 números soltos; com ela, dá pra ver o que é normal e o que fugiu.
+  if (n >= 4) {
+    const mm = data.map((_, i) => { const w = data.slice(Math.max(0, i - 2), i + 1); return w.reduce((s, d) => s + d.despesa, 0) / w.length; });
+    const mp = mm.map((v, i) => [padL + (i + 0.5) * slot, Y(v)]);
+    g += `<path d="M${mp.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" L ")}" fill="none" stroke="${C.despesa}" stroke-opacity=".5" stroke-width="1.6" stroke-dasharray="5 4" stroke-linejoin="round"/>`;
+    // meses atípicos: despesa a mais de 1,5 desvio da média do período — um anel discreto acima da barra
+    const desps = data.map((d) => d.despesa), mu = desps.reduce((a, b) => a + b, 0) / n;
+    const sd = Math.sqrt(desps.reduce((a, b) => a + (b - mu) ** 2, 0) / n);
+    if (sd > 0) data.forEach((d, i) => {
+      if (Math.abs(d.despesa - mu) < 1.5 * sd) return;
+      const cx = padL + (i + 0.5) * slot + gap / 2 + bw / 2;
+      g += `<circle cx="${cx.toFixed(1)}" cy="${(Y(d.despesa) - 7).toFixed(1)}" r="3" fill="none" stroke="${C.despesa}" stroke-width="1.4"><title>mês atípico</title></circle>`;
+    });
+  }
   // linha de saldo por cima
   const pts = data.map((d, i) => [padL + (i + 0.5) * slot, Y(d.receita - d.despesa)]);
   if (pts.length > 1) g += `<path d="M${pts.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" L ")}" fill="none" stroke="${C_SALDO}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>`;
@@ -769,10 +784,22 @@ function catDonutBlock(tipo) {
   const totColor = tipo === "despesa" ? "var(--neg)" : "var(--pos)";
   const titleTxt = tipo === "despesa" ? "Despesas por categoria" : "Ganhos por categoria";
   const semTxt = tipo === "despesa" ? "despesas" : "ganhos";
-  const center = ao
-    ? `<div class="donut-center"><span class="dc-nm">${active}</span><strong class="num">${fmtShort(ao.valor)}</strong><span class="dc-pct">${(ao.valor / total * 100).toFixed(1)}%</span></div>`
-    : `<div class="donut-center"><span>total</span><strong class="num">${fmtShort(total)}</strong></div>`;
-  const legend = data.map((d, i) => `<li class="cat-leg${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${d.nome}"><i style="background:${catColor(i)}"></i><span>${d.nome}</span><b class="lg-pct">${(d.valor / total * 100).toFixed(0)}%</b><b class="num lg-val">${fmtShort(d.valor)}</b></li>`).join("");
+  // Barras ordenadas no lugar da rosca: ângulo se compara mal, e a rosca não respondia "comparado
+  // a quê?". Cada linha traz o Δ contra a média dos 3 meses anteriores + sparkline de 12 meses.
+  const cor = tipo === "despesa" ? C.despesa : C.receita;
+  const maxV = Math.max(1, ...data.map((d) => d.valor));
+  const antes = catMediaAnterior(tipo, ym, drill, 3);
+  const legend = data.map((d) => {
+    const md = antes[d.nome];
+    const delta = md > 0 ? (d.valor - md) / md : null;
+    const dCls = delta == null ? "novo" : delta > 0.1 ? "up" : delta < -0.1 ? "down" : "flat";
+    const dTxt = delta == null ? "novo" : `${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}%`;
+    const serie = catSerie(tipo, ym, drill, d.nome, 12);
+    return `<li class="cat-bar${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${attr(d.nome)}">
+      <div class="cb-top"><span class="cb-nm">${d.nome}</span><span class="cb-sp">${sparkSVG(serie, cor)}</span><b class="cb-delta ${dCls}" title="${md > 0 ? `média dos 3 meses anteriores: ${fmtShort(md)}` : "não aparecia nos 3 meses anteriores"}">${dTxt}</b><b class="num cb-val">${fmtShort(d.valor)}</b></div>
+      <div class="cb-track"><i style="width:${(d.valor / maxV * 100).toFixed(1)}%;background:${cor}"></i></div>
+    </li>`;
+  }).join("");
   const head = drill
     ? `<div class="cd-head-l"><button class="cd-back" data-donut-back="${tipo}" aria-label="Voltar">${ic("arrow-left", 16)}</button><div><h3>${drill}</h3><span class="card-sub">subcategorias</span></div></div>`
     : `<h3>${titleTxt}</h3>`;
@@ -786,10 +813,34 @@ function catDonutBlock(tipo) {
     <div class="card-head">${head}
       <div class="cd-nav"><button class="cd-arrow" data-donut-month="${tipo}|prev" ${idx <= 0 ? "disabled" : ""} aria-label="Mês anterior">${ic("arrow-left", 15)}</button><span class="cd-month">${ym ? ymLabel(ym) : "—"}</span><button class="cd-arrow" data-donut-month="${tipo}|next" ${idx >= months.length - 1 ? "disabled" : ""} aria-label="Próximo mês">${ic("arrow-right", 15)}</button></div>
     </div>
-    ${data.length ? `<div class="donut-wrap"><div class="donut-box">${catDonut(tipo, data, active)}${center}</div><ul class="cat-legend cd-legend">${legend}</ul></div>
+    ${data.length ? `<ul class="cat-bars">${legend}</ul>
     <div class="cd-foot"><span class="cd-total">Total <b class="num" style="color:${totColor}">${fmt(total)}</b></span>${actions}</div>`
       : `<div class="empty-mini">Sem ${semTxt} ${drill ? `em ${drill}` : "neste mês"}.</div>`}
   </div>`;
+}
+// média de uma categoria (ou subcategoria, quando em drill) nos N meses ANTERIORES ao exibido —
+// é o baseline que faltava: sem ele, R$ 1.400 pode ser +80% ou −30% e o desenho é idêntico.
+function catMediaAnterior(tipo, ym, drill, n) {
+  const ms = txMonths().filter((k) => k < ym).slice(-n);
+  const out = {};
+  if (!ms.length) return out;
+  ms.forEach((k) => { (drill ? bySub(tipo, drill, k) : byCat(tipo, k)).forEach((d) => { out[d.nome] = (out[d.nome] || 0) + d.valor; }); });
+  Object.keys(out).forEach((k) => { out[k] = out[k] / ms.length; });
+  return out;
+}
+// série dos últimos n meses até `ym` para uma categoria/sub — alimenta a sparkline (small multiples)
+function catSerie(tipo, ym, drill, nome, n) {
+  const all = txMonths().filter((k) => k <= ym);
+  const ms = all.slice(-n);
+  return ms.map((k) => { const row = (drill ? bySub(tipo, drill, k) : byCat(tipo, k)).find((d) => d.nome === nome); return row ? Math.max(0, row.valor) : 0; });
+}
+function sparkSVG(vals, cor, w = 54, h = 16) {
+  if (!vals || vals.length < 2) return "";
+  const max = Math.max(1, ...vals), n = vals.length;
+  const pt = (v, i) => [(i / (n - 1)) * (w - 2) + 1, h - 1.5 - (v / max) * (h - 4)];
+  const d = vals.map((v, i) => { const [x, y] = pt(v, i); return `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`; }).join(" ");
+  const [lx, ly] = pt(vals[n - 1], n - 1);
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="${cor}" stroke-opacity=".55" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="1.9" fill="${cor}"/></svg>`;
 }
 function blkPatrimonio() {
   const full = netWorthSeries(), N = full.length;
@@ -873,18 +924,109 @@ function blkPatrimonio() {
 function blkUltimas() {
   return `<div class="card"><div class="card-head"><h3>Últimas transações</h3><button class="link" data-tab="transacoes">ver todas ${ic("arrow-right", 13)}</button></div><div class="mini-list">${state.tx.slice(0, 5).map((t) => `<div class="mini-row click" data-tx-open="${t.id}"><div class="mini-l">${badgeHTML(t.tipo, true)}<div><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.tipo === "transferencia" ? `${t.origem} → ${t.destino}` : `${t.cat}${t.sub ? " · " + t.sub : ""}`}</div></div></div>${moneyHTML(t.tipo, t.valor)}</div>`).join("")}</div></div>`;
 }
+/* ---------- Fora do padrão: a ponte Informação → Conhecimento ----------
+   Compara o gasto de cada categoria no mês corrente com o RITMO dela nos meses fechados, ajustado
+   pelo quanto do mês já passou. É o único bloco que aponta ação sem o usuário ir procurar. */
+function foraDoPadrao() {
+  const ym = TODAY_ISO.slice(0, 7), p = monthProgress(ym);
+  const base = mesesFechados(6);
+  if (p.frac <= 0 || base.length < 2) return []; // sem histórico não existe "padrão"
+  const set = new Set(base), atual = {}, hist = {}, histAte = {};
+  state.tx.forEach((t) => {
+    if (t.tipo !== "despesa" && t.tipo !== "reembolso") return;
+    const iso = t.iso || "", k = iso.slice(0, 7); if (!k) return;
+    const c = t.cat || "—", v = (t.tipo === "reembolso" ? -1 : 1) * Math.abs(t.valor);
+    if (k === ym) { if (+iso.slice(8, 10) <= p.dia) atual[c] = (atual[c] || 0) + v; }
+    else if (set.has(k)) { hist[c] = (hist[c] || 0) + v; if (+iso.slice(8, 10) <= p.dia) histAte[c] = (histAte[c] || 0) + v; }
+  });
+  const out = [];
+  Object.keys(atual).forEach((c) => {
+    const total = hist[c] || 0, mediaMes = total / base.length;
+    // Quanto do mês típico DESTA categoria já teria sido gasto até hoje. Usar a fração do calendário
+    // (dia/dias) suporia gasto uniforme — falso pra aluguel, salário e assinatura, que caem em dia
+    // certo: no dia 8 o bloco acusaria "Fixos +275%" todo mês. Aqui a referência é o próprio histórico.
+    const frac = total > 0 ? Math.min(1, Math.max(0, (histAte[c] || 0) / total)) : p.frac;
+    const esperado = mediaMes * frac, exc = atual[c] - esperado;
+    // só entra o que vale uma decisão: ≥ R$50 de excedente E ≥25% de um mês típico da categoria
+    if (atual[c] > 0 && exc >= 50 && exc >= 0.25 * Math.max(mediaMes, 1)) {
+      out.push({ cat: c, atual: atual[c], esperado, exc, pct: esperado > 0 ? exc / esperado : null, novo: mediaMes <= 0 });
+    }
+  });
+  return out.sort((a, b) => b.exc - a.exc).slice(0, 5);
+}
+function blkForaDoPadrao() {
+  const rows = foraDoPadrao(), p = monthProgress(TODAY_ISO.slice(0, 7));
+  const body = rows.length
+    ? rows.map((r) => `<div class="fp-row click" data-cat-detail="despesa|${attr(r.cat)}"><span class="fp-ic">${ic(catIcon(r.cat), 15)}</span>
+        <div class="fp-mid"><div class="fp-nm">${r.cat}</div><div class="fp-sub">${r.novo ? "não costuma aparecer" : `esperado até hoje ${fmtShort(r.esperado)}`}</div></div>
+        <div class="fp-right"><b class="num">${fmtNum(r.atual)}</b><span class="fp-delta">${r.pct == null ? "novo" : `+${Math.round(r.pct * 100)}%`}</span></div></div>`).join("")
+    : `<div class="empty-mini">${mesesFechados(6).length < 2 ? "Ainda não há meses fechados suficientes para saber o que é o seu padrão." : "Tudo dentro do ritmo por enquanto."}</div>`;
+  return `<div class="card">
+    <div class="card-head"><div><h3>Fora do padrão neste mês</h3><span class="card-sub">contra o ritmo dos últimos ${mesesFechados(6).length} meses fechados, no dia ${p.dia} de ${p.dias}</span></div></div>
+    <div class="fp-list">${body}</div>
+  </div>`;
+}
+
+/* ---------- Comprometido × escolha: os potes do Kakeibo ----------
+   Só aparece se a conta usa a estrutura de potes — senão o bloco se esconde (render vazio). */
+const POTES = [
+  { nome: "Fixos", cor: C.patrimonio, nota: "decidido antes do mês começar" },
+  { nome: "Sobrevivência", cor: "#8A7A5C", nota: "varia, mas é inevitável" },
+  { nome: "Lazer", cor: C.despesa, nota: "escolha sua — onde dá pra cortar" },
+  { nome: "Extras", cor: "#A65B4E", nota: "grande e irregular" },
+];
+function potesMedia() {
+  const ms = mesesFechados(12); if (!ms.length) return null;
+  const disp = POTES.filter((p) => catTree.despesa.some((c) => c.nome === p.nome));
+  if (disp.length < 3) return null; // conta não usa a estrutura — o bloco não faz sentido
+  const set = new Set(ms), acc = {};
+  state.tx.forEach((t) => {
+    if (t.tipo !== "despesa" && t.tipo !== "reembolso") return;
+    const k = (t.iso || "").slice(0, 7); if (!set.has(k)) return;
+    acc[t.cat || "—"] = (acc[t.cat || "—"] || 0) + (t.tipo === "reembolso" ? -1 : 1) * Math.abs(t.valor);
+  });
+  const itens = disp.map((p) => ({ ...p, valor: Math.max(0, (acc[p.nome] || 0) / ms.length) }));
+  const total = itens.reduce((s, i) => s + i.valor, 0);
+  return total > 0 ? { itens, total, meses: ms.length } : null;
+}
+function blkPotes() {
+  const d = potesMedia(); if (!d) return "";
+  const comprometido = d.itens.filter((i) => i.nome === "Fixos").reduce((s, i) => s + i.valor, 0);
+  const escolha = d.itens.filter((i) => i.nome === "Lazer").reduce((s, i) => s + i.valor, 0);
+  const barras = d.itens.map((i) => `<i style="width:${(i.valor / d.total * 100).toFixed(2)}%;background:${i.cor}" title="${i.nome}: ${fmt(i.valor)}/mês"></i>`).join("");
+  const legenda = d.itens.map((i) => `<li class="click" data-cat-detail="despesa|${attr(i.nome)}"><i style="background:${i.cor}"></i><span>${i.nome}</span><b class="num">${fmtShort(i.valor)}</b><em>${(i.valor / d.total * 100).toFixed(0)}%</em></li>`).join("");
+  return `<div class="card">
+    <div class="card-head"><div><h3>Comprometido × escolha</h3><span class="card-sub">média por mês dos últimos ${d.meses} ${d.meses === 1 ? "mês fechado" : "meses fechados"}</span></div></div>
+    <div class="potes-bar">${barras}</div>
+    <ul class="potes-leg">${legenda}</ul>
+    <div class="potes-foot">${comprometido > 0 ? `<b class="num">${fmt(comprometido)}</b> já estavam decididos antes do mês começar.` : ""}${escolha > 0 ? ` O que dá pra mexer é <b class="num">${fmt(escolha)}</b>.` : ""}</div>
+  </div>`;
+}
+
+// Ordem = ordem em que uma decisão se forma: o que fugiu do padrão → qual a estrutura → o histórico.
+// Saíram a rosca de "Ganhos por categoria" (a renda é 1-2 fontes; a rosca desenhava uma fatia de 93%
+// pra dizer "salário") e "Últimas transações" (degrau Dado puro, e a aba Transações já faz melhor).
 const DASH_BLOCKS = {
+  foraDoPadrao: { title: "Fora do padrão neste mês", sub: "o que fugiu do ritmo", icon: "circle-alert", cor: C.despesa, render: blkForaDoPadrao },
+  potes: { title: "Comprometido × escolha", sub: "estrutura do gasto", icon: "checklist", cor: C.patrimonio, render: blkPotes },
+  categorias: { title: "Despesas por categoria", sub: "barras com variação", icon: "trending-down", cor: C.despesa, render: () => catDonutBlock("despesa") },
   receitaDespesa: { title: "Receitas × Despesas", sub: "gráfico de barras", icon: "trending-up", cor: C.brand, render: blkReceitaDespesa },
-  categorias: { title: "Despesas por categoria", sub: "rosca", icon: "trending-down", cor: C.despesa, render: () => catDonutBlock("despesa") },
-  ganhos: { title: "Ganhos por categoria", sub: "rosca", icon: "trending-up", cor: C.receita, render: () => catDonutBlock("receita") },
   patrimonio: { title: "Evolução do patrimônio", sub: "área", icon: "building", cor: C.patrimonio, render: blkPatrimonio },
-  ultimas: { title: "Últimas transações", sub: "lista", icon: "list", cor: C.transfer, render: blkUltimas },
 };
+// dashOrder vem das prefs sincronizadas e pode ter chave de bloco que não existe mais (ex.: "ganhos"),
+// o que quebraria o render. Filtra o desconhecido e injeta os blocos novos na posição declarada.
+function normalizeDashOrder() {
+  const known = Object.keys(DASH_BLOCKS);
+  const o = (state.dashOrder || []).filter((k, i, a) => known.includes(k) && a.indexOf(k) === i);
+  known.forEach((k, i) => { if (!o.includes(k)) o.splice(Math.min(i, o.length), 0, k); });
+  state.dashOrder = o;
+}
 
 function dashEditor() {
   const last = state.dashOrder.length - 1;
   const rows = state.dashOrder.map((key, idx) => {
     const b = DASH_BLOCKS[key];
+    if (!b) return "";
     return `<div class="dash-edit-row${state.dragKey === key ? " dragging" : ""}" draggable="true" data-dash-row="${key}">
       <span class="der-grip" title="Arraste para reordenar">${ic("grip", 17)}</span>
       <span class="der-ic" style="background:${b.cor}1A;color:${b.cor}">${ic(b.icon, 17)}</span>
@@ -918,19 +1060,63 @@ function monthTotals(ym) {
 function refMonthYM() { return (OF && OF.refMonthYM) || TODAY_ISO.slice(0, 7); }
 // eixo de meses p/ navegação: os meses com lançamento + o mês atual (mesmo sem lançamento)
 function monthsAxis() { const s = new Set(txMonths()); s.add(TODAY_ISO.slice(0, 7)); return [...s].sort(); }
+/* ---------- base das leituras "comparado a quê?" ----------
+   Todo número do topo do dashboard é uma TAXA comparada a uma referência. Sem isso, "gastei R$ 3.180"
+   não diz se está bom ou ruim — e um número que não vira decisão é métrica de vaidade. */
+// quanto do mês já passou (no mês corrente; meses passados contam inteiros)
+function monthProgress(ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const dias = new Date(y, m, 0).getDate();
+  const corrente = TODAY_ISO.slice(0, 7) === ym;
+  const dia = corrente ? Math.min(+TODAY_ISO.slice(8, 10), dias) : dias;
+  return { dias, dia, frac: dias ? dia / dias : 1, corrente };
+}
+// meses FECHADOS (exclui o corrente, que está pela metade) — base de qualquer média honesta
+function mesesFechados(n) { const cur = TODAY_ISO.slice(0, 7); const ms = txMonths().filter((ym) => ym < cur); return n ? ms.slice(-n) : ms; }
+const gastoMes = (ym) => monthTotals(ym).desp; // já é líquido de reembolso
+function gastoMedio(n = 12) { const ms = mesesFechados(n); return ms.length ? ms.reduce((s, ym) => s + gastoMes(ym), 0) / ms.length : 0; }
+// caixa disponível = só contas financeiras (cartão entra negativo, é dívida de curto prazo).
+// Imóvel e alocação de patrimônio NÃO contam: não dá pra viver do apartamento no mês que vem.
+const caixaDisponivel = () => accounts.filter((a) => !a.arquivada && a.grupo === "fin").reduce((s, a) => s + acctTotal(a), 0);
+// meses de reserva ("runway"): a pergunta mais consequente de finanças pessoais
+function reservaMeses() { const g = gastoMedio(12); return g > 0 ? caixaDisponivel() / g : null; }
+
+// Faixa do topo: o mês CORRENTE contra o próprio normal. Substituiu o "Patrimônio líquido" em corpo
+// grande — que sobe com aporte, com o mercado e com o imóvel, e não mede escolha nenhuma deste mês.
 function statementBand() {
-  const ym = refMonthYM();
-  const t = ym ? monthTotals(ym) : { rec: 0, desp: 0 }; // sem lançamentos → zero (não mock)
-  const rec = t.rec, desp = t.desp, res = rec - desp;
-  const cap = ym ? monthLabel(ym) : (REF_LABEL.charAt(0).toUpperCase() + REF_LABEL.slice(1));
+  const ym = TODAY_ISO.slice(0, 7);
+  const p = monthProgress(ym), t = monthTotals(ym);
+  const gasto = t.desp, rec = t.rec;
+  const media = gastoMedio(12), nFech = mesesFechados(12).length;
+  const ritmo = p.frac > 0 ? gasto / p.frac : 0;          // projeção do mês inteiro no ritmo de hoje
+  const esperado = media * p.frac;                         // quanto seria normal ter gasto até hoje
+  const desvio = media > 0 ? (ritmo - media) / media : null;
+  const cls = desvio == null ? "" : desvio > 0.08 ? "over" : desvio < -0.08 ? "under" : "ok";
+  const txt = desvio == null ? "sem meses fechados para comparar ainda"
+    : `no ritmo de <b class="num">${fmtShort(ritmo)}</b> · média de ${nFech} ${nFech === 1 ? "mês" : "meses"} <b class="num">${fmtShort(media)}</b>`;
+  const rotulo = desvio == null ? "" : desvio > 0.08 ? `${Math.round(desvio * 100)}% acima do normal` : desvio < -0.08 ? `${Math.round(-desvio * 100)}% abaixo do normal` : "no ritmo";
+  // barra: o preenchido é o que já foi gasto sobre a média do mês; o traço é onde "deveria" estar hoje
+  const escala = Math.max(media, ritmo, gasto, 1);
+  const bar = media > 0 ? `<div class="pace-bar" title="gasto até hoje contra o esperado para o dia ${p.dia}">
+      <i class="pace-fill ${cls}" style="width:${Math.min(100, gasto / escala * 100).toFixed(1)}%"></i>
+      <span class="pace-mark" style="left:${Math.min(100, esperado / escala * 100).toFixed(1)}%"></span>
+    </div><div class="pace-legend"><span>esperado até o dia ${p.dia}: <b class="num">${fmtShort(esperado)}</b></span></div>` : "";
+  const res = rec - gasto;
+  const poup = rec > 0 ? Math.round(res / rec * 100) : null;
+  const reserva = reservaMeses();
   return `<div class="statement">
-    <div class="stmt-top"><span class="stmt-eyebrow">Extrato</span><span class="stmt-period">${cap}</span></div>
+    <div class="stmt-top"><span class="stmt-eyebrow">Este mês</span><span class="stmt-period">${monthLabel(ym)} · dia ${p.dia} de ${p.dias}</span></div>
     <div class="stmt-main">
-      <div class="stmt-net"><span class="stmt-lbl">Patrimônio líquido</span><span class="stmt-big num">${fmt(netWorth())}</span></div>
+      <div class="stmt-net">
+        <span class="stmt-lbl">Gasto até agora</span>
+        <span class="stmt-big num">${fmt(gasto)}</span>
+        <span class="stmt-pace ${cls}">${rotulo ? `<b class="pace-tag">${rotulo}</b> ` : ""}${txt}</span>
+        ${bar}
+      </div>
       <div class="stmt-ledger">
+        <div class="stmt-row"><span class="sl-k">Reserva</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
         <div class="stmt-row"><span class="sl-k">Receitas do mês</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
-        <div class="stmt-row"><span class="sl-k">Despesas do mês</span><span class="sl-op">−</span><span class="sl-v num" style="color:var(--neg)">${fmtNum(desp)}</span></div>
-        <div class="stmt-row total"><span class="sl-k">Resultado</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(res)}</span></div>
+        <div class="stmt-row total"><span class="sl-k">Sobrou até agora</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(Math.abs(res))}${poup != null ? ` <small class="sl-pct">${poup}%</small>` : ""}</span></div>
       </div>
     </div>
   </div>`;
@@ -1141,6 +1327,7 @@ function viewPatrimonial() {
 }
 
 function viewDashboard() {
+  normalizeDashOrder();
   const edit = state.dashEdit;
   return `
   <div class="dash-tools">
@@ -1148,7 +1335,7 @@ function viewDashboard() {
     ${edit ? `<span class="dash-hint">Arraste os blocos ou use as setas para mudar a ordem.</span>` : ""}
   </div>
   ${statementBand()}
-  ${edit ? dashEditor() : `<div class="dash-grid">${state.dashOrder.map((k) => DASH_BLOCKS[k].render()).join("")}</div>`}`;
+  ${edit ? dashEditor() : `<div class="dash-grid">${state.dashOrder.map((k) => (DASH_BLOCKS[k] ? DASH_BLOCKS[k].render() : "")).filter(Boolean).join("")}</div>`}`;
 }
 
 const chipLabel = (t) => (t === "cartao" ? "cartão" : t === "invest" ? "investimento" : t === "imovel" ? "imóvel" : t);
@@ -2255,7 +2442,7 @@ const state = {
   // detalhe de categoria/subcategoria (todos os lançamentos)
   catDetail: null,
   // dashboard
-  dashEdit: false, dashOrder: ["receitaDespesa", "categorias", "ganhos", "patrimonio", "ultimas"], dragKey: null,
+  dashEdit: false, dashOrder: ["foraDoPadrao", "potes", "categorias", "receitaDespesa", "patrimonio"], dragKey: null,
   // drill-down + pop-ups
   drill: null, pop: null, editTx: null,
   // donuts de categoria (despesas e ganhos), cada um com mês/seleção/drill próprios
@@ -2295,6 +2482,7 @@ function applyModel(m) {
   if (Array.isArray(m.assetMoves)) { assetMoves.length = 0; m.assetMoves.forEach((x) => assetMoves.push(x)); }
   if (m.prefs && typeof m.prefs === "object") state.prefs = m.prefs;
   if (Array.isArray(m.dashOrder) && m.dashOrder.length) state.dashOrder = m.dashOrder;
+  normalizeDashOrder();
 }
 // as linhas voltam do banco na ordem de `updated_at` (empates = ordem física da tabela), então sem
 // ordenar aqui a aba Transações e o bloco "Últimas transações" mostravam lançamentos arbitrários —

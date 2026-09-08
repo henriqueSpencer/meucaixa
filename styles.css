@@ -139,6 +139,20 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .sl-k{color:var(--sub)}
 .sl-op{color:var(--subtle);text-align:center;font-family:'JetBrains Mono',monospace}
 .sl-v{text-align:right;font-weight:600;min-width:120px}
+/* leitura de ritmo do mês: o herói deixou de ser patrimônio líquido (sobe sozinho) e passou a ser
+   "quanto gastei contra o meu normal" — a única versão do número que sugere ação. */
+.stmt-pace{font-size:12.5px;color:var(--sub);line-height:1.5;max-width:46ch}
+.stmt-pace b.num{color:var(--ink)}
+.pace-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:20px;padding:2px 9px;margin-right:6px}
+.stmt-pace.ok .pace-tag{color:var(--pos);background:color-mix(in srgb,var(--pos) 12%,transparent)}
+.stmt-pace.over .pace-tag{color:var(--neg);background:color-mix(in srgb,var(--neg) 12%,transparent)}
+.stmt-pace.under .pace-tag{color:var(--brand);background:color-mix(in srgb,var(--brand) 14%,transparent)}
+.pace-bar{position:relative;height:9px;border-radius:6px;background:var(--card-2);border:1px solid var(--border);overflow:hidden;margin-top:4px;max-width:420px}
+.pace-fill{display:block;height:100%;background:var(--line-strong);transition:width .3s}
+.pace-fill.ok{background:var(--pos)} .pace-fill.over{background:var(--neg)} .pace-fill.under{background:var(--brand)}
+.pace-mark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.55;border-radius:2px}
+.pace-legend{font-size:11.5px;color:var(--subtle);margin-top:5px}
+.sl-pct{font-size:11.5px;color:var(--subtle);font-weight:600}
 .stmt-row.total{border-bottom:none;border-top:2px solid var(--ink);margin-top:3px;padding-top:9px}
 .stmt-row.total .sl-k{color:var(--ink);font-weight:700}
 .stmt-row.total .sl-v{font-weight:700}
@@ -805,6 +819,44 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .cat-leg span{color:var(--ink)}
 .cat-leg .lg-pct{color:var(--subtle);font-size:11.5px;font-weight:600;min-width:30px;text-align:right}
 .cat-leg .lg-val{font-weight:600;min-width:64px;text-align:right}
+/* categorias em barras ordenadas (substituiu a rosca): valor + Δ vs. média de 3 meses + sparkline */
+.cat-bars{list-style:none;display:flex;flex-direction:column;gap:11px;margin:2px 0 0}
+.cat-bar{cursor:pointer;padding:3px 5px;margin:0 -5px;border-radius:8px;transition:background .12s}
+.cat-bar:hover{background:var(--card-2)}
+.cat-bar.on{background:color-mix(in srgb,var(--brand) 10%,transparent)}
+.cb-top{display:flex;align-items:center;gap:9px;font-size:13px}
+.cb-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.cb-sp{display:flex;align-items:center;flex:none;opacity:.9}
+.cb-delta{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;flex:none;min-width:44px;text-align:right}
+.cb-delta.up{color:var(--neg)} .cb-delta.down{color:var(--pos)}
+.cb-delta.flat{color:var(--subtle)} .cb-delta.novo{color:var(--brand)}
+.cb-val{flex:none;min-width:62px;text-align:right;color:var(--ink);font-weight:600}
+.cb-track{height:6px;border-radius:4px;background:var(--card-2);overflow:hidden;margin-top:5px}
+.cb-track i{display:block;height:100%;border-radius:4px}
+/* fora do padrão: o bloco que aponta ação sem o usuário procurar */
+.fp-list{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.fp-row{display:flex;align-items:center;gap:11px;padding:10px 6px;border-radius:9px;border-bottom:1px solid var(--hair)}
+.fp-row:last-child{border-bottom:0}
+.fp-row.click{cursor:pointer} .fp-row.click:hover{background:var(--card-2)}
+.fp-ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none;background:color-mix(in srgb,var(--neg) 12%,transparent);color:var(--neg)}
+.fp-mid{flex:1;min-width:0}
+.fp-nm{font-size:14px;font-weight:600;color:var(--ink)}
+.fp-sub{font-size:11.5px;color:var(--subtle);margin-top:1px}
+.fp-right{text-align:right;flex:none}
+.fp-right b{display:block;font-size:14px;color:var(--ink)}
+.fp-delta{font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:600;color:var(--neg)}
+/* comprometido × escolha: a estrutura do gasto numa barra só */
+.potes-bar{display:flex;height:30px;border-radius:8px;overflow:hidden;border:1px solid var(--border);margin:10px 0 12px}
+.potes-bar i{display:block;height:100%}
+.potes-leg{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px 14px;margin:0}
+.potes-leg li{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--sub);cursor:pointer;border-radius:6px;padding:2px 4px;margin:0 -4px}
+.potes-leg li:hover{background:var(--card-2)}
+.potes-leg li i{width:9px;height:9px;border-radius:3px;flex:none}
+.potes-leg li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.potes-leg li b{color:var(--ink);font-weight:600}
+.potes-leg li em{font-style:normal;color:var(--subtle);font-size:11px;min-width:28px;text-align:right}
+.potes-foot{font-size:12.5px;color:var(--sub);margin-top:12px;padding-top:11px;border-top:1px solid var(--hair);line-height:1.55}
+.potes-foot b{color:var(--ink)}
 .cd-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:12px;border-top:2px solid var(--ink)}
 .cd-total{font-size:13px;color:var(--sub)}
 .cd-total b{margin-left:6px;font-size:14px}
