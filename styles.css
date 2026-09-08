@@ -854,6 +854,10 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .cat-leg i{width:9px;height:9px;border-radius:3px;flex-shrink:0}
 .cat-leg span{color:var(--ink)}
 .cat-leg .lg-pct{color:var(--subtle);font-size:11.5px;font-weight:600;min-width:30px;text-align:right}
+/* Δ na legenda da rosca: a comparação que o círculo sozinho não dá */
+.cat-leg .lg-delta{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;min-width:42px;text-align:right}
+.cat-leg .lg-delta.up{color:var(--neg)} .cat-leg .lg-delta.down{color:var(--pos)}
+.cat-leg .lg-delta.flat{color:var(--subtle)} .cat-leg .lg-delta.novo{color:var(--brand)}
 .cat-leg .lg-val{font-weight:600;min-width:64px;text-align:right}
 /* categorias em barras ordenadas (substituiu a rosca): valor + Δ vs. média de 3 meses + sparkline */
 .cat-bars{list-style:none;display:flex;flex-direction:column;gap:11px;margin:2px 0 0}

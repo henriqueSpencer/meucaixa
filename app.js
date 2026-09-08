@@ -796,31 +796,29 @@ function catDonutBlock(tipo) {
   const totColor = tipo === "despesa" ? "var(--neg)" : "var(--pos)";
   const titleTxt = tipo === "despesa" ? "Despesas por categoria" : "Ganhos por categoria";
   const semTxt = tipo === "despesa" ? "despesas" : "ganhos";
-  // Barras ordenadas no lugar da rosca: ângulo se compara mal, e a rosca não respondia "comparado
-  // a quê?". Cada linha traz o Δ contra a média dos 3 meses anteriores + sparkline de 12 meses.
-  const cor = tipo === "despesa" ? C.despesa : C.receita;
-  const maxV = Math.max(1, ...data.map((d) => d.valor));
+  // Rosca (preferência do usuário: a proporção se lê melhor num círculo). O ganho que as barras
+  // tinham trazido — a comparação — fica na legenda: cada linha carrega o Δ contra a média dos 3
+  // meses anteriores, que é o que responde "comparado a quê?".
   const antes = catMediaAnterior(tipo, ym, drill, 3);
-  const legend = data.map((d) => {
+  const center = ao
+    ? `<div class="donut-center"><span class="dc-nm">${active}</span><strong class="num">${fmtShort(ao.valor)}</strong><span class="dc-pct">${(ao.valor / total * 100).toFixed(1)}%</span></div>`
+    : `<div class="donut-center"><span>total</span><strong class="num">${fmtShort(total)}</strong></div>`;
+  const legend = data.map((d, i) => {
     const md = antes[d.nome];
     const delta = md > 0 ? (d.valor - md) / md : null;
     const dCls = delta == null ? "novo" : delta > 0.1 ? "up" : delta < -0.1 ? "down" : "flat";
     const dTxt = delta == null ? "novo" : `${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}%`;
-    const serie = catSerie(tipo, ym, drill, d.nome, 12);
     const tip = md > 0
       ? `${d.nome}: ${fmt(d.valor)} neste mês · média dos 3 meses anteriores ${fmt(md)} · diferença ${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}% (${fmtSigned(d.valor - md)})`
       : `${d.nome}: ${fmt(d.valor)} neste mês · não aparecia nos 3 meses anteriores`;
-    return `<li class="cat-bar${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${attr(d.nome)}" title="${attr(tip)}">
-      <div class="cb-top"><span class="cb-nm">${d.nome}</span><span class="cb-sp" title="${attr(`últimos ${serie.length} meses de ${d.nome}`)}">${sparkSVG(serie, cor)}</span><b class="cb-delta ${dCls}">${dTxt}</b><b class="num cb-val">${fmtShort(d.valor)}</b></div>
-      <div class="cb-track"><i style="width:${(d.valor / maxV * 100).toFixed(1)}%;background:${cor}"></i></div>
-    </li>`;
+    return `<li class="cat-leg${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${attr(d.nome)}" title="${attr(tip)}"><i style="background:${catColor(i)}"></i><span>${d.nome}</span><b class="lg-delta ${dCls}">${dTxt}</b><b class="num lg-val">${fmtShort(d.valor)}</b></li>`;
   }).join("");
   const head = drill
     ? `<div class="cd-head-l"><button class="cd-back" data-donut-back="${tipo}" aria-label="Voltar">${ic("arrow-left", 16)}</button><div><h3>${drill}</h3><span class="card-sub">subcategorias</span></div></div>`
-    : `<h3>${titleTxt} ${xp("Como ler esta lista",
-        "barra = tamanho no mês · % = contra a média dos 3 meses anteriores · linha = 12 meses",
-        `mês exibido: <b>${ym ? ymLabel(ym) : "—"}</b><br>a barra é proporcional à maior categoria do mês<br>o % compara com a média dos 3 meses <b>anteriores</b> a este<br>passe o mouse numa linha pra ver os dois valores`,
-        "Barras no lugar da rosca porque ângulo se compara mal. O “% do total” foi tirado de propósito: ele sobe nas outras categorias quando você corta uma, sem ninguém ter gasto mais.")}</h3>`;
+    : `<h3>${titleTxt} ${xp("Como ler este gráfico",
+        "fatia = parte do mês · % ao lado do nome = contra a média dos 3 meses anteriores",
+        `mês exibido: <b>${ym ? ymLabel(ym) : "—"}</b><br>o tamanho da fatia mostra o peso dentro do mês<br>o <b>%</b> de cada linha compara com a média dos 3 meses <b>anteriores</b> a este<br>passe o mouse numa linha pra ver os dois valores`,
+        "O tamanho da fatia sozinho não diz se algo mudou — ele muda quando você corta outra categoria, sem ninguém ter gasto mais. Por isso cada linha carrega o Δ, que é o número que sugere ação.")}</h3>`;
   let actions;
   if (active) {
     actions = drill
@@ -831,7 +829,7 @@ function catDonutBlock(tipo) {
     <div class="card-head">${head}
       <div class="cd-nav"><button class="cd-arrow" data-donut-month="${tipo}|prev" ${idx <= 0 ? "disabled" : ""} aria-label="Mês anterior">${ic("arrow-left", 15)}</button><span class="cd-month">${ym ? ymLabel(ym) : "—"}</span><button class="cd-arrow" data-donut-month="${tipo}|next" ${idx >= months.length - 1 ? "disabled" : ""} aria-label="Próximo mês">${ic("arrow-right", 15)}</button></div>
     </div>
-    ${data.length ? `<ul class="cat-bars">${legend}</ul>
+    ${data.length ? `<div class="donut-wrap"><div class="donut-box">${catDonut(tipo, data, active)}${center}</div><ul class="cat-legend cd-legend">${legend}</ul></div>
     <div class="cd-foot"><span class="cd-total">Total <b class="num" style="color:${totColor}">${fmt(total)}</b></span>${actions}</div>`
       : `<div class="empty-mini">Sem ${semTxt} ${drill ? `em ${drill}` : "neste mês"}.</div>`}
   </div>`;
@@ -1032,12 +1030,14 @@ function blkPotes() {
 }
 
 // Ordem = ordem em que uma decisão se forma: o que fugiu do padrão → qual a estrutura → o histórico.
-// Saíram a rosca de "Ganhos por categoria" (a renda é 1-2 fontes; a rosca desenhava uma fatia de 93%
-// pra dizer "salário") e "Últimas transações" (degrau Dado puro, e a aba Transações já faz melhor).
+// Saiu só "Últimas transações" (degrau Dado puro, e a aba Transações já faz melhor). As roscas de
+// categoria ficaram por escolha do usuário — a proporção se lê melhor num círculo —, mas cada linha
+// da legenda leva o Δ contra os 3 meses anteriores, que é o que a rosca sozinha não conta.
 const DASH_BLOCKS = {
   foraDoPadrao: { title: "Fora do padrão neste mês", sub: "o que fugiu do ritmo", icon: "circle-alert", cor: C.despesa, render: blkForaDoPadrao },
   potes: { title: "Comprometido × escolha", sub: "estrutura do gasto", icon: "checklist", cor: C.patrimonio, render: blkPotes },
-  categorias: { title: "Despesas por categoria", sub: "barras com variação", icon: "trending-down", cor: C.despesa, render: () => catDonutBlock("despesa") },
+  categorias: { title: "Despesas por categoria", sub: "rosca com variação", icon: "trending-down", cor: C.despesa, render: () => catDonutBlock("despesa") },
+  ganhos: { title: "Ganhos por categoria", sub: "rosca com variação", icon: "trending-up", cor: C.receita, render: () => catDonutBlock("receita") },
   receitaDespesa: { title: "Receitas × Despesas", sub: "gráfico de barras", icon: "trending-up", cor: C.brand, render: blkReceitaDespesa },
   patrimonio: { title: "Evolução do patrimônio", sub: "área", icon: "building", cor: C.patrimonio, render: blkPatrimonio },
 };
@@ -2517,7 +2517,7 @@ const state = {
   // detalhe de categoria/subcategoria (todos os lançamentos)
   catDetail: null,
   // dashboard
-  dashEdit: false, dashOrder: ["foraDoPadrao", "potes", "categorias", "receitaDespesa", "patrimonio"], dragKey: null,
+  dashEdit: false, dashOrder: ["foraDoPadrao", "potes", "categorias", "ganhos", "receitaDespesa", "patrimonio"], dragKey: null,
   // drill-down + pop-ups
   drill: null, pop: null, editTx: null,
   // donuts de categoria (despesas e ganhos), cada um com mês/seleção/drill próprios
