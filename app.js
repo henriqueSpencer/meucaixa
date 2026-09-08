@@ -493,8 +493,10 @@ const fmtSigned = (n) => (numOr0(n) < 0 ? "−" : "+") + fmtShort(n); // +R$ 24.
 const C_SALDO = "#8B7BD8"; // linha de saldo (roxo-azulado)
 // combo: barras Receitas/Despesas + linha de Saldo (receita−despesa) + tooltip por mês (hover no desktop,
 // toque no celular via classe .on em state.rdSel). `sel` = índice do mês fixado no toque (ou null).
-function barChartSVG(data, sel) {
-  const W = 520, H = 240, padL = 40, padR = 12, padT = 18, padB = 28;
+// W/H definem o viewBox. O card largo passa 900×260 porque com 520 de largura o "meet" centralizaria
+// o desenho e deixaria tarja vazia dos dois lados — o gráfico não cresceria junto com o card.
+function barChartSVG(data, sel, W = 520, H = 240, foco = -1) {
+  const padL = 40, padR = 12, padT = 18, padB = 28, k = W / 520;
   const n = data.length || 1;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const saldos = data.map((d) => d.receita - d.despesa);
@@ -505,7 +507,7 @@ function barChartSVG(data, sel) {
   const y0 = Y(0);
   // mesma geometria de barra da versão anterior (barras cheias, vão justo entre o par)
   const slot = plotW / n, gap = Math.min(6, slot * 0.12);
-  const bwCap = n <= 8 ? 24 : n <= 14 ? 15 : 9;
+  const bwCap = (n <= 8 ? 24 : n <= 14 ? 15 : 9) * k;
   const bw = Math.max(2, Math.min(bwCap, slot / 2 - gap));
   const rx = Math.min(3, bw / 2), lblStep = Math.max(1, Math.ceil(n / 9));
   let g = "";
@@ -570,7 +572,7 @@ function barChartSVG(data, sel) {
       + `<line x1="12" y1="${mmOn ? 68 : 62}" x2="${tipW - 12}" y2="${mmOn ? 68 : 62}" stroke="var(--border)"/>`
       + linha(mmOn ? 86 : 76, "Saldo", saldo, MM.saldo[i], C_SALDO, fmtSigned, true)
       + `</g>`;
-    g += `<g class="rd-col${i === sel ? " on" : ""}">`
+    g += `<g class="rd-col${i === sel ? " on" : ""}${i === foco ? " foco" : ""}">`
       + `<line class="rd-guide" x1="${cx.toFixed(1)}" y1="${padT}" x2="${cx.toFixed(1)}" y2="${padT + plotH}" stroke="${C_SALDO}" stroke-width="1" stroke-dasharray="3 3"/>`
       + `<rect x="${(cx - slot / 2).toFixed(1)}" y="${padT}" width="${slot.toFixed(1)}" height="${plotH}" fill="transparent" style="cursor:pointer" data-rdsel="${i}"></rect>`
       + tip + `</g>`;
@@ -636,15 +638,16 @@ function receitaDespesaSeries() {
 }
 function blkReceitaDespesa() {
   const full = receitaDespesaSeries(), N = full.length;
-  if (!N) return `<div class="card"><div class="card-head"><h3>Receitas × Despesas</h3></div><div class="empty-mini">Sem lançamentos ainda — adicione uma transação para ver o gráfico.</div></div>`;
+  if (!N) return `<div class="card dash-wide"><div class="card-head"><h3>Receitas × Despesas</h3></div><div class="empty-mini">Sem lançamentos ainda — adicione uma transação para ver o gráfico.</div></div>`;
   const opts = [6, 12, 24].filter((x) => x < N);
   const valid = [...opts.map(String), "all"];
   const range = valid.includes(state.rdRange) ? state.rdRange : (N > 12 ? "12" : "all");
   const nShow = range === "all" ? N : Math.min(+range, N);
   const s = full.slice(-nShow), n = s.length;
-  // a coluna do mês em foco no topo fica destacada — os dois blocos falam do mesmo mês
+  // a coluna do mês em foco no topo ganha só a guia vertical (classe .foco). Ela NÃO pode entrar em
+  // `sel`: `sel` é o mês fixado no toque, e usá-lo aqui deixava o tooltip de um mês colado na tela.
   const iFoco = s.findIndex((d) => d.ym === dashMonthYM());
-  const sel = (typeof state.rdSel === "number" && state.rdSel >= 0 && state.rdSel < n) ? state.rdSel : (iFoco >= 0 ? iFoco : null);
+  const sel = (typeof state.rdSel === "number" && state.rdSel >= 0 && state.rdSel < n) ? state.rdSel : null;
   const st = rdStats(s), gCls = st.guardado >= 0 ? "pos" : "neg";
   // mesmas médias móveis que o gráfico desenha — usadas na explicação da legenda
   const _mm3 = (k) => { const w = s.slice(-3); return w.length ? w.reduce((a, d) => a + (k === "saldo" ? d.receita - d.despesa : d[k]), 0) / w.length : 0; };
@@ -663,14 +666,14 @@ function blkReceitaDespesa() {
       `<b class="num">${fmtSigned(st.guardado)}</b> ÷ <b class="num">${fmt(st.recTot)}</b> = <b>${Math.round(st.poupanca)}%</b>`,
       "A métrica que mede decisão sua — diferente do patrimônio, que sobe também quando o mercado sobe.")}</span><b class="accent">${Math.round(st.poupanca)}%</b><small>da receita</small></div>
   </div>`;
-  return `<div class="card">
+  return `<div class="card dash-wide">
     <div class="card-head">
       <div><h3>Receitas × Despesas</h3><span class="card-sub">${n} ${n === 1 ? "mês" : "meses"}</span></div>
       <button class="card-sub drill-hint" data-drill="open">detalhar ${ic("arrow-right", 12)}</button>
     </div>
     ${opts.length ? `<div class="pc-ranges"><div class="pc-chips">${chips}</div></div>` : ""}
     ${cards}
-    <div class="chart" style="height:260px">${barChartSVG(s, sel)}</div>
+    <div class="chart chart-wide">${barChartSVG(s, sel, 900, 260, iFoco)}</div>
     <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span><span><i class="line" style="background:${C_SALDO}"></i> Saldo</span>${n >= 4 ? `<span><i class="line dash"></i> Média móvel 3m (tracejado, na cor de cada série)</span><span><i class="ring"></i> Mês atípico</span>` : ""}</div>
     ${n >= 4 ? `<div class="legend-note">Cada série tem sua média móvel de 3 meses tracejada na mesma cor — receitas, despesas e saldo. Passe o mouse (ou toque) num mês para ver os dois números lado a lado. O anel marca os meses cuja despesa passou de 1,5 desvio-padrão da média do período. ${xp("Médias móveis e mês atípico",
       "média dos 3 últimos meses até cada ponto, em cada série",

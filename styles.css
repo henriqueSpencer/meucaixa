@@ -216,7 +216,13 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 
 /* tooltip do gráfico: escondido por padrão, aparece no hover (desktop) ou no toque (.on, celular) */
 .rd-tip,.rd-guide{opacity:0;transition:opacity .1s;pointer-events:none}
-.rd-col:hover .rd-tip,.rd-col:hover .rd-guide,.rd-col.on .rd-tip,.rd-col.on .rd-guide{opacity:1}
+.rd-col:hover .rd-tip,.rd-col:hover .rd-guide{opacity:1}
+/* .on = mês fixado no toque. Em tela com mouse o hover já mostra, e fixar no clique deixava a
+   informação de um mês colada na tela sem jeito óbvio de tirar — então só vale onde não há hover. */
+@media (hover:none){.rd-col.on .rd-tip,.rd-col.on .rd-guide{opacity:1}}
+/* mês em foco no seletor do topo: só a guia vertical, discreta — sem abrir o tooltip */
+.rd-col.foco .rd-guide{opacity:.4}
+.rd-col.foco:hover .rd-guide{opacity:1}
 
 /* donut */
 .donut-wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
@@ -578,6 +584,9 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .dash-personalize.on{background:var(--brand);color:#fff;border-color:var(--brand)}
 .dash-hint{font-size:12.5px;color:var(--sub)}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+/* bloco que ocupa a linha inteira da grade (Receitas × Despesas: a série temporal precisa de largura) */
+.dash-grid>.dash-wide{grid-column:1/-1}
+.chart-wide{height:290px}
 /* editor de ordem (lista compacta, arrastável) */
 .dash-editor{display:flex;flex-direction:column;gap:10px;max-width:640px;margin-bottom:16px}
 .dash-edit-row{display:flex;align-items:center;gap:13px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px 15px;transition:.12s}
