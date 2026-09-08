@@ -166,6 +166,15 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .legend i.line.dash{background:none!important;border-top:2px dashed var(--neg);height:0;width:16px}
 .legend i.ring{width:9px;height:9px;border-radius:50%;background:none;border:1.4px solid var(--neg)}
 .legend-note{font-size:11.5px;color:var(--subtle);line-height:1.55;margin-top:8px;text-align:center;max-width:62ch;margin-left:auto;margin-right:auto}
+/* seletor de mês do topo: manda em todos os blocos de mês da Visão geral */
+.stmt-nav{display:flex;align-items:center;gap:4px}
+.stmt-mes{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);min-width:11ch;text-align:center}
+.stmt-arrow{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;color:var(--sub);border:1px solid transparent}
+.stmt-arrow:hover:not(:disabled){background:var(--card-2);border-color:var(--border);color:var(--ink)}
+.stmt-arrow:disabled{opacity:.3;cursor:default}
+.stmt-hoje{margin-left:4px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--brand);border:1px solid color-mix(in srgb,var(--brand) 40%,transparent);border-radius:20px;padding:3px 10px}
+.stmt-hoje:hover{background:color-mix(in srgb,var(--brand) 12%,transparent)}
+.sl-hoje{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--subtle);border:1px solid var(--hair);border-radius:20px;padding:1px 6px;margin-left:2px}
 /* leitura de ritmo do mês: o herói deixou de ser patrimônio líquido (sobe sozinho) e passou a ser
    "quanto gastei contra o meu normal" — a única versão do número que sugere ação. */
 .stmt-pace{font-size:12.5px;color:var(--sub);line-height:1.5;max-width:46ch}

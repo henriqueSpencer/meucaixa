@@ -628,7 +628,9 @@ function blkReceitaDespesa() {
   const range = valid.includes(state.rdRange) ? state.rdRange : (N > 12 ? "12" : "all");
   const nShow = range === "all" ? N : Math.min(+range, N);
   const s = full.slice(-nShow), n = s.length;
-  const sel = (typeof state.rdSel === "number" && state.rdSel >= 0 && state.rdSel < n) ? state.rdSel : null;
+  // a coluna do mês em foco no topo fica destacada — os dois blocos falam do mesmo mês
+  const iFoco = s.findIndex((d) => d.ym === dashMonthYM());
+  const sel = (typeof state.rdSel === "number" && state.rdSel >= 0 && state.rdSel < n) ? state.rdSel : (iFoco >= 0 ? iFoco : null);
   const st = rdStats(s), gCls = st.guardado >= 0 ? "pos" : "neg";
   const chips = [...opts.map((x) => ({ k: String(x), lb: x + "M" })), { k: "all", lb: "Tudo" }].map((r) => `<button class="pc-range${range === r.k ? " on" : ""}" data-rdrange="${r.k}">${r.lb}</button>`).join("");
   const baseTxt = st.todos ? `${n} ${n === 1 ? "mês" : "meses"} (nenhum fechado ainda)` : `${st.nFech} ${st.nFech === 1 ? "mês fechado" : "meses fechados"}`;
@@ -786,8 +788,7 @@ function bySub(tipo, cat, ym) {
 }
 function catDonutBlock(tipo) {
   const st = state.donut[tipo];
-  if (!st.month) st.month = defaultMonth(tipo);
-  const ym = st.month, months = monthsAxis(), idx = months.indexOf(ym), drill = st.drill;
+  const ym = dashMonthYM(), months = monthsAxis(), idx = months.indexOf(ym), drill = st.drill;
   const data = drill ? bySub(tipo, drill, ym) : (ym ? byCat(tipo, ym) : []);
   const total = data.reduce((s, d) => s + d.valor, 0);
   const active = st.active && data.some((d) => d.nome === st.active) ? st.active : null;
@@ -945,8 +946,8 @@ function blkUltimas() {
    Compara o gasto de cada categoria no mês corrente com o RITMO dela nos meses fechados, ajustado
    pelo quanto do mês já passou. É o único bloco que aponta ação sem o usuário ir procurar. */
 function foraDoPadrao() {
-  const ym = TODAY_ISO.slice(0, 7), p = monthProgress(ym);
-  const base = mesesFechados(6);
+  const ym = dashMonthYM(), p = monthProgress(ym);
+  const base = mesesFechados(6, ym);
   if (p.frac <= 0 || base.length < 2) return []; // sem histórico não existe "padrão"
   const set = new Set(base), atual = {}, hist = {}, histAte = {};
   state.tx.forEach((t) => {
@@ -972,7 +973,7 @@ function foraDoPadrao() {
   return out.sort((a, b) => b.exc - a.exc).slice(0, 5);
 }
 function blkForaDoPadrao() {
-  const rows = foraDoPadrao(), p = monthProgress(TODAY_ISO.slice(0, 7));
+  const ym = dashMonthYM(), rows = foraDoPadrao(), p = monthProgress(ym), nBase = mesesFechados(6, ym).length;
   const body = rows.length
     ? rows.map((r) => `<div class="fp-row"><span class="fp-ic">${ic(catIcon(r.cat), 15)}</span>
         <div class="fp-mid"><div class="fp-nm click" data-cat-detail="despesa|${attr(r.cat)}">${r.cat}</div>
@@ -981,12 +982,12 @@ function blkForaDoPadrao() {
             `${_esc(r.cat)}: média de ${_n(r.mediaMes)}/mês<br>até o dia ${p.dia} você costuma ter gasto ${Math.round(r.frac * 100)}% disso = ${_n(r.esperado)}<br>este mês você já está em ${_n(r.atual)}<br><b>excedente ${_n(r.exc)}</b>`,
             "A régua é o histórico da própria categoria, não a fração do calendário — assim aluguel e assinatura, que caem em dia certo, não viram alarme falso.")}</div></div>
         <div class="fp-right"><b class="num">${fmtNum(r.atual)}</b><span class="fp-delta">${r.pct == null ? "novo" : `+${Math.round(r.pct * 100)}%`}</span></div></div>`).join("")
-    : `<div class="empty-mini">${mesesFechados(6).length < 2 ? "Ainda não há meses fechados suficientes para saber o que é o seu padrão." : "Tudo dentro do ritmo por enquanto."}</div>`;
+    : `<div class="empty-mini">${nBase < 2 ? "Ainda não há meses fechados suficientes para saber o que é o seu padrão." : "Tudo dentro do ritmo por enquanto."}</div>`;
   return `<div class="card">
     <div class="card-head"><div><h3>Fora do padrão neste mês ${xp("O que entra nesta lista",
       "categorias em que o gasto de hoje passou do ritmo delas",
-      `base: os últimos ${mesesFechados(6).length} meses fechados<br>entra quem está <b>≥ R$ 50</b> acima do esperado <b>e</b> esse excedente vale <b>≥ 25%</b> de um mês típico da categoria`,
-      "Os dois cortes juntos evitam encher a lista de ruído: R$ 60 a mais numa categoria de R$ 2.000 não muda decisão nenhuma.")}</h3><span class="card-sub">comparado ao ritmo dos últimos ${mesesFechados(6).length} meses fechados, no dia ${p.dia} de ${p.dias}</span></div></div>
+      `base: os últimos ${nBase} meses fechados<br>entra quem está <b>≥ R$ 50</b> acima do esperado <b>e</b> esse excedente vale <b>≥ 25%</b> de um mês típico da categoria`,
+      "Os dois cortes juntos evitam encher a lista de ruído: R$ 60 a mais numa categoria de R$ 2.000 não muda decisão nenhuma.")}</h3><span class="card-sub">comparado ao ritmo dos últimos ${nBase} meses fechados, no dia ${p.dia} de ${p.dias}</span></div></div>
     <div class="fp-list">${body}</div>
   </div>`;
 }
@@ -1000,7 +1001,7 @@ const POTES = [
   { nome: "Extras", cor: "#A65B4E", nota: "grande e irregular" },
 ];
 function potesMedia() {
-  const ms = mesesFechados(12); if (!ms.length) return null;
+  const ms = mesesFechados(12, dashMonthYM()); if (!ms.length) return null;
   const disp = POTES.filter((p) => catTree.despesa.some((c) => c.nome === p.nome));
   if (disp.length < 3) return null; // conta não usa a estrutura — o bloco não faz sentido
   const set = new Set(ms), acc = {};
@@ -1098,10 +1099,20 @@ function monthProgress(ym) {
   const dia = corrente ? Math.min(+TODAY_ISO.slice(8, 10), dias) : dias;
   return { dias, dia, frac: dias ? dia / dias : 1, corrente };
 }
-// meses FECHADOS (exclui o corrente, que está pela metade) — base de qualquer média honesta
-function mesesFechados(n) { const cur = TODAY_ISO.slice(0, 7); const ms = txMonths().filter((ym) => ym < cur); return n ? ms.slice(-n) : ms; }
+// mês em foco na Visão geral — o seletor do topo manda em TODOS os blocos do mês (herói, fora do
+// padrão, categorias e a estrutura dos potes), pra não existirem dois seletores discordando na tela.
+function dashMonthYM() { const ms = monthsAxis(); const v = state.dashMonth; return v && ms.includes(v) ? v : TODAY_ISO.slice(0, 7); }
+function dashMonthNav(dir) {
+  const ms = monthsAxis(), i = ms.indexOf(dashMonthYM());
+  const j = dir === "hoje" ? ms.indexOf(TODAY_ISO.slice(0, 7)) : dir === "prev" ? i - 1 : i + 1;
+  if (j < 0 || j >= ms.length) return;
+  state.dashMonth = ms[j]; state.rdSel = null; resetDonuts(); renderView();
+}
+// meses FECHADOS antes de `antes` (padrão: antes do mês atual). Excluir o mês em curso é o que torna
+// qualquer média honesta — ele está pela metade e puxaria tudo pra baixo.
+function mesesFechados(n, antes) { const lim = antes || TODAY_ISO.slice(0, 7); const ms = txMonths().filter((ym) => ym < lim); return n ? ms.slice(-n) : ms; }
 const gastoMes = (ym) => monthTotals(ym).desp; // já é líquido de reembolso
-function gastoMedio(n = 12) { const ms = mesesFechados(n); return ms.length ? ms.reduce((s, ym) => s + gastoMes(ym), 0) / ms.length : 0; }
+function gastoMedio(n = 12, antes) { const ms = mesesFechados(n, antes); return ms.length ? ms.reduce((s, ym) => s + gastoMes(ym), 0) / ms.length : 0; }
 // caixa disponível = só contas financeiras (cartão entra negativo, é dívida de curto prazo).
 // Imóvel e alocação de patrimônio NÃO contam: não dá pra viver do apartamento no mês que vem.
 const caixaDisponivel = () => accounts.filter((a) => !a.arquivada && a.grupo === "fin").reduce((s, a) => s + acctTotal(a), 0);
@@ -1121,53 +1132,66 @@ const _n = (v) => `<b class="num">${fmt(v)}</b>`;
 // Faixa do topo: o mês CORRENTE contra o próprio normal. Substituiu o "Patrimônio líquido" em corpo
 // grande — que sobe com aporte, com o mercado e com o imóvel, e não mede escolha nenhuma deste mês.
 function statementBand() {
-  const ym = TODAY_ISO.slice(0, 7);
+  const ym = dashMonthYM(), hoje = TODAY_ISO.slice(0, 7);
   const p = monthProgress(ym), t = monthTotals(ym);
   const gasto = t.desp, rec = t.rec;
-  const media = gastoMedio(12), nFech = mesesFechados(12).length;
-  const ritmo = p.frac > 0 ? gasto / p.frac : 0;          // projeção do mês inteiro no ritmo de hoje
-  const esperado = media * p.frac;                         // quanto seria normal ter gasto até hoje
+  // a média de comparação é sempre a dos meses fechados ANTES do mês em foco — navegar pra março
+  // compara março com o que vinha antes dele, não com o ano inteiro depois
+  const media = gastoMedio(12, ym), nFech = mesesFechados(12, ym).length;
+  const ritmo = p.corrente ? (p.frac > 0 ? gasto / p.frac : 0) : gasto; // mês fechado já é o total
+  const esperado = media * p.frac;
   const desvio = media > 0 ? (ritmo - media) / media : null;
   const cls = desvio == null ? "" : desvio > 0.08 ? "over" : desvio < -0.08 ? "under" : "ok";
-  const txt = desvio == null ? "sem meses fechados para comparar ainda"
-    : `no ritmo de <b class="num">${fmtShort(ritmo)}</b> · média de ${nFech} ${nFech === 1 ? "mês" : "meses"} <b class="num">${fmtShort(media)}</b>`;
+  const mediaTxt = `média de ${nFech} ${nFech === 1 ? "mês" : "meses"} antes dele <b class="num">${fmtShort(media)}</b>`;
+  const txt = desvio == null ? "sem meses fechados antes deste para comparar"
+    : p.corrente ? `no ritmo de <b class="num">${fmtShort(ritmo)}</b> · ${mediaTxt}`
+    : `mês fechado · ${mediaTxt}`;
   const rotulo = desvio == null ? "" : desvio > 0.08 ? `${Math.round(desvio * 100)}% acima do normal` : desvio < -0.08 ? `${Math.round(-desvio * 100)}% abaixo do normal` : "no ritmo";
-  // barra: o preenchido é o que já foi gasto sobre a média do mês; o traço é onde "deveria" estar hoje
   const escala = Math.max(media, ritmo, gasto, 1);
   const pctMes = Math.round(p.frac * 100);
+  // a marca do "esperado" só faz sentido no mês em curso; no mês fechado a referência é a média cheia
   const bar = media > 0 ? `<div class="pace-bar">
       <i class="pace-fill ${cls}" style="width:${Math.min(100, gasto / escala * 100).toFixed(1)}%"></i>
-      <span class="pace-mark" style="left:${Math.min(100, esperado / escala * 100).toFixed(1)}%"></span>
-    </div><div class="pace-legend"><span>▌ o traço é onde você costuma estar no dia ${p.dia}: <b class="num">${fmtShort(esperado)}</b></span>
-      ${xp("Esperado até hoje", "gasto médio do mês × parte do mês que já passou",
-        `${_n(media)} × ${p.dia}/${p.dias} (${pctMes}%) = ${_n(esperado)}`,
-        `Supõe gasto espalhado pelo mês. Serve como referência do topo; o bloco “Fora do padrão” usa uma régua mais fina, por categoria.`)}</div>` : "";
+      <span class="pace-mark" style="left:${Math.min(100, (p.corrente ? esperado : media) / escala * 100).toFixed(1)}%"></span>
+    </div><div class="pace-legend"><span>▌ ${p.corrente ? `o traço é onde você costuma estar no dia ${p.dia}` : "o traço é o seu mês médio"}: <b class="num">${fmtShort(p.corrente ? esperado : media)}</b></span>
+      ${xp(p.corrente ? "Esperado até hoje" : "Mês médio", p.corrente ? "gasto médio do mês × parte do mês que já passou" : "gasto médio dos meses fechados anteriores",
+        p.corrente ? `${_n(media)} × ${p.dia}/${p.dias} (${pctMes}%) = ${_n(esperado)}` : `${_n(media)} por mês, base de ${nFech} ${nFech === 1 ? "mês" : "meses"}`,
+        p.corrente ? "Supõe gasto espalhado pelo mês. Serve como referência do topo; o bloco “Fora do padrão” usa uma régua mais fina, por categoria." : "Este mês já fechou, então o número dele é final — não há projeção.")}</div>` : "";
   const res = rec - gasto;
   const poup = rec > 0 ? Math.round(res / rec * 100) : null;
-  const reserva = reservaMeses(), caixa = caixaDisponivel();
+  const reserva = reservaMeses(), caixa = caixaDisponivel(), mediaHoje = gastoMedio(12);
   const nFin = accounts.filter((a) => !a.arquivada && a.grupo === "fin").length;
+  // seletor de mês: manda em todos os blocos de mês da página
+  const ms = monthsAxis(), i = ms.indexOf(ym);
+  const nav = `<span class="stmt-nav">
+    <button class="stmt-arrow" data-dash-month="prev" ${i <= 0 ? "disabled" : ""} aria-label="Mês anterior">${ic("arrow-left", 15)}</button>
+    <b class="stmt-mes">${monthLabel(ym)}</b>
+    <button class="stmt-arrow" data-dash-month="next" ${i >= ms.length - 1 ? "disabled" : ""} aria-label="Próximo mês">${ic("arrow-right", 15)}</button>
+    ${ym !== hoje ? `<button class="stmt-hoje" data-dash-month="hoje">hoje</button>` : ""}
+  </span>`;
+  const rotDia = p.corrente ? `dia ${p.dia} de ${p.dias} · ${pctMes}% do mês` : `${p.dias} dias · mês fechado`;
   return `<div class="statement">
-    <div class="stmt-top"><span class="stmt-eyebrow">Este mês</span><span class="stmt-period">${monthLabel(ym)} · dia ${p.dia} de ${p.dias} · ${pctMes}% do mês</span></div>
+    <div class="stmt-top">${nav}<span class="stmt-period">${rotDia}</span></div>
     <div class="stmt-main">
       <div class="stmt-net">
-        <span class="stmt-lbl">Gasto até agora ${xp("Gasto até agora", "despesas do mês − reembolsos",
-          `de 01 a ${String(p.dia).padStart(2, "0")}/${ym.slice(5)} = ${_n(gasto)}`,
+        <span class="stmt-lbl">${p.corrente ? "Gasto até agora" : "Gasto no mês"} ${xp(p.corrente ? "Gasto até agora" : "Gasto no mês", "despesas do mês − reembolsos",
+          `${p.corrente ? `de 01 a ${String(p.dia).padStart(2, "0")}` : `01 a ${p.dias}`}/${ym.slice(5)} = ${_n(gasto)}`,
           "Transferência e aplicação não entram: dinheiro que muda de lugar não é gasto.")}</span>
         <span class="stmt-big num">${fmt(gasto)}</span>
-        <span class="stmt-pace ${cls}">${rotulo ? `<b class="pace-tag">${rotulo}</b> ` : ""}${txt} ${desvio == null ? "" : xp("Ritmo do mês",
-          "gasto até hoje ÷ parte do mês que já passou",
-          `${_n(gasto)} ÷ ${pctMes}% = ${_n(ritmo)} projetados<br>média de ${nFech} ${nFech === 1 ? "mês fechado" : "meses fechados"} = ${_n(media)}<br>diferença = <b>${desvio >= 0 ? "+" : "−"}${Math.abs(Math.round(desvio * 100))}%</b>`,
-          "O mês corrente fica fora da média — ele está pela metade e puxaria o número pra baixo.")}</span>
+        <span class="stmt-pace ${cls}">${rotulo ? `<b class="pace-tag">${rotulo}</b> ` : ""}${txt} ${desvio == null ? "" : xp(p.corrente ? "Ritmo do mês" : "Comparação do mês",
+          p.corrente ? "gasto até hoje ÷ parte do mês que já passou" : "gasto do mês ÷ média dos meses anteriores",
+          `${p.corrente ? `${_n(gasto)} ÷ ${pctMes}% = ${_n(ritmo)} projetados<br>` : `${_n(gasto)} fechados<br>`}média de ${nFech} ${nFech === 1 ? "mês fechado" : "meses fechados"} antes de ${monthLabel(ym).toLowerCase()} = ${_n(media)}<br>diferença = <b>${desvio >= 0 ? "+" : "−"}${Math.abs(Math.round(desvio * 100))}%</b>`,
+          "A média olha só pra trás do mês em foco — assim navegar no tempo compara cada mês com o que vinha antes dele.")}</span>
         ${bar}
       </div>
       <div class="stmt-ledger">
-        <div class="stmt-row"><span class="sl-k">Reserva ${xp("Reserva", "caixa disponível ÷ gasto médio mensal",
-          `${_n(caixa)} ÷ ${_n(media)} = <b>${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</b>`,
-          `Caixa = as ${nFin} ${nFin === 1 ? "conta financeira" : "contas financeiras"} (cartão entra negativo). Imóvel e alocação de patrimônio ficam fora: não dá pra pagar boleto com apartamento.`)}</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
-        <div class="stmt-row"><span class="sl-k">Receitas do mês ${xp("Receitas do mês", "tudo que entrou como receita de 01 a hoje", `${_n(rec)}`, "Reembolso não conta aqui — ele abate a despesa, não é renda nova.")}</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
-        <div class="stmt-row total"><span class="sl-k">Sobrou até agora ${xp("Sobrou / taxa de poupança", "receitas − gasto, e quanto isso é da receita",
+        <div class="stmt-row"><span class="sl-k">Reserva <small class="sl-hoje">hoje</small> ${xp("Reserva", "caixa disponível ÷ gasto médio mensal",
+          `${_n(caixa)} ÷ ${_n(mediaHoje)} = <b>${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</b>`,
+          `Sempre de hoje, não do mês em foco — o app guarda o saldo atual das contas, não o saldo histórico. Caixa = as ${nFin} ${nFin === 1 ? "conta financeira" : "contas financeiras"} (cartão entra negativo); imóvel e alocação de patrimônio ficam fora.`)}</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
+        <div class="stmt-row"><span class="sl-k">Receitas do mês ${xp("Receitas do mês", `tudo que entrou como receita em ${monthLabel(ym).toLowerCase()}`, `${_n(rec)}`, "Reembolso não conta aqui — ele abate a despesa, não é renda nova.")}</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
+        <div class="stmt-row total"><span class="sl-k">${p.corrente ? "Sobrou até agora" : "Sobrou no mês"} ${xp("Sobrou / taxa de poupança", "receitas − gasto, e quanto isso é da receita",
           `${_n(rec)} − ${_n(gasto)} = ${_n(res)}${poup != null ? `<br>${_n(res)} ÷ ${_n(rec)} = <b>${poup}%</b> da receita` : ""}`,
-          "Parcial do mês: se a maior parte da sua receita cai no início, este número começa alto e desce.")}</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(Math.abs(res))}${poup != null ? ` <small class="sl-pct">${poup}%</small>` : ""}</span></div>
+          p.corrente ? "Parcial do mês: se a maior parte da sua receita cai no início, este número começa alto e desce." : "Mês fechado — este é o número final.")}</span><span class="sl-op">=</span><span class="sl-v num" style="color:${res >= 0 ? "var(--pos)" : "var(--neg)"}">${res < 0 ? "−" : ""}${fmtNum(Math.abs(res))}${poup != null ? ` <small class="sl-pct">${poup}%</small>` : ""}</span></div>
       </div>
     </div>
   </div>`;
@@ -2500,6 +2524,7 @@ const state = {
   donut: { despesa: { month: null, active: null, drill: null }, receita: { month: null, active: null, drill: null } },
   // gráfico de patrimônio (período + seleção por arrasto)
   pcRange: null, pcSel: null, pcMode: null,
+  dashMonth: null, // mês em foco na Visão geral (null = mês atual)
 };
 let pcDrag = null;
 const freshForm = () => {
@@ -3261,12 +3286,9 @@ function saveCatForm() {
   closePop(); renderView();
 }
 /* donut de categorias: navegação, seleção, lançamentos */
-function openDonutTx(arg) { const [tipo, cat, sub] = arg.split("|"); state.pop = { kind: "catTx", tipo, cat, sub: sub || null, ym: state.donut[tipo].month }; renderPop(); }
-function donutMonthNav(tipo, dir) {
-  const st = state.donut[tipo], months = monthsAxis(), i = months.indexOf(st.month), j = dir === "prev" ? i - 1 : i + 1;
-  if (j < 0 || j >= months.length) return;
-  st.month = months[j]; st.active = null; renderView();
-}
+function openDonutTx(arg) { const [tipo, cat, sub] = arg.split("|"); state.pop = { kind: "catTx", tipo, cat, sub: sub || null, ym: dashMonthYM() }; renderPop(); }
+// as setas do bloco de categorias mexem no MESMO mês do topo — um seletor só pra toda a Visão geral
+function donutMonthNav(tipo, dir) { dashMonthNav(dir); }
 function donutSelect(tipo, nome) { const st = state.donut[tipo]; st.active = st.active === nome ? null : nome; renderView(); }
 function donutDrill(tipo, cat) { const st = state.donut[tipo]; st.drill = cat; st.active = null; renderView(); }
 function donutBack(tipo) { const st = state.donut[tipo]; st.drill = null; st.active = null; renderView(); }
@@ -4153,6 +4175,8 @@ function wire() {
     if (iclr) { state.reconFiles.splice(+iclr.dataset.impClear, 1); renderView(); return; }
     const idrop = e.target.closest("[data-imp-drop]");
     if (idrop && !e.target.closest("[data-imp-file]")) { const inp = idrop.querySelector("[data-imp-file]"); if (inp) inp.click(); return; }
+    const dmn = e.target.closest("[data-dash-month]");
+    if (dmn) { dashMonthNav(dmn.dataset.dashMonth); return; }
     const cdet = e.target.closest("[data-cat-detail]");
     if (cdet) { const [tp, ct, sb] = cdet.dataset.catDetail.split("|"); openCatDetail(tp, ct, sb); return; }
     if (e.target.closest("[data-cat-detail-back]")) { state.catDetail = null; renderView(); return; }
