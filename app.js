@@ -1198,7 +1198,10 @@ function txCatIcon(t) {
 }
 function acctTxRow(t, nome) {
   const v = txValorConta(t, nome);
-  const contraparte = t.tipo === "transferencia" ? (t.origem === nome ? `→ ${t.destino}` : `← ${t.origem}`) : `${t.cat}${t.sub ? ` · ${t.sub}` : ""}`;
+  // etiqueta de imóvel: no extrato do banco dá pra ver a qual imóvel/unidade o aluguel pertence
+  const imv = (t.imovelId && window.imvEnabled && imvEnabled()) ? imvNameOf(t.imovelId) : "";
+  const imvTag = imv ? ` <span class="imv-inconta">🏠 ${imv}${imvUnitNameOf(t.imovelId, t.unidadeId) ? ` · ${imvUnitNameOf(t.imovelId, t.unidadeId)}` : ""}</span>` : "";
+  const contraparte = (t.tipo === "transferencia" ? (t.origem === nome ? `→ ${t.destino}` : `← ${t.origem}`) : `${t.cat}${t.sub ? ` · ${t.sub}` : ""}`) + imvTag;
   const tcor = t.tipo === "transferencia" ? C.transfer : (t.tipo === "despesa" ? C.despesa : C.receita);
   return `<div class="mini-row click txr" data-tx-open="${t.id}"><span class="tx-ic" style="background:${tcor}1A;color:${tcor}">${ic(txCatIcon(t), 16)}</span><div class="tx-mid"><div class="mini-desc">${t.desc}</div><div class="mini-meta">${t.data} · ${contraparte}</div></div><span class="num" style="color:${v < 0 ? "var(--ink)" : "var(--pos)"};font-weight:600">${v < 0 ? "−" : "+"} ${fmtNum(Math.abs(v))}</span></div>`;
 }
@@ -1318,9 +1321,20 @@ function viewAcctDetail(nome) {
     ? `<div class="adh-cart"><div><span>Caixa</span><b class="num">${fmt(carteiraCaixa(a))}</b></div><div><span>Aplicado</span><b class="num">${fmt(cartCusto)}</b></div><div><span>Mercado</span><b class="num">${fmt(invInvestido(a))}</b></div><div class="adh-cart-tot"><span>Total</span><strong class="num">${fmt(acctTotal(a))}</strong></div></div>`
     : `<div class="adh-saldo num" style="color:${a && acctTotal(a) < 0 ? "var(--neg)" : "var(--ink)"}">${a ? fmt(acctTotal(a)) : ""}</div>`;
   const ativos = (a && a.tipo === "invest") ? invAtivosSection(a) : ""; // ativos vivem na página da própria conta
+  // barra de ações da conta: o que dá pra FAZER daqui, sem ter que sair e procurar a aba certa.
+  // "Conciliar" só faz sentido em conta de dinheiro (banco/carteira/cartão) — imóvel e alocação
+  // de patrimônio não têm extrato pra bater.
+  const prop = (window.imvEnabled && imvEnabled()) ? imvPropOfAccount(a && a.id) : null;
+  const acts = [];
+  if (a && a.grupo === "fin") acts.push(`<button class="mini-btn" data-acct-recon="${attr(nome)}">${ic("checklist", 13)} Conciliar / importar extrato</button>`);
+  if (prop) acts.push(`<button class="mini-btn" data-goto-imovel="${attr(prop.id)}">${ic("home", 13)} Abrir imóvel</button>`);
+  acts.push(`<button class="mini-btn" data-acct-newtx="${attr(nome)}">${ic("plus", 13)} Lançar nesta conta</button>`);
+  const actBar = `<div class="acct-actions">${acts.join("")}</div>`;
   return `
   <button class="back-btn" data-acct-back>${ic("arrow-left", 16)} Contas</button>
   <div class="card acct-detail-head"><div class="adh-l"><span class="acct-ic big">${ic(iconName, 22)}</span><div><div class="adh-name">${nome}</div><div class="acct-sub">${a ? a.sub : ""}</div></div></div>${headVal}</div>
+  ${actBar}
+  ${prop ? imvAcctLinkedSection(prop, a) : ""}
   ${ativos}
   <div class="adh-stats">
     <div class="card adh-stat"><span>Entradas</span><b class="num" style="color:var(--pos)">${fmt(entradas)}</b></div>
@@ -1706,8 +1720,10 @@ function viewConciliacao() {
       ? ` <b class="rdb-ok">Bate na vírgula com o banco (${fmt(bat.banco)}).</b>`
       : ` Ainda há <b class="rdb-off">${fmtNum(bat.falta)}</b> de diferença com o banco — falta lançar ${bat.falta > 0 ? "entrada" : "despesa"} (banco ${fmt(bat.banco)} · MeuCaixa ${fmt(bat.saldo)}).`;
     const doneBanner = state.reconDone ? `<div class="recon-done-banner card">${ic("check", 16)} <div>Conciliação salva — <b>${state.reconDone.criados}</b> ${state.reconDone.criados === 1 ? "lançamento criado" : "lançamentos criados"}${state.reconDone.dup ? ` · ${state.reconDone.dup} ${state.reconDone.dup === 1 ? "tinha" : "tinham"} correspondência e ${state.reconDone.dup === 1 ? "foi lançado" : "foram lançados"} mesmo assim` : ""}.${batTxt}</div><button class="rdb-x" data-recon-done-x title="Fechar">${ic("x", 14)}</button></div>` : "";
+    // veio da página de uma conta: mostra o caminho de volta (senão a conciliação parece um beco)
+    const backLink = state.reconFrom ? `<button class="back-btn" data-recon-back>${ic("arrow-left", 16)} Voltar para ${state.reconFrom}</button>` : "";
     const drop = `<div class="import-drop" data-imp-drop><input type="file" data-imp-file accept=".ofx,.csv,.pdf,.xls,.xlsx,.qif,.txt" multiple hidden><span class="imp-file-ic">${ic("upload", 22)}</span><div class="imp-drop-txt"><b>${files.length ? "Adicionar outro arquivo" : "Arraste o(s) arquivo(s) aqui"}</b><span>${files.length ? "arraste ou clique para incluir mais" : "ou clique para escolher (pode ser mais de um)"}</span></div></div>`;
-    return `${doneBanner}<div class="import-zone card">
+    return `${backLink}${doneBanner}<div class="import-zone card">
       <h3>Importar extrato</h3>
       <p>Escolha a conta e envie um ou mais arquivos do banco (OFX · CSV · PDF · Excel · QIF). O MeuCaixa lê as transações e já sugere categoria, conta e correspondências com o que você lançou.</p>
       <div class="import-form">
@@ -2223,6 +2239,7 @@ const state = {
   tx: initialTx.slice(),
   recon: [],
   imported: false, reconAccount: null, reconFiles: [], reconDone: null, modalRecon: false,
+  reconFrom: null, // conta de onde o usuário abriu a conciliação (atalho "voltar pra conta")
   reconBank: "", // saldo real digitado do app do banco (batimento contra o projetado)
   filter: "todas",
   modal: false,
@@ -2386,6 +2403,18 @@ function openAcct(nome) {
   if (a && a.tipo === "invest" && hasHoldings() && !quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } });
 }
 function backAcct() { state.acctDetail = null; renderView(); }
+// "Conciliar" a partir da página da conta: leva pra aba Conciliação já com a conta escolhida e
+// guarda de onde veio (`reconFrom`) pra oferecer o caminho de volta — sem isso o usuário cai numa
+// tela que parece desconectada da conta que ele estava olhando.
+function startReconFor(nome) {
+  if (state.imported && state.reconAccount !== nome) {
+    if (!confirm(`Você está no meio de uma conciliação de "${state.reconAccount}".\n\nTrocar para "${nome}" descarta os itens ainda não salvos.`)) return;
+    state.recon = []; state.reconFiles = []; state.imported = false; state.editing = null; state.reconBank = "";
+  }
+  state.reconAccount = nome; state.reconFrom = nome; state.reconDone = null;
+  state.tab = "conciliacao"; state.acctDetail = null; state.acctMenu = null; state.assetRecon = null; state.catDetail = null;
+  renderView();
+}
 function toggleAcctMenu(id) { state.acctMenu = state.acctMenu === id ? null : id; renderView(); }
 function startEditAcct(id) { const a = acctById(id); if (!a) return; state.acctMenu = null; state.pop = { kind: "acctEdit", id, curName: a.nome, editIcon: acctIconOf(a) }; renderPop(); }
 function cancelEditAcct() { state.acctEdit = null; renderView(); }
@@ -3785,6 +3814,14 @@ function wire() {
     if (iMoves) { openAssetMoves(iMoves.dataset.invMoves); return; }
     if (e.target.closest("[data-b3-import]")) { b3ImportPick(); return; }
     if (e.target.closest("[data-goto-b3import]")) { state.tab = "conciliacao"; state.acctDetail = null; renderView(); return; }
+    // atalhos da página da conta: conciliar ESTA conta (já pré-selecionada), lançar nela, abrir o imóvel
+    if (e.target.closest("[data-recon-back]")) { const n = state.reconFrom; state.reconFrom = null; openAcct(n); return; }
+    const aRec = e.target.closest("[data-acct-recon]");
+    if (aRec) { startReconFor(aRec.dataset.acctRecon); return; }
+    const aNew = e.target.closest("[data-acct-newtx]");
+    if (aNew) { openModal(); state.form.conta = aNew.dataset.acctNewtx; state.form.origem = aNew.dataset.acctNewtx; renderModal(); return; }
+    const gImv = e.target.closest("[data-goto-imovel]");
+    if (gImv) { const ui = imvUI(); ui.sub = "portfolio"; ui.propId = gImv.dataset.gotoImovel; ui.unitDetail = null; state.tab = "imoveis"; state.acctDetail = null; renderView(); return; }
     // conciliação de ativos (tela cheia)
     const arAcc = e.target.closest("[data-ar-accept]");
     if (arAcc) { assetReconAccept(arAcc.dataset.arAccept); return; }
@@ -3899,7 +3936,7 @@ function wire() {
     if (e.target.closest("[data-nav-toggle]")) { document.querySelector(".fin-root").classList.toggle("nav-open"); return; }
     if (e.target.closest("[data-nav-close]")) { document.querySelector(".fin-root").classList.remove("nav-open"); return; }
     const tabBtn = e.target.closest("[data-tab]");
-    if (tabBtn) { document.querySelector(".fin-root").classList.remove("nav-open"); state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
+    if (tabBtn) { document.querySelector(".fin-root").classList.remove("nav-open"); if (tabBtn.dataset.tab !== "conciliacao") state.reconFrom = null; state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     if (e.target.closest("[data-admin-refresh]")) { loadAdmin(true); return; }
     const hday = e.target.closest("[data-hist-day]");

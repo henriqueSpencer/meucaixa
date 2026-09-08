@@ -203,12 +203,23 @@ function imvAddTx(p, o){ // cria transação REAL numa conta de dinheiro, ETIQUE
   state.tx.push(tx); applyTxToBalance(tx, 1); sortTx(); return tx;
 }
 
-/* ---- vencimento / pagamento ---- */
+/* ---- vencimento / pagamento ----
+   O dia de vencimento aceita 1..31 (contratos com "todo dia 30" são comuns). Guardamos o dia CRU
+   e só na hora de calcular a data de um mês concreto é que ele é aparado pelo último dia daquele
+   mês (fev = 28/29). Antes o valor era clampado em 28 na GRAVAÇÃO — quem digitava 30 via 28 voltar,
+   o bug "não consigo salvar o vencimento dia 30". */
+function imvLastDay(ym){ const[y,m]=ym.split("-").map(Number); return new Date(y,m,0).getDate(); }
+function imvNormDia(v){ const n=parseInt(v,10); return isNaN(n)?10:Math.min(31,Math.max(1,n)); }
+function imvDueDayIn(ym,dia){ return Math.min(imvNormDia(dia),imvLastDay(ym)); }
 function imvRentPaid(p,u,ym){ return imvAcctTxs(p).some(t=>t.tipo==="receita"&&(t.sub==="Aluguel"||t.cat==="Aluguel")&&(t.iso||"").slice(0,7)===ym&&(t.unidadeId===u.id||(!t.unidadeId&&p.units.length===1))); }
-function imvUnpaidMonths(p,u){ const now=new Date(); const start=u.inquilino&&u.inquilino.inicio?u.inquilino.inicio.slice(0,7):null; const out=[];
+// marco inicial de cobrança: mês a partir do qual o MeuCaixa passa a cobrar esta unidade. Existe
+// porque quem começa a usar o app hoje cadastra o contrato com a data REAL de início (anos atrás) e
+// não vai lançar o histórico todo — sem o marco, o app acusaria 12 meses de atraso no primeiro uso.
+function imvCobrarDesde(u){ const i=u&&u.inquilino; if(!i)return ""; return i.cobrarDesde||(i.inicio?i.inicio.slice(0,7):""); }
+function imvUnpaidMonths(p,u){ const now=new Date(); const start=imvCobrarDesde(u)||null; const out=[];
   for(let i=0;i<12;i++){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); const ym=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); if(start&&ym<start)break; if(imvRentPaid(p,u,ym))break; out.push(ym); } return out; }
 function imvRentStatus(p,u){ if(u.status!=="alugado"||!u.inquilino||imvIsMoradia(p))return null;
-  const now=new Date(),today=now.getDate(); const dueDay=Math.min(28,u.inquilino.diaVenc||10); const cur=imvCurYM(); const unpaid=imvUnpaidMonths(p,u); const v=u.aluguelReal||0;
+  const now=new Date(),today=now.getDate(); const cur=imvCurYM(); const dueDay=imvDueDayIn(cur,u.inquilino.diaVenc); const unpaid=imvUnpaidMonths(p,u); const v=u.aluguelReal||0;
   if(!unpaid.includes(cur))return {kind:"pago",dueDay,valor:v};
   const prior=unpaid.filter(y=>y!==cur).length;
   if(prior>0)return {kind:"atrasado",dueDay,meses:prior+1,dias:today>dueDay?today-dueDay:0,valor:v*(prior+1)};
@@ -218,7 +229,8 @@ function imvRentStatus(p,u){ if(u.status!=="alugado"||!u.inquilino||imvIsMoradia
 }
 function imvPending(){ const out=[]; imvProps().forEach(p=>p.units.forEach(u=>{const st=imvRentStatus(p,u); if(st&&st.kind!=="pago")out.push({p,u,st});})); const rank={atrasado:0,hoje:1,avencer:2}; return out.sort((a,b)=>rank[a.st.kind]-rank[b.st.kind]||b.st.valor-a.st.valor); }
 function imvWorstRent(p){ if(imvIsMoradia(p))return null; const rank={atrasado:0,hoje:1,avencer:2,pago:3}; let best=null; p.units.forEach(u=>{const st=imvRentStatus(p,u); if(st&&(!best||rank[st.kind]<rank[best.kind]))best=st;}); return best; }
-function imvRegisterPayment(p,u){ const now=new Date(); const ym=imvCurYM(); const dd=Math.min(28,u.inquilino.diaVenc||10); const data=ym+"-"+String(Math.min(now.getDate(),dd)).padStart(2,"0");
+function imvRegisterPayment(p,u){ const now=new Date(); const unpaid=imvUnpaidMonths(p,u); const ym=unpaid.length?unpaid[unpaid.length-1]:imvCurYM(); // o mais ANTIGO em aberto
+  const dd=imvDueDayIn(ym,u.inquilino.diaVenc); const dia=ym===imvCurYM()?Math.min(now.getDate(),dd):dd; const data=ym+"-"+String(dia).padStart(2,"0");
   imvModalLanc({ title:"Registrar pagamento de aluguel", tipo:"receita", sub:"Aluguel", unitId:u.id, valor:u.aluguelReal||0, desc:u.nome+" — aluguel "+imvYmLabel(ym), iso:data }, p); }
 function imvRentPill(st){ if(!st)return ""; const m={ pago:`<span class="imv-rp pago">● em dia</span>`, avencer:`<span class="imv-rp av">vence dia ${st.dueDay} · em ${st.dias}d</span>`, hoje:`<span class="imv-rp hoje">⚠ vence hoje</span>`, atrasado:`<span class="imv-rp atr">⚠ atrasado${st.meses>1?` ${st.meses} meses`:st.dias?` ${st.dias}d`:""}</span>` }; return m[st.kind]||""; }
 
@@ -296,6 +308,36 @@ function imvAddDocs(input, scope){ const files=[...(input.files||[])]; if(!files
       .catch(()=>{ errs++; }).finally(()=>{ if(--pending===0)done(); }); });
 }
 
+/* Seção "lançamentos do imóvel" DENTRO da página da conta-bem do imóvel (viewAcctDetail).
+   O aluguel cai numa conta de banco — é lá que o dinheiro existe de verdade. Aqui ele aparece só
+   para ACOMPANHAR o desempenho do imóvel, e nada disso entra no saldo/entradas/saídas desta conta
+   (senão o mesmo dinheiro contaria duas vezes no patrimônio). É o modelo dos apps do ramo
+   (Stessa, Buildium, AppFolio): o imóvel é uma DIMENSÃO sobre o extrato bancário, não um caixa. */
+function imvAcctLinkedSection(p, a){
+  if(!p) return "";
+  const txs=imvAcctTxs(p).filter(t=>t.conta!==(a&&a.nome)).slice().sort((x,y)=>String(y.iso||"").localeCompare(String(x.iso||"")));
+  const set=new Set(imvLastMonths(12)); let rec=0,desp=0;
+  txs.forEach(t=>{ const k=(t.iso||"").slice(0,7); if(!set.has(k))return; if(t.tipo==="receita")rec+=Math.abs(t.valor); else if(t.tipo==="despesa")desp+=Math.abs(t.valor); });
+  const head=`<div class="card-head" style="padding:12px 2px 4px"><div><h3>Movimentações deste imóvel</h3><span class="card-sub">Estão no caixa de outras contas (é lá que o dinheiro entrou/saiu). Aparecem aqui só para acompanhar o imóvel — <b>não somam no saldo desta conta</b>.</span></div><button class="mini-btn" data-imv-goto-prop="${imvE(p.id)}">Abrir o imóvel ${ic("arrow-right",12)}</button></div>`;
+  if(!txs.length) return `<div class="card table-card imv-linked" style="padding:6px 18px">${head}<div class="empty-mini">Nenhum aluguel ou despesa etiquetado a este imóvel ainda. Etiquete um lançamento na categoria "${IMV_CAT}" (no modal ou na conciliação) e ele aparece aqui.</div></div>`;
+  const grp={}; txs.forEach(t=>{ const k=(t.iso||"0000-00").slice(0,7); (grp[k]=grp[k]||[]).push(t); });
+  const keys=Object.keys(grp).sort((x,y)=>y.localeCompare(x));
+  const shown=keys.slice(0,6);
+  const body=shown.map(k=>{
+    const list=grp[k]; const net=list.reduce((s,t)=>s+(t.tipo==="receita"?1:-1)*Math.abs(t.valor),0);
+    const rows=list.map(t=>{
+      const uni=t.unidadeId?imvUnitNameOf(p.id,t.unidadeId):"";
+      const cor=t.tipo==="receita"?"var(--pos)":"var(--neg)";
+      return `<div class="mini-row click txr" data-tx-open="${t.id}"><span class="tx-ic" style="background:${cor}1A;color:${cor}">${ic(t.tipo==="receita"?"trending-up":"receipt",16)}</span><div class="tx-mid"><div class="mini-desc">${imvE(t.desc)}</div><div class="mini-meta">${(t.iso||"").split("-").reverse().join("/")} · ${imvE(t.sub||t.cat)}${uni?` · ${imvE(uni)}`:""} <span class="imv-inconta">em ${imvE(t.conta||"—")}</span></div></div><span class="num" style="color:${cor};font-weight:600">${t.tipo==="receita"?"+":"−"} ${fmtNum(Math.abs(t.valor))}</span></div>`;
+    }).join("");
+    return `<div class="month-div"><span class="md-label">${k==="0000-00"?"Sem data":monthLabel(k+"-01")}</span><span class="md-count">${list.length} ${list.length===1?"lançamento":"lançamentos"}</span><span class="md-net num" style="color:${net>=0?"var(--pos)":"var(--neg)"}">${net>=0?"+":"−"} ${fmtNum(net)}</span></div>${rows}`;
+  }).join("");
+  const mais=keys.length>shown.length?`<button class="mini-btn" data-imv-goto-prop="${imvE(p.id)}" style="margin:10px 0">Ver os ${keys.length-shown.length} meses anteriores no imóvel ${ic("arrow-right",12)}</button>`:"";
+  return `<div class="card table-card imv-linked" style="padding:6px 18px">${head}
+    <div class="imv-linked-kpis"><div><span>Receitas 12m</span><b class="num" style="color:var(--pos)">${fmt(rec)}</b></div><div><span>Despesas 12m</span><b class="num" style="color:var(--neg)">${fmt(desp)}</b></div><div><span>Resultado 12m</span><b class="num" style="color:${rec-desp>=0?"var(--pos)":"var(--neg)"}">${fmt(rec-desp)}</b></div></div>
+    <div class="mini-list">${body}</div>${mais}</div>`;
+}
+
 /* ---- VIEW principal ---- */
 function viewImoveis(){
   if(!imvEnabled()) return `<div class="imv-root"><div class="imv-empty">Módulo desativado. Ative em Configurações.</div></div>`;
@@ -305,18 +347,75 @@ function viewImoveis(){
   else if(ui.sub==="rentabilidade") body=imvViewRentab();
   else if(ui.sub==="contratos") body=imvViewContratos();
   else body=imvViewPortfolio();
-  const showNav=!ui.unitDetail && !(ui.sub==="portfolio"&&ui.propId);
-  const nav=showNav?`<div class="imv-subnav">${[["portfolio","Portfólio"],["rentabilidade","Rentabilidade"],["contratos","Contratos"]].map(([k,l])=>`<button data-imv-sub="${k}" class="${ui.sub===k?'on':''}">${l}</button>`).join("")}</div>`:"";
+  // a subnav fica SEMPRE visível (antes sumia ao abrir um imóvel/unidade, e ir daí pra Rentabilidade
+  // exigia voltar antes). O caminho de onde você está vem no breadcrumb, dentro de cada view.
+  const nav=`<div class="imv-subnav">${[["portfolio","Portfólio"],["rentabilidade","Rentabilidade"],["contratos","Contratos"]].map(([k,l])=>`<button data-imv-sub="${k}" class="${ui.sub===k?'on':''}">${l}</button>`).join("")}</div>`;
   return `<div class="imv-root">${nav}${body}</div>`;
+}
+// trilha de navegação: cada nível anterior é clicável, o atual é texto. Substituiu o "← Portfólio"
+// solto, que não dizia onde você estava nem deixava subir só um nível a partir da unidade.
+function imvCrumb(items){
+  return `<nav class="imv-crumb">`+items.map((it,i)=> i===items.length-1
+    ? `<span class="cur">${imvE(it.label)}</span>`
+    : `<button ${it.act||""}>${imvE(it.label)}</button><span class="sep">›</span>`).join("")+`</nav>`;
 }
 
 function imvRentAlert(){
   const pend=imvPending(); if(!pend.length)return "";
   const atr=pend.filter(x=>x.st.kind==="atrasado"),hoje=pend.filter(x=>x.st.kind==="hoje"),av=pend.filter(x=>x.st.kind==="avencer");
   const urgent=atr.length||hoje.length; const totAtraso=atr.reduce((s,x)=>s+x.st.valor,0);
-  const rows=pend.slice(0,10).map(({p,u,st})=>`<div class="imv-cobr">${imvRentPill(st)}<div class="imv-cm"><b>${imvE(u.inquilino.nome)}</b><small>${imvE(p.nome)} · ${imvE(u.nome)} · vence dia ${st.dueDay}</small></div><div class="imv-cv">${imvFmt(st.valor)}</div><button class="imv-btn primary sm" data-imv-pay="${p.id}|${u.id}">Registrar pagamento</button></div>`).join("");
+  const rows=pend.slice(0,10).map(({p,u,st})=>{
+    const meses=st.meses||1;
+    const acertar=st.kind==="atrasado"?`<button class="imv-btn sm" data-imv-acerto="${p.id}|${u.id}" title="Lançar de uma vez ou marcar como quitado">Acertar${meses>1?` ${meses} meses`:''}</button>`:"";
+    return `<div class="imv-cobr">${imvRentPill(st)}<div class="imv-cm"><b>${imvE(u.inquilino.nome)}</b><small>${imvE(p.nome)} · ${imvE(u.nome)} · vence dia ${imvNormDia(u.inquilino.diaVenc)}</small></div><div class="imv-cv">${imvFmt(st.valor)}</div><div class="imv-row">${acertar}<button class="imv-btn primary sm" data-imv-pay="${p.id}|${u.id}">Registrar pagamento</button></div></div>`;
+  }).join("");
   const parts=[]; if(atr.length)parts.push(`${atr.length} em atraso`); if(hoje.length)parts.push(`${hoje.length} vence${hoje.length>1?'m':''} hoje`); if(!urgent&&av.length)parts.push(`${av.length} a vencer em breve`);
-  return `<div class="imv-alert ${urgent?'':'warn'}"><h4>${urgent?'⚠ ':''}Aluguéis: ${parts.join(' · ')}${totAtraso?` — ${imvFmt(totAtraso)} em aberto`:''}</h4>${rows}</div>`;
+  // saída pra quem está COMEÇANDO a usar o app: o contrato começou há anos, mas os lançamentos só
+  // começam agora — um clique zera o passado sem inventar transação nenhuma.
+  const zerar=atr.length?`<div class="imv-alert-foot">Começando a usar agora e esses meses já foram pagos fora do app? <button class="imv-linkbtn" data-imv-zerar>Zerar o atraso e cobrar só a partir de ${imvYmLabel(imvCurYM())} →</button></div>`:"";
+  return `<div class="imv-alert ${urgent?'':'warn'}"><h4>${urgent?'⚠ ':''}Aluguéis: ${parts.join(' · ')}${totAtraso?` — ${imvFmt(totAtraso)} em aberto`:''}</h4>${rows}${zerar}</div>`;
+}
+/* Acerto de aluguéis em aberto: lista os meses pendentes da unidade e deixa (a) lançar todos de uma
+   vez como recebidos ou (b) marcar como quitados SEM lançar — este segundo caso só move o marco
+   `cobrarDesde`, que é o que interessa a quem está migrando o histórico pro app. */
+function imvModalAcerto(propId,unitId){
+  const p=imvProps().find(x=>x.id===propId); const u=p&&p.units.find(x=>x.id===unitId); if(!u||!u.inquilino)return;
+  const meses=imvUnpaidMonths(p,u).slice().reverse(); // do mais antigo pro mais recente
+  if(!meses.length){ alert("Não há aluguel em aberto nesta unidade."); return; }
+  const val=u.aluguelReal||u.aluguelEsperado||0;
+  const cashAccts=accounts.filter(a=>!a.arquivada&&a.tipo!=="imovel"&&a.tipo!=="patrimonio");
+  const contaOpts=cashAccts.map(a=>`<option ${a.nome===imvDefaultCashAccount()?"selected":""}>${imvE(a.nome)}</option>`).join("");
+  const cur=imvCurYM();
+  const rows=meses.map(ym=>`<label class="imv-ac-row"><input type="checkbox" data-ac-ym="${ym}" ${ym===cur?"":"checked"}><span class="imv-ac-m">${imvMesLongo(ym)}${ym===cur?' <span class="imv-pill">mês corrente</span>':''}</span><input class="imv-ac-v" data-ac-val="${ym}" inputmode="decimal" value="${String(val).replace(".",",")}"></label>`).join("");
+  imvOpenModal(`<button class="imv-x big" data-imv-close>×</button><h3>Acertar aluguéis em aberto</h3>
+    <p class="imv-phint">${imvE(p.nome)} · ${imvE(imvUnitLabel(u))} — ${meses.length} ${meses.length===1?"mês":"meses"} sem recebimento lançado.</p>
+    <div class="imv-ac-list">${rows}</div>
+    <div class="imv-field" style="margin-top:12px"><label>Conta que recebeu (só para "lançar")</label><select id="imv_ac_conta">${contaOpts||`<option>Conta Corrente</option>`}</select></div>
+    <div class="imv-tip">Duas saídas para os meses marcados:<br><b>Lançar</b> cria uma receita de aluguel em cada mês (entra no caixa e no resultado do imóvel).<br><b>Marcar como quitado</b> não cria lançamento nenhum — só avisa o app para parar de cobrar esses meses. Use quando eles foram pagos antes de você começar a usar o MeuCaixa.</div>
+    <div class="imv-modal-foot"><button class="imv-btn" data-imv-close>Cancelar</button><button class="imv-btn" id="imv_ac_quit">Marcar como quitado (sem lançar)</button><button class="imv-btn primary" id="imv_ac_lanc">Lançar recebimentos</button></div>`);
+  const marcados=()=>[...document.querySelectorAll("[data-ac-ym]:checked")].map(c=>c.dataset.acYm).sort();
+  // move o marco pro mês seguinte ao último marcado (os meses anteriores param de ser cobrados)
+  const avancaMarco=(sel)=>{ const ultimo=sel[sel.length-1]; const[y,m]=ultimo.split("-").map(Number); const d=new Date(y,m,1); u.inquilino.cobrarDesde=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"); };
+  document.getElementById("imv_ac_quit").onclick=()=>{ const sel=marcados(); if(!sel.length){alert("Marque ao menos um mês.");return;}
+    if(!confirm(`Marcar ${sel.length} ${sel.length===1?"mês":"meses"} como quitados sem criar lançamento?\n\nO MeuCaixa passa a cobrar só a partir do mês seguinte. Nada entra no caixa.`))return;
+    avancaMarco(sel); imvCloseModal(); imvSave(); };
+  document.getElementById("imv_ac_lanc").onclick=()=>{ const sel=marcados(); if(!sel.length){alert("Marque ao menos um mês.");return;}
+    const conta=document.getElementById("imv_ac_conta").value; let n=0;
+    sel.forEach(ym=>{ const v=imvParseVal((document.querySelector(`[data-ac-val="${ym}"]`)||{}).value); if(v<=0)return;
+      imvAddTx(p,{iso:ym+"-"+String(imvDueDayIn(ym,u.inquilino.diaVenc)).padStart(2,"0"),tipo:"receita",cat:IMV_CAT,sub:"Aluguel",conta,unidadeId:p.units.length>1?u.id:"",desc:imvUnitLabel(u)+" — aluguel "+imvYmLabel(ym),valor:v}); n++; });
+    if(!n){alert("Informe um valor maior que zero.");return;}
+    imvCloseModal(); imvSave(); };
+}
+// "começar do zero": considera tudo em dia até o mês corrente em TODAS as unidades alugadas,
+// sem criar lançamento — o caso de quem acabou de cadastrar contratos antigos.
+function imvZerarAtrasos(){
+  const alvo=imvPending().filter(x=>x.st.kind==="atrasado");
+  if(!alvo.length)return;
+  const uni=new Set(alvo.map(x=>x.p.id+"|"+x.u.id));
+  if(!confirm(`Zerar o atraso de ${uni.size} ${uni.size===1?"unidade":"unidades"} e passar a cobrar a partir de ${imvYmLabel(imvCurYM())}?\n\nNenhum lançamento é criado — o MeuCaixa só para de cobrar os meses anteriores. Dá pra ajustar unidade a unidade depois, em "Acertar".`))return;
+  const cur=imvCurYM();
+  alvo.forEach(({u})=>{ if(u.inquilino) u.inquilino.cobrarDesde=cur; });
+  imvSave();
 }
 
 function imvViewPortfolio(){
@@ -394,9 +493,10 @@ function imvViewPropDetail(){
   }).join("");
   const wanted=new Set(imvLastMonths(ui.chartMonths));
   const rows=imvAcctTxs(p).filter(t=>wanted.has((t.iso||"").slice(0,7))).sort((a,b)=>(b.iso||"")<(a.iso||"")?-1:1).slice(0,60).map(t=>`<tr class="imv-txr" data-tx-open="${t.id}"><td class="imv-mono" style="color:var(--sub)">${(t.iso||"").split("-").reverse().join("/")}</td><td>${imvE(t.desc)}</td><td><span class="imv-pill">${imvE(t.sub||t.cat)}</span></td><td class="imv-num ${t.tipo==='receita'?'pos':'neg'}">${t.tipo==='receita'?'+':'−'}${imvFmt(Math.abs(t.valor))}</td></tr>`).join("");
-  return `<button class="imv-back" data-imv-sub="portfolio">← Portfólio</button>
+  const acc=imvAcct(p);
+  return `${imvCrumb([{label:"Imóveis",act:`data-imv-sub="portfolio"`},{label:p.nome}])}
     <div class="imv-head"><div style="display:flex;gap:16px;align-items:flex-start">${imvFloorStack(p,56)}<div><div class="imv-eyebrow">${imvE(p.tipo||"")} · ${imvE(p.cidade||"")}${moradia?' · <span style="color:var(--pos)">🏠 Moradia</span>':''}</div><h1>${imvE(p.nome)}</h1><p>${imvE(p.endereco||"")}</p></div></div>
-    <div class="imv-row"><button class="imv-btn" data-imv-toggle-uso="${p.id}">${moradia?'↩ Voltar p/ aluguel':'🏠 Marcar moradia'}</button><button class="imv-btn" data-imv-edit-prop="${p.id}">Editar</button><button class="imv-btn primary" data-imv-add-lanc>+ Lançar</button></div></div>
+    <div class="imv-row">${acc?`<button class="imv-btn" data-imv-goto-acct="${imvE(acc.nome)}" title="Abrir a conta deste imóvel em Contas">${ic("wallet",14)} Conta do imóvel</button>`:""}<button class="imv-btn" data-imv-toggle-uso="${p.id}">${moradia?'↩ Voltar p/ aluguel':'🏠 Marcar moradia'}</button><button class="imv-btn" data-imv-edit-prop="${p.id}">Editar</button><button class="imv-btn primary" data-imv-add-lanc>+ Lançar</button></div></div>
     <div class="imv-kpis">
       <div class="imv-kpi"><div class="l">Valor de mercado</div><div class="v">${imvFmt(m12.valorMercado)}</div><div class="s"><span class="pos">▲ ${imvPct(m12.valoriz)}</span> desde ${imvFmt(m12.valorCompra)}</div></div>
       ${moradia?`<div class="imv-kpi"><div class="l">Despesas ${ui.chartMonths}m</div><div class="v neg">${imvFmt(m.desp)}</div><div class="s">custo de manter</div></div><div class="imv-kpi"><div class="l">Custo médio/mês</div><div class="v">${imvFmt(m.desp/ui.chartMonths)}</div><div class="s">no período</div></div><div class="imv-kpi"><div class="l">Uso</div><div class="v" style="font-size:18px;color:var(--pos)">Moradia própria</div><div class="s">fora do aluguel</div></div>`
@@ -421,7 +521,10 @@ function imvViewUnitDetail(){
   const ui=imvUI(); const {propId,unitId}=ui.unitDetail; const p=imvProps().find(x=>x.id===propId); if(!p){ui.unitDetail=null;return imvViewPortfolio();}
   const u=p.units.find(x=>x.id===unitId); if(!u){ui.unitDetail=null;return imvViewPropDetail();}
   const inq=u.inquilino; const occ=u.status==="alugado"&&!!inq;
-  const cur=occ?`<div class="imv-tcard"><div><div class="k">Nome</div><div class="vv">${imvE(inq.nome)}</div></div><div><div class="k">CPF/CNPJ</div><div class="vv imv-mono">${imvE(inq.cpf||'—')}</div></div><div><div class="k">R.G</div><div class="vv imv-mono">${imvE(inq.rg||'—')}</div></div><div><div class="k">Telefone</div><div class="vv">${imvE(inq.tel||'—')}</div></div><div><div class="k">E-mail</div><div class="vv">${imvE(inq.email||'—')}</div></div><div><div class="k">Desde</div><div class="vv">${inq.inicio?imvFormatBR(inq.inicio):'—'}</div></div><div><div class="k">Vencimento</div><div class="vv">dia ${inq.diaVenc||10}</div></div><div><div class="k">Aluguel</div><div class="vv">${imvFmt(u.aluguelReal)}</div></div></div>
+  const stU=occ?imvRentStatus(p,u):null;
+  const desde=occ?imvCobrarDesde(u):"";
+  const cur=occ?`<div class="imv-tcard"><div><div class="k">Nome</div><div class="vv">${imvE(inq.nome)}</div></div><div><div class="k">CPF/CNPJ</div><div class="vv imv-mono">${imvE(inq.cpf||'—')}</div></div><div><div class="k">R.G</div><div class="vv imv-mono">${imvE(inq.rg||'—')}</div></div><div><div class="k">Telefone</div><div class="vv">${imvE(inq.tel||'—')}</div></div><div><div class="k">E-mail</div><div class="vv">${imvE(inq.email||'—')}</div></div><div><div class="k">Desde</div><div class="vv">${inq.inicio?imvFormatBR(inq.inicio):'—'}</div></div><div><div class="k">Vencimento</div><div class="vv">dia ${imvNormDia(inq.diaVenc)}</div></div><div><div class="k">Aluguel</div><div class="vv">${imvFmt(u.aluguelReal)}</div></div><div><div class="k">Cobrança acompanhada desde</div><div class="vv">${desde?imvYmLabel(desde):'—'}</div></div></div>
+    ${stU?`<div class="imv-row" style="margin-top:12px;align-items:center">${imvRentPill(stU)}${stU.kind!=="pago"?`<button class="imv-btn primary sm" data-imv-pay="${p.id}|${u.id}">Registrar pagamento</button>`:""}${stU.kind==="atrasado"?`<button class="imv-btn sm" data-imv-acerto="${p.id}|${u.id}">Acertar meses em aberto</button>`:""}</div>`:""}
     <div class="imv-row" style="margin-top:12px"><button class="imv-btn sm" data-imv-edit-unit="${u.id}">Editar dados</button><button class="imv-btn sm" data-imv-contract-unit="${u.id}">Gerar contrato</button><button class="imv-btn sm danger" data-imv-encerrar="${u.id}">Encerrar locação</button></div>
     <div class="imv-divlabel">Observações</div><textarea class="imv-obs" data-imv-obs placeholder="Anotações: forma de pagamento, animais, combinados…">${imvE(inq.obs||'')}</textarea>
     <div class="imv-divlabel">Documentos do inquilino</div><label class="imv-docup"><input type="file" data-imv-doc-up="cur" multiple style="display:none">📎 Anexar (RG, CPF, comprovantes, contrato assinado…)</label>${imvDocList(inq.docs,"cur")}`
@@ -431,8 +534,8 @@ function imvViewUnitDetail(){
       <div class="imv-row" style="margin-top:10px"><button class="imv-btn sm" data-imv-hist-edit="${i}">Editar dados</button><button class="imv-btn sm danger" data-imv-hist-del="${i}">Excluir do histórico</button></div>
       ${h.obs?`<div class="imv-divlabel">Observações</div><p class="imv-phint">${imvE(h.obs)}</p>`:''}
       <div class="imv-divlabel">Documentos</div><label class="imv-docup"><input type="file" data-imv-doc-up="h${i}" multiple style="display:none">📎 Anexar documento deste inquilino</label>${imvDocList(h.docs,"h"+i)}</div>`:''}</div>`; }).join(""):`<div class="imv-empty">Nenhum inquilino anterior.</div>`;
-  return `<button class="imv-back" data-imv-unit-back="${propId}">← ${imvE(p.nome)}</button>
-    <div class="imv-head"><div><div class="imv-eyebrow">${imvE(p.nome)}${u.area&&u.area!=='—'?' · '+imvE(u.area):''}${u.quartos?' · '+u.quartos+' dorm.':''}</div><h1>${imvE(imvUnitLabel(u))}</h1><p>${occ?'Inquilino atual, observações, documentos e histórico.':'Unidade vaga — histórico preservado abaixo.'}</p></div><div class="imv-row"><button class="imv-btn" data-imv-edit-unit="${u.id}">✏ Editar unidade</button></div></div>
+  return `${imvCrumb([{label:"Imóveis",act:`data-imv-sub="portfolio"`},{label:p.nome,act:`data-imv-unit-back="${propId}"`},{label:u.nome}])}
+    <div class="imv-head"><div><div class="imv-eyebrow">${imvE(p.nome)}${u.area&&u.area!=='—'?' · '+imvE(u.area):''}${u.quartos?' · '+u.quartos+' dorm.':''}</div><h1>${imvE(imvUnitLabel(u))}</h1><p>${occ?'Inquilino atual, observações, documentos e histórico.':'Unidade vaga — histórico preservado abaixo.'}</p></div><div class="imv-row"><button class="imv-btn" data-imv-edit-unit="${u.id}">✏ Editar unidade</button><button class="imv-btn primary" data-imv-add-lanc data-imv-unit-lanc="${u.id}">+ Lançar nesta unidade</button></div></div>
     <div class="imv-panel"><h2>Inquilino atual</h2>${cur}</div>
     <div class="imv-panel" style="margin-top:16px"><h2>Documentos da unidade</h2><p class="imv-phint">Vistoria/laudo, planta, manuais, cópia de chave — específicos desta unidade (independem do inquilino).</p><label class="imv-docup"><input type="file" data-imv-doc-up="unit" multiple style="display:none">📎 Anexar documento da unidade</label>${imvDocList(u.docs,"unit")}</div>
     <div class="imv-panel" style="margin-top:16px"><div class="imv-panel-head"><h2>Histórico de inquilinos</h2><button class="imv-btn sm" data-imv-hist-add>＋ Adicionar ao histórico</button></div><p class="imv-phint">Quem já ocupou esta unidade — clique para ver/editar, anexar documentos e anotações.</p>${hist}</div>`;
@@ -567,7 +670,8 @@ function imvModalUnit(unitId){
     <div class="imv-f2"><div class="imv-field"><label>CPF/CNPJ</label><input id="imv_ucpf" value="${imvE(inq.cpf||'')}"></div><div class="imv-field"><label>R.G nº</label><input id="imv_urg" value="${imvE(inq.rg||'')}"></div></div>
     <div class="imv-f3"><div class="imv-field"><label>Estado civil</label><input id="imv_uec" value="${imvE(inq.estadoCivil||'')}"></div><div class="imv-field"><label>Natural de</label><input id="imv_unat" value="${imvE(inq.naturalidade||'')}"></div><div class="imv-field"><label>Gênero</label><select id="imv_usexo"><option value="m" ${inq.sexo!=="f"?'selected':''}>Masc.</option><option value="f" ${inq.sexo==="f"?'selected':''}>Fem.</option></select></div></div>
     <div class="imv-f2"><div class="imv-field"><label>Telefone</label><input id="imv_utel" value="${imvE(inq.tel||'')}"></div><div class="imv-field"><label>E-mail</label><input id="imv_uemail" value="${imvE(inq.email||'')}"></div></div>
-    <div class="imv-f3"><div class="imv-field"><label>Início</label><input type="date" id="imv_uini" value="${inq.inicio||''}"></div><div class="imv-field"><label>Prazo (meses)</label><input id="imv_umeses" value="${inq.meses||30}"></div><div class="imv-field"><label>Vencimento (dia)</label><input id="imv_udv" value="${inq.diaVenc||10}"></div></div>`;
+    <div class="imv-f3"><div class="imv-field"><label>Início</label><input type="date" id="imv_uini" value="${inq.inicio||''}"></div><div class="imv-field"><label>Prazo (meses)</label><input id="imv_umeses" value="${inq.meses||30}"></div><div class="imv-field"><label>Vencimento (dia)</label><input id="imv_udv" type="number" min="1" max="31" step="1" value="${imvNormDia(inq.diaVenc)}"></div></div>
+    <div class="imv-field"><label>Cobrar a partir de <span class="lbl-hint">· mês em que o MeuCaixa começa a acompanhar o aluguel</span></label><input type="month" id="imv_ucd" value="${imvE(inq.cobrarDesde||'')}"><small class="imv-fhint">Vazio = desde o início do contrato. Se o contrato é antigo e você não vai lançar o histórico, ponha o mês atual — assim os meses anteriores não aparecem como atraso.</small></div>`;
   imvOpenModal(`<button class="imv-x big" data-imv-close>×</button><h3>Editar unidade</h3>
     <div class="imv-f3"><div class="imv-field"><label>Nome da unidade</label><input id="imv_unm" value="${imvE(u.nome)}"></div><div class="imv-field"><label>Área</label><input id="imv_uarea" value="${imvE(u.area&&u.area!=='—'?u.area:'')}" placeholder="ex.: 60 m²"></div><div class="imv-field"><label>Dormitórios</label><input id="imv_uq" value="${u.quartos||''}"></div></div>
     <div class="imv-field"><label>Ícone da unidade</label><div class="imv-iconpick" id="imv_uiconpick">${["","🔑","🏠","🏢","🏬","🏪","🛏️","🚪","🚗","🏨","🏚️","🌳"].map(ico=>`<button type="button" class="imv-icb ${(u.icon||'')===ico?'on':''}" data-icon="${ico}">${ico||'Auto'}</button>`).join("")}</div><input type="hidden" id="imv_uicon" value="${imvE(u.icon||'')}"></div>
@@ -578,7 +682,11 @@ function imvModalUnit(unitId){
     u.nome=g("imv_unm").trim()||u.nome; u.area=g("imv_uarea").trim()||"—"; u.quartos=parseInt(g("imv_uq"))||0; u.icon=g("imv_uicon")||"";
     if(!moradia){
       u.aluguelEsperado=imvParseVal(g("imv_uesp"))||u.aluguelEsperado||0; u.aluguelReal=imvParseVal(g("imv_ureal")); const nome=g("imv_unome").trim();
-      if(nome){ u.status="alugado"; u.inquilino={...(u.inquilino||{}),nome,cpf:g("imv_ucpf"),rg:g("imv_urg"),estadoCivil:g("imv_uec"),naturalidade:g("imv_unat"),sexo:g("imv_usexo"),tel:g("imv_utel"),email:g("imv_uemail"),inicio:g("imv_uini")||inq.inicio||new Date().toISOString().slice(0,10),meses:parseInt(g("imv_umeses"))||inq.meses||30,diaVenc:Math.min(28,Math.max(1,parseInt(g("imv_udv"))||10)),deposito:inq.deposito||u.aluguelReal*3,obs:(u.inquilino&&u.inquilino.obs)||"",docs:(u.inquilino&&u.inquilino.docs)||[]}; }
+      if(nome){ const novo=!u.inquilino; const ini=g("imv_uini")||inq.inicio||new Date().toISOString().slice(0,10);
+        // inquilino NOVO com contrato que começou em mês passado: o padrão é acompanhar do mês atual
+        // em diante (senão o primeiro cadastro já nasce com meses de "atraso" que nunca vão ser lançados).
+        let cd=g("imv_ucd")||""; if(!cd && novo && ini.slice(0,7)<imvCurYM()) cd=imvCurYM();
+        u.status="alugado"; u.inquilino={...(u.inquilino||{}),nome,cpf:g("imv_ucpf"),rg:g("imv_urg"),estadoCivil:g("imv_uec"),naturalidade:g("imv_unat"),sexo:g("imv_usexo"),tel:g("imv_utel"),email:g("imv_uemail"),inicio:ini,meses:parseInt(g("imv_umeses"))||inq.meses||30,diaVenc:imvNormDia(g("imv_udv")),cobrarDesde:cd,deposito:inq.deposito||u.aluguelReal*3,obs:(u.inquilino&&u.inquilino.obs)||"",docs:(u.inquilino&&u.inquilino.docs)||[]}; }
       else if(inq.nome){ imvEncerrar(u,new Date().toISOString().slice(0,10)); }
       else { u.status="vago"; u.inquilino=null; u.aluguelReal=0; }
     }
@@ -780,7 +888,11 @@ document.addEventListener("click",(e)=>{
   const sub=e.target.closest("[data-imv-sub]"); if(sub){ const ui=imvUI(); ui.sub=sub.dataset.imvSub; ui.propId=null; ui.unitDetail=null; imvSave(); return; }
   const prop=e.target.closest("[data-imv-prop]"); if(prop){ const ui=imvUI(); ui.sub="portfolio"; ui.propId=prop.dataset.imvProp; ui.unitDetail=null; imvSave(); return; }
   const mo=e.target.closest("[data-imv-months]"); if(mo){ imvUI().chartMonths=+mo.dataset.imvMonths; imvSave(); return; }
-  if(e.target.closest("[data-imv-add-lanc]")){ imvModalLanc(); return; }
+  const al=e.target.closest("[data-imv-add-lanc]"); if(al){ const uid=al.dataset.imvUnitLanc||""; imvModalLanc(uid?{unitId:uid}:null); return; }
+  const ac=e.target.closest("[data-imv-acerto]"); if(ac){ const [pid,uid]=ac.dataset.imvAcerto.split("|"); imvModalAcerto(pid,uid); return; }
+  if(e.target.closest("[data-imv-zerar]")){ imvZerarAtrasos(); return; }
+  const ga=e.target.closest("[data-imv-goto-acct]"); if(ga){ if(typeof openAcct==="function") openAcct(ga.dataset.imvGotoAcct); return; }
+  const gpr=e.target.closest("[data-imv-goto-prop]"); if(gpr){ const ui=imvUI(); ui.sub="portfolio"; ui.propId=gpr.dataset.imvGotoProp; ui.unitDetail=null; state.tab="imoveis"; state.acctDetail=null; imvSave(); return; }
   if(e.target.closest("[data-imv-add-prop]")){ imvModalProp(null); return; }
   if(e.target.closest("[data-imv-rateio]")){ imvModalRateio(); return; }
   if(e.target.closest("[data-imv-sample]")){ imvLoadSample(); return; }

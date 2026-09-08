@@ -431,6 +431,49 @@ soma (`reconSplitSumInfo`) só habilita o botão quando a soma **bate** com o to
 vira uma transação no commit). Caso de uso: um PIX que junta dois aluguéis (kitnet + duplex). **Fecha o pop
 com `renderPop()`** no commit (esquecer isso deixava o pop na tela — bug corrigido).
 
+**Vencimento do aluguel aceita 1–31** (bug corrigido): o dia era clampado em **28 na gravação**
+(`Math.min(28,…)` no `imvModalUnit`), então quem digitava "vence dia 30" via 28 voltar — "não consigo
+salvar o dia 30". Agora o dia CRU (1–31, `imvNormDia`) é guardado e só é aparado **na hora de montar a
+data de um mês concreto** (`imvDueDayIn(ym,dia)` = min(dia, último dia do mês) — fev vira 28/29). O input
+é `type=number min=1 max=31`.
+
+**Marco de cobrança (`inquilino.cobrarDesde`, "YYYY-MM")** — resolve o caso de quem **está começando a
+usar o app**: o contrato começou anos atrás (e a data real vai no cadastro), mas os lançamentos só
+começam agora; sem marco, `imvUnpaidMonths` acusava 12 meses de atraso no primeiro uso. Peças:
+`imvCobrarDesde(u)` (marco, caindo no início do contrato quando vazio), `imvUnpaidMonths` para no marco,
+campo **"Cobrar a partir de"** (`type=month`) no `imvModalUnit`, e **default automático só para inquilino
+NOVO** com início em mês passado (= mês corrente; editar inquilino existente nunca mexe no marco
+silenciosamente). Duas saídas na UI: (a) **"Acertar"** por unidade (`imvModalAcerto`) lista os meses em
+aberto e oferece **lançar os recebimentos** (cria receita de Aluguel em cada mês, na conta escolhida) ou
+**marcar como quitado sem lançar** (só avança o marco); (b) **"Zerar o atraso"** (`imvZerarAtrasos`) no
+banner de aluguéis — um clique põe todas as unidades atrasadas em `cobrarDesde = mês corrente`, sem criar
+lançamento. `imvRegisterPayment` passou a pré-preencher o **mês mais antigo em aberto** (era sempre o
+corrente, o que nunca quitava o atraso).
+
+**Navegação dos imóveis**: a **subnav (Portfólio/Rentabilidade/Contratos) fica sempre visível** — antes
+sumia ao abrir um imóvel/unidade, e sair de lá pra Rentabilidade exigia voltar antes. O "← Portfólio"
+solto virou **breadcrumb** (`imvCrumb`): `Imóveis › Ponta Negra › Kitnet 02`, cada nível clicável.
+**Cross-links imóvel ⇄ conta**: no detalhe do imóvel, "Conta do imóvel" (`data-imv-goto-acct` →
+`openAcct`); na página da conta-bem, "Abrir imóvel" (`data-goto-imovel`). Detalhe da unidade ganhou
+"+ Lançar nesta unidade" (`data-imv-unit-lanc`, pré-seleciona a unidade no modal), a pílula de status e
+os botões Registrar pagamento/Acertar.
+
+**Ações na página da conta** (`viewAcctDetail`, `.acct-actions`): **"Conciliar / importar extrato"**
+(`data-acct-recon` → `startReconFor(nome)`) só em conta do grupo `fin` — imóvel/alocação não têm extrato
+pra bater. `startReconFor` leva pra aba Conciliação **já com a conta selecionada**, guarda
+`state.reconFrom` (atalho "← Voltar para <conta>" na tela de import, limpo ao trocar de aba) e **pede
+confirmação** se havia outra conciliação em andamento. Também "+ Lançar nesta conta" (`data-acct-newtx`,
+pré-preenche `state.form.conta`).
+
+**Lançamento de imóvel visto de DENTRO da conta-bem** (`imvAcctLinkedSection`, chamada pelo
+`viewAcctDetail`): o aluguel entra numa conta de banco — é lá que o dinheiro existe. Na conta do imóvel
+ele aparece numa seção separada **"Movimentações deste imóvel"** (receitas/despesas/resultado 12m + lista
+por mês, cada linha marcada "em &lt;conta&gt;"), com o aviso de que **não soma no saldo desta conta** — se
+somasse, o mesmo dinheiro contaria duas vezes no patrimônio. É o modelo dos apps do ramo (Stessa,
+Buildium, AppFolio): o imóvel é uma **dimensão sobre o extrato bancário**, não um caixa. A seção filtra
+`t.conta !== a.nome` (nada aparece duas vezes na mesma página) e o `acctTxRow` do banco ganhou a tag
+`🏠 imóvel · unidade`, pra enxergar o vínculo dos dois lados.
+
 ## Mapa de arquivos
 `index.html` (shell + scripts) · `app.js` (toda a lógica/telas) · `imoveis.js` (módulo Imóveis de renda —
 script clássico carregado ANTES do `app.js`, escopo global compartilhado; `viewImoveis`, helpers `imv*`) ·
