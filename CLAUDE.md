@@ -372,6 +372,33 @@ desabilitado (removidos `initialRecon` e o fallback no action `import`).
 seguintes `n>1` vêm ignoradas) — pedido explícito do usuário (uma tentativa de desativar isso p/ cartão foi
 revertida). `parseInstallment` reconhece "PARC 01/03".
 
+**Sugestão que aprende com o histórico** (`learnBuild`/`learnSuggest`, chamados pelo `buildRecon`): a
+categoria sugerida sai dos **lançamentos que o próprio usuário já classificou**, não de uma lista fixa.
+Cada transação com categoria vira um "documento" de **tokens** da descrição (`learnTokens`: sem acento,
+sem ruído de extrato — `LEARN_STOP` tira pix/compra/pagamento/ltda… —, sem número de documento, ≥3
+letras). A descrição nova é comparada com cada documento por **cobertura dos dois lados ponderada por
+IDF** (`covD`/`covN`, `sim = 0,65·max + 0,35·min`, corte `LEARN_MIN`): assimétrico de propósito, porque o
+banco **trunca** nome ("NORDESTAO SUPERMERCADOS"→"NORDESTAO") e às vezes **acrescenta** palavra
+("NETFLIX.COM ESTORNO") — Jaccard simétrico rejeitava os dois. Os parecidos **votam** por
+tipo|categoria|subcategoria com peso **`sim⁴` × recência × bônus de valor igual**; o expoente 4 é
+essencial: com `sim²` o salário "Pix recebido HENRIQUE SPENCER…" perdia pro **monte** de reembolsos que
+também trazem o nome dele — um casamento quase exato tem que valer mais que muitos mornos somados.
+Regras: (a) o **sinal do extrato manda no tipo** — o histórico só escolhe categoria; (b) **crédito também
+consulta as despesas**: se o parecido é lugar onde você só gasta, a sugestão vem como **reembolso**
+(estorno), exigindo `sim ≥ 0,6`; (c) etiqueta de **imóvel** herdada só na categoria de imóvel de renda.
+`RECON_RULES` continua como **rede de segurança** pro estabelecimento nunca lançado, mas deixou de apontar
+pra nomes fixos ("LAZER", "Custo de Vida" — que ninguém migrado pro Kakeibo tem): cada regra aponta pra um
+**conceito** (`alvo: ["comer fora","restaurante",…]`) e **`ruleResolve`** acha na árvore DO USUÁRIO a
+sub/categoria correspondente (casa por **tokens**, não `includes` — "casa" casaria com "Contas de casa");
+sem correspondência, a regra não vale. O card mostra **de onde veio** a sugestão (`r.aprend` →
+`.recon-learn`: "como você classificou «…» · N parecidos", ou "pelo tipo de estabelecimento"), e na edição
+inline aparece **"e nos N parecidos"** (`reconSimilares`/`reconAcceptSimilar`) que carimba a correção nos
+outros itens do MESMO extrato com descrição parecida e aceita todos. Como todo item conciliado vira
+lançamento, **corrigir uma sugestão ensina a próxima importação** — não há nada pra treinar à mão nem
+tabela nova no banco. Medido nos dados reais do usuário (treino jul/26 → prever ago/26, 74 lançamentos):
+**70% de cobertura, 83% de acerto de categoria**; o resto é ambiguidade genuína (o mesmo PIX da Ana paga
+salário e lanche) e custa ~100ms pra 300 linhas contra 3000 lançamentos.
+
 **Status dos itens e saldo projetado** (`buildRecon`/`viewConciliacao`): cada item tem `status`
 (`pendente`/`conciliado`/`ignorado`). `findReconMatch(p, used)` (restrito à conta selecionada,
 `state.reconAccount`) detecta correspondência com um lançamento já existente — item correspondente

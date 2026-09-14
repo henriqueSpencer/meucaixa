@@ -9,8 +9,8 @@
      6. Telas (views) — cada aba é uma função que devolve HTML
      7. Modal "nova transação" — campos mudam conforme o tipo
      8. Estado + renderização + eventos
-   Tudo é mock. A "sugestão" da conciliação aqui é fixa; num app real
-   viria de regras/histórico/ML sobre a descrição do extrato.
+   A "sugestão" da conciliação aprende com o histórico do próprio usuário
+   (learnBuild/learnSuggest), com regras por palavra-chave como rede de segurança.
    ========================================================================= */
 
 /* ---------- 1. tokens ---------- */
@@ -2091,18 +2091,27 @@ function viewConciliacao() {
             ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
             : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>${imvReconFieldHTML(r.sug)}<button class="sp-open-btn" data-recon-split="${r.id}" title="Ex.: um PIX que junta dois aluguéis">✂ Dividir em vários lançamentos</button>`}
         </div>`;
+    // de onde veio a sugestão: mostra o lançamento seu que serviu de régua (transparência > mágica)
+    const learned = r.aprend && !isEdit
+      ? (r.aprend.regra
+        ? `<div class="recon-learn">${ic("sparkles", 12)} pelo tipo de estabelecimento — você ainda não lançou nada parecido</div>`
+        : `<div class="recon-learn">${ic("sparkles", 12)} como você classificou <b>“${_esc(String(r.aprend.exemplo).slice(0, 42))}${String(r.aprend.exemplo).length > 42 ? "…" : ""}”</b>${r.aprend.n > 1 ? ` <span class="dot">·</span> ${r.aprend.n} lançamentos parecidos` : ""}</div>`)
+      : "";
     const match = r.match && !isEdit ? `<div class="recon-match${r.matchId != null ? " click" : ""}"${r.matchId != null ? ` data-tx-open="${r.matchId}"` : ""}>${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b>${r.matchId != null ? ` ${ic("arrow-right", 12)}` : ""}</div>` : "";
     const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
     const inst = r.note ? `<div class="recon-inst">${ic("circle-alert", 12)} ${r.note}</div>` : "";
+    // corrigiu um item? o mesmo estabelecimento costuma vir várias vezes no extrato — oferece aplicar
+    // a correção a todos os parecidos de uma vez (nada é gravado até "Salvar conciliação")
+    const simN = isEdit ? reconSimilares(r).length : 0;
     const actions = isEdit
-      ? `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Salvar</button><button class="act edit" data-recon-edit="${r.id}">${ic("x", 13)} Cancelar</button>`
+      ? `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Salvar</button>${simN ? `<button class="act accept alt" data-recon-accept-similar="${r.id}" title="Usa esta mesma categoria nos outros lançamentos do extrato com descrição parecida">${ic("sparkles", 13)} e nos ${simN} parecidos</button>` : ""}<button class="act edit" data-recon-edit="${r.id}">${ic("x", 13)} Cancelar</button>`
       : done
         ? `<span class="conc-tag">${ic("check", 14)} Conciliado</span><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-reactivate="${r.id}" title="Desfazer">${ic("undo", 13)}</button>`
         : skip
           ? `<span class="skip-tag">${r.note ? "Parcela pulada" : "Ignorado"}</span><button class="act edit" data-recon-reactivate="${r.id}">reativar</button>`
           : `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Aceitar</button><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-ignore="${r.id}">${ic("x", 13)}</button>`;
     const rawDate = r.iso ? r.iso.split("-").reverse().join("/") : "";
-    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${inst}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
+    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${learned}${inst}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
   }).join("");
   const addLine = `<button class="recon-add-line" data-recon-add>${ic("plus", 14)} Adicionar lançamento manualmente</button>`;
   return bar + addLine + `<div class="recon-list">${list}</div>`;
@@ -3419,21 +3428,53 @@ function reconFieldChange(id, field, value) {
   if (r.sug.cat !== IMV_CAT) { r.sug.imovelId = ""; r.sug.unidadeId = ""; }
   renderView();
 }
+// lê os campos da edição inline aberta e devolve o patch pro item (vazio se não está editando)
+function reconPatchFromEdit(id, r0) {
+  if (state.editing !== id || !r0) return {};
+  const scope = document.querySelector(`[data-recon-id="${id}"]`);
+  if (!scope) return {};
+  const val = (f) => { const el = scope.querySelector(`[data-recon-field="${f}"]`); return el ? el.value : null; };
+  const tipoKey = Object.keys(TIPOS).find((k) => TIPOS[k].label === val("tipo")) || r0.sug.tipo;
+  const patch = { sug: { ...r0.sug, tipo: tipoKey, cat: val("cat") || r0.sug.cat, sub: val("sub") != null ? val("sub") : r0.sug.sub, conta: val("conta") || r0.sug.conta, origem: val("origem") || r0.sug.origem, destino: val("destino") || r0.sug.destino, imovelId: val("imovelId") != null ? val("imovelId") : r0.sug.imovelId, unidadeId: val("unidadeId") != null ? val("unidadeId") : r0.sug.unidadeId } };
+  const desc = val("desc"); if (desc != null && desc.trim()) patch.raw = desc.trim();
+  const data = val("data"); if (data) patch.iso = data;
+  return patch;
+}
 function reconAccept(id) {
   const r0 = state.recon.find((r) => r.id === id);
-  let patch = {};
-  if (state.editing === id && r0) {
-    const scope = document.querySelector(`[data-recon-id="${id}"]`);
-    if (scope) {
-      const val = (f) => { const el = scope.querySelector(`[data-recon-field="${f}"]`); return el ? el.value : null; };
-      const tipoKey = Object.keys(TIPOS).find((k) => TIPOS[k].label === val("tipo")) || r0.sug.tipo;
-      patch = { sug: { ...r0.sug, tipo: tipoKey, cat: val("cat") || r0.sug.cat, sub: val("sub") != null ? val("sub") : r0.sug.sub, conta: val("conta") || r0.sug.conta, origem: val("origem") || r0.sug.origem, destino: val("destino") || r0.sug.destino, imovelId: val("imovelId") != null ? val("imovelId") : r0.sug.imovelId, unidadeId: val("unidadeId") != null ? val("unidadeId") : r0.sug.unidadeId } };
-      const desc = val("desc"); if (desc != null && desc.trim()) patch.raw = desc.trim();
-      const data = val("data"); if (data) patch.iso = data;
-    }
-  }
+  const patch = reconPatchFromEdit(id, r0);
   // aceitar é uma decisão reversível — nada é gravado até "Salvar conciliação" (reconCommit)
   state.recon = state.recon.map((r) => (r.id === id ? { ...r, ...patch, status: "conciliado" } : r));
+  state.editing = null; renderView();
+}
+// semelhança simples entre duas listas de tokens (Jaccard) — aqui os dois lados vêm do MESMO extrato,
+// então não precisa do IDF do histórico
+function learnSim(a, b) {
+  if (!a.length || !b.length) return 0;
+  const comum = a.filter((w) => b.includes(w)).length;
+  return comum / (a.length + b.length - comum);
+}
+// outros itens PENDENTES do extrato com descrição parecida e mesmo sinal (mesmo estabelecimento)
+function reconSimilares(r) {
+  const a = [...new Set(learnTokens(r.raw))].sort();
+  if (!a.length || r.sug.tipo === "transferencia") return [];
+  return state.recon.filter((o) => o.id !== r.id && o.status === "pendente" && !o.pulado
+    && o.sug.tipo !== "transferencia" && (o.valor < 0) === (r.valor < 0)
+    && learnSim(a, [...new Set(learnTokens(o.raw))].sort()) >= 0.6);
+}
+// "e nos N parecidos": salva a correção e carimba a MESMA classificação nos itens parecidos, aceitando
+// todos. Copia só tipo/categoria/subcategoria/imóvel — valor, data e descrição são de cada item.
+function reconAcceptSimilar(id) {
+  const r0 = state.recon.find((r) => r.id === id); if (!r0) return;
+  const patch = reconPatchFromEdit(id, r0);
+  const base = { ...r0, ...patch };
+  const alvos = new Set(reconSimilares(base).map((o) => o.id));
+  state.recon = state.recon.map((r) => {
+    if (r.id === id) return { ...base, status: "conciliado" };
+    if (!alvos.has(r.id)) return r;
+    const sug = { ...r.sug, tipo: base.sug.tipo, cat: base.sug.cat, sub: base.sug.sub, imovelId: base.sug.imovelId || "", unidadeId: base.sug.unidadeId || "" };
+    return { ...r, sug, conf: Math.max(r.conf, 95), aprend: null, status: "conciliado" };
+  });
   state.editing = null; renderView();
 }
 // aceita de uma vez tudo que está pendente (o caminho normal quando o extrato traz muitos itens novos)
@@ -3862,18 +3903,137 @@ async function parseB3File(file) {
   if (/\.xlsx$/i.test(file.name || "")) return b3ParseMovXlsx(await readXlsx(buf));
   return parseB3PDF(buf);
 }
+/* ---------- aprender com o histórico: sugestão a partir dos SEUS lançamentos ----------
+   As RECON_RULES abaixo são uma lista fixa de palavras-chave apontando pra categorias genéricas —
+   quem migrou pro Kakeibo (Fixos/Sobrevivência/Lazer/Extras) quase nunca via uma regra casar. Aqui a
+   régua passa a ser o histórico do próprio usuário: a descrição do extrato é comparada com a de cada
+   lançamento já classificado e o vencedor "vota" na categoria. Como todo item conciliado vira
+   lançamento, corrigir uma sugestão ensina a próxima importação — não há nada pra treinar à mão.  */
+// ruído de extrato que não identifica o estabelecimento (aparece em tudo e só atrapalha a semelhança)
+const LEARN_STOP = new Set(("pix compra compras cartao credito debito deb cred transf transferencia transferencias "
+  + "recebido recebida recebimento enviado enviada envio pagamento pagto pgto para por com das dos ref via "
+  + "boleto tarifa saque deposito ltda me eireli epp mei sao www com net online app mensalidade parcela parc "
+  + "titular conta banco bco agencia doc ted elo visa master mastercard").split(" "));
+const LEARN_MIN = 0.56; // semelhança mínima pra confiar no histórico (0–1); abaixo disso cai nas regras
+// (0,5 deixava "iFood - NuPay" herdar de "Uber - NuPay" só pela forma de pagamento em comum)
+const LEARN_IDF_MIN = 0.8; // o que as duas descrições têm em comum precisa ser palavra que informa algo
+function learnNorm(s) {
+  return (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+}
+// tokens que identificam o estabelecimento: sem ruído, sem número de documento/data, ≥3 letras
+function learnTokens(s) {
+  return learnNorm(s).split(" ").filter((w) => w.length >= 3 && !/^\d+$/.test(w) && !/\d{3}/.test(w) && !LEARN_STOP.has(w));
+}
+// índice do histórico (montado uma vez por importação — barato e sem cache pra invalidar)
+function learnBuild() {
+  const df = new Map(), docs = [];
+  (state.tx || []).forEach((t) => {
+    if (!t || !t.cat || t.tipo === "transferencia") return; // transferência não tem categoria a aprender
+    const toks = [...new Set(learnTokens(t.desc))].sort();
+    if (!toks.length) return;
+    toks.forEach((w) => df.set(w, (df.get(w) || 0) + 1));
+    docs.push({ toks, tipo: t.tipo, cat: t.cat, sub: t.sub || "", imovelId: t.imovelId || "", unidadeId: t.unidadeId || "",
+      valor: Math.abs(numOr0(t.valor)), iso: t.iso || "", desc: t.desc || "" });
+  });
+  const idx = { docs, df, n: docs.length };
+  docs.forEach((d) => { d.peso = d.toks.reduce((s, w) => s + learnIdf(idx, w), 0) || 1; });
+  return idx;
+}
+// palavra rara pesa mais que palavra comum (senão "posto" e "loja" casariam tudo com tudo)
+function learnIdf(idx, w) { return Math.log(1 + idx.n / (1 + (idx.df.get(w) || 0))); }
+// quanto mais velho o lançamento, menos ele manda (categoria de 3 anos atrás pode ter mudado)
+function learnRecencia(iso) {
+  if (!iso) return 0.6;
+  const meses = (new Date(TODAY_ISO) - new Date(iso)) / 2629800000;
+  return meses <= 3 ? 1 : Math.max(0.45, 1 - (meses - 3) * 0.025);
+}
+/* Devolve {tipo,cat,sub,imovelId,unidadeId,sim,n,exemplo,conf} ou null.
+   `valor` assinado vem do extrato e MANDA no tipo (receita/despesa) — o histórico só escolhe
+   categoria/subcategoria. A exceção é o reembolso, que é crédito numa categoria de despesa: se os
+   parecidos forem reembolso e o valor for positivo, a sugestão vem como reembolso. */
+function learnSuggest(idx, desc, valor) {
+  if (!idx || !idx.n) return null;
+  const toks = [...new Set(learnTokens(desc))].sort();
+  if (!toks.length) return null;
+  const peso = toks.reduce((s, w) => s + learnIdf(idx, w), 0) || 1;
+  // crédito também olha as DESPESAS: se o parecido é um lugar onde você só gasta, a entrada é estorno
+  // — no MeuCaixa isso é reembolso (crédito numa categoria de despesa, que abate o total).
+  const entra = valor < 0 ? ["despesa"] : ["receita", "reembolso", "despesa"];
+  const grupos = new Map();
+  let melhor = null, totalW = 0;
+  idx.docs.forEach((d) => {
+    if (!entra.includes(d.tipo)) return;
+    let comum = 0;
+    toks.forEach((w) => { if (d.toks.includes(w)) comum += learnIdf(idx, w); });
+    if (comum < LEARN_IDF_MIN) return;
+    // cobertura dos DOIS lados: quanto do lançamento antigo está na descrição nova e vice-versa. O
+    // lado mais coberto manda (o banco trunca nome: "NORDESTAO SUPERMERCADOS" vira "NORDESTAO", e
+    // "NETFLIX.COM ESTORNO" ganha uma palavra) — mas o outro lado ainda pesa, senão uma palavra
+    // genérica em comum casaria tudo com tudo.
+    const covD = comum / d.peso, covN = comum / peso;
+    const sim = 0.65 * Math.max(covD, covN) + 0.35 * Math.min(covD, covN);
+    if (sim < LEARN_MIN) return;
+    const bonus = d.valor > 0 && Math.abs(d.valor - Math.abs(valor)) < 0.01 ? 1.3 : 1; // mesmo valor = assinatura/conta fixa
+    // sim⁴: um casamento quase exato tem que valer mais que muitos casamentos mornos somados — com
+    // sim² o salário "Pix recebido HENRIQUE SPENCER ALBUQUERQUE" perdia pro monte de reembolsos do
+    // airbnb que também trazem o nome dele.
+    const w = Math.pow(sim, 4) * learnRecencia(d.iso) * bonus;
+    totalW += w;
+    const k = `${d.tipo}|${d.cat}|${d.sub}`;
+    const g = grupos.get(k) || { tipo: d.tipo, cat: d.cat, sub: d.sub, w: 0, n: 0, sim: 0, top: d, imv: new Map() };
+    g.w += w; g.n++;
+    if (sim > g.sim) { g.sim = sim; g.top = d; }
+    if (d.imovelId) g.imv.set(d.imovelId + "|" + (d.unidadeId || ""), (g.imv.get(d.imovelId + "|" + (d.unidadeId || "")) || 0) + w);
+    grupos.set(k, g);
+    if (!melhor || g.w > melhor.w) melhor = g;
+  });
+  if (!melhor || !totalW) return null;
+  let tipo = melhor.tipo;
+  if (valor > 0 && tipo === "despesa") {
+    if (melhor.sim < 0.6) return null; // virar a entrada em reembolso exige semelhança forte
+    tipo = "reembolso";
+  }
+  const share = melhor.w / totalW; // o quanto a categoria vencedora domina (histórico coerente?)
+  const forca = 0.88 + 0.12 * Math.min(melhor.n, 4) / 4; // 1 exemplo vale menos que 4
+  const imvTop = [...melhor.imv.entries()].sort((a, b) => b[1] - a[1])[0];
+  const [imovelId, unidadeId] = imvTop ? imvTop[0].split("|") : ["", ""];
+  return { tipo, cat: melhor.cat, sub: melhor.sub, imovelId, unidadeId,
+    sim: melhor.sim, n: melhor.n, exemplo: melhor.top.desc,
+    conf: Math.max(58, Math.min(97, Math.round(52 + 45 * melhor.sim * (0.6 + 0.4 * share) * forca))) };
+}
+/* Regras por palavra-chave — a rede de segurança pro estabelecimento que você NUNCA lançou antes
+   (churrascaria nova, posto novo). Antes cada regra apontava pra um nome fixo de categoria
+   ("LAZER", "Custo de Vida") que praticamente ninguém tem — quem migrou pro Kakeibo nunca via uma
+   regra pegar. Agora a regra aponta pra um CONCEITO e `ruleResolve` acha, na árvore do usuário, a
+   categoria/subcategoria cujo nome corresponde ("comer fora" pode ser sub de Lazer aqui e categoria
+   "Alimentação" ali). Sem correspondência a regra simplesmente não vale. */
 const RECON_RULES = [
-  { kw: ["ifood", "rappi", "restaurante", "lanche", "burger", "pizza", "bar ", "padaria"], cat: "LAZER", sub: "Comer fora" },
-  { kw: ["uber", "99app", "99 ", "posto", "shell", "ipiranga", "combustiv", "estacion", "pedagio", "sem parar"], cat: "Custo de Vida", sub: "Carro" },
-  { kw: ["mercado", "supermerc", "nordestao", "carrefour", "feira", "hortifruti", "atacad", "assai"], cat: "Custo de Vida", sub: "Feira" },
-  { kw: ["netflix", "spotify", "assinatura", "prime", "hbo", "disney", "youtube"], cat: "Custo de Vida", sub: "Assinaturas" },
-  { kw: ["farmacia", "drogaria", "consulta", "medic", "hospital", "unimed", "plano de saude"], cat: "Custo de Vida", sub: "Plano de saude" },
-  { kw: ["aluguel", "condominio", "energia", "enel", "cemig", "agua", "internet", "vivo", "claro", "tim ", "net "], cat: "Casa", sub: "Contas" },
-  { kw: ["salario", "pro-labore", "pro labore", "prolabore"], cat: "Trabalho", sub: "Salário", tipo: "receita" },
-  { kw: ["dividendo", "juros", "rendimento", "cdb", "tesouro", "renda fixa", "aplicacao resgate"], cat: "Rendimentos financeiros", sub: "Renda Fixa", tipo: "receita" },
-  { kw: ["aporte", "investimento", "aplicacao", "compra ativo"], cat: "Investimento", sub: "Investimento" },
-  { kw: ["amazon", "mercado livre", "mercadolivre", "magazine", "aliexpress", "shopee", "loja", "roupa", "renner"], cat: "Compras", sub: "" },
+  { kw: ["ifood", "rappi", "restaurante", "refeicoes", "lanchonete", "lanche", "burger", "burguer", "hamburg", "pizza", "padaria", "churrascaria", "espetinho", "acai", "sorvete", "gelateria", "cafeteria", "confeitaria", "bolo", "sushi", "temaki", "bistro", "pastelaria", "pizzaria", "alimentos e bebidas", "comercial de alimentos"], alvo: ["comer fora", "restaurante", "alimentacao", "refeicoes", "comida"] },
+  { kw: ["uber", "99app", "99pop", "posto", "shell", "ipiranga", "combustiv", "gasolina", "estacion", "pedagio", "sem parar", "lava jato", "auto center", "centro automotivo", "oficina", "pneus", "mecanica"], alvo: ["transporte", "carro", "combustivel", "locomocao"] },
+  { kw: ["supermerc", "mercadinho", "nordestao", "carrefour", "feira", "hortifruti", "atacad", "assai", "quitanda", "acougue", "verduras"], alvo: ["mercado", "supermercado", "feira", "alimentacao"] },
+  { kw: ["netflix", "spotify", "assinatura", "prime video", "hbo", "max ", "disney", "youtub", "google one", "icloud", "claude", "chatgpt", "openai", "anthropic", "claro flex", "vivo fibra", "academia", "smart fit"], alvo: ["assinaturas", "streaming", "assinatura"] },
+  { kw: ["farmacia", "drogaria", "drogasil", "pague menos", "pacheco", "consulta", "laboratorio", "hospital", "unimed", "hapvida", "odonto", "clinica"], alvo: ["saude", "remedio", "farmacia", "plano de saude"] },
+  { kw: ["energia", "enel", "cosern", "neoenergia", "cemig", "light ", "saneamento", "caern", "sabesp", "companhia energetica", "internet", "fibra", "gas "], alvo: ["contas de casa", "contas", "utilidades", "moradia"] },
+  { kw: ["aluguel", "condominio", "habitacao", "imobiliaria"], alvo: ["aluguel e condominio", "aluguel", "moradia"] },
+  { kw: ["petshop", "pet shop", "veterinar", "racao"], alvo: ["pet", "animais"] },
+  { kw: ["salario", "pro-labore", "pro labore", "prolabore", "folha de pagamento"], alvo: ["salario"], tipo: "receita" },
+  { kw: ["dividendo", "rendimento", "cdb", "tesouro", "renda fixa", "juros sobre capital", "cashback"], alvo: ["renda fixa", "rendimentos", "dividendos"], tipo: "receita" },
+  { kw: ["amazon", "mercado livre", "mercadolivre", "magazine", "aliexpress", "shopee", "shein", "renner", "riachuelo", "otica", "calcados", "comercio de roupas"], alvo: ["comprinhas", "compras", "roupas", "vestuario"] },
 ];
+// nome-conceito → categoria/subcategoria REAIS do usuário. Casa por tokens (todas as palavras do
+// conceito presentes no nome), não por `includes` solto: "casa" dentro de "Contas de casa" casaria
+// coisa errada. Subcategoria tem prioridade sobre categoria (é o nível onde o conceito costuma viver).
+function ruleResolve(alvos, tipo) {
+  const tree = catTree[tipo === "receita" ? "receita" : "despesa"] || [];
+  const bate = (nome, alvo) => {
+    const a = learnNorm(alvo).split(" ").filter(Boolean), n = learnNorm(nome).split(" ").filter(Boolean);
+    return a.length && a.every((w) => n.includes(w));
+  };
+  for (const alvo of alvos) for (const c of tree) for (const s of c.subs) if (bate(s, alvo)) return { cat: c.nome, sub: s };
+  for (const alvo of alvos) for (const c of tree) if (bate(c.nome, alvo)) return { cat: c.nome, sub: "" };
+  return null;
+}
 // `used` = ids de lançamentos já casados por outro item deste mesmo extrato. Sem isso, duas compras
 // idênticas no extrato casavam as duas com o MESMO lançamento existente e a segunda (que é nova de
 // verdade) era silenciosamente engolida como duplicata.
@@ -3916,6 +4076,7 @@ function buildRecon(parsed, account) {
   // não existe — o saldo entrava no cartão sem sair de lugar nenhum). O usuário confirma/edita.
   const origemPad = (accounts.find((a) => !a.arquivada && a.grupo === "fin" && a.tipo !== "cartao" && a.nome !== account) || {}).nome || account;
   const used = new Set(); // cada lançamento existente só casa com UM item do extrato
+  const learn = learnBuild(); // índice do histórico: a sugestão olha o que VOCÊ já classificou antes
   return parsed.slice(0, 300).map((p, idx) => {
     // pagamento de fatura do cartão → transferência (não é receita/despesa do orçamento)
     if (acc && acc.tipo === "cartao" && isPay(p.desc) && p.valor * flip > 0) {
@@ -3933,19 +4094,32 @@ function buildRecon(parsed, account) {
       else { status = "ignorado"; pulado = true; note = `Parcela ${inst.n}/${inst.m} — o total já foi lançado na 1ª`; }
     }
     const isDesp = valor < 0;
-    const rule = RECON_RULES.find((r) => r.kw.some((k) => (p.desc || "").toLowerCase().includes(k)));
-    const tipo = rule && rule.tipo ? rule.tipo : (isDesp ? "despesa" : "receita");
-    // categoria: da regra se existir, senão a 1ª do tipo
-    const catObj = (rule && catExists(tipo, rule.cat) ? catTree[tipo].find((c) => c.nome === rule.cat) : catTree[tipo][0]) || null;
+    // 1º o histórico do usuário (lançamentos parecidos), 2º as regras fixas, 3º a 1ª categoria do tipo
+    const apr = learnSuggest(learn, p.desc, valor);
+    const hay = learnNorm(p.desc); // sem acento: "farmácia" casa com a keyword "farmacia"
+    const rule0 = apr ? null : RECON_RULES.find((r) => r.kw.some((k) => hay.includes(k.trim())));
+    // o SINAL do extrato manda no tipo; a regra só escolhe categoria (uma regra marcada `tipo:"receita"`
+    // num débito simplesmente não vai achar a categoria dela na árvore de despesa, e cai fora)
+    const tipo = apr ? apr.tipo : (isDesp ? "despesa" : "receita");
+    const tree = catTree[tipo === "receita" ? "receita" : "despesa"] || []; // reembolso usa a árvore de despesa
+    const rule = rule0 ? ruleResolve(rule0.alvo, tipo) : null; // a regra só vale se o usuário tem a categoria
+    const quer = apr ? apr.cat : (rule ? rule.cat : null);
+    // categoria: a aprendida/da regra se ainda existir, senão a 1ª do tipo
+    const catObj = (quer && tree.some((c) => c.nome === quer) ? tree.find((c) => c.nome === quer) : tree[0]) || null;
     const cat = catObj ? catObj.nome : "Outros";
-    // subcategoria SEMPRE pré-preenchida: a da regra se pertencer à categoria, senão a 1ª sub real
+    // subcategoria SEMPRE pré-preenchida: a aprendida/da regra se pertencer à categoria, senão a 1ª sub real
     // (ignora o fallback em que a única "sub" é o próprio nome da categoria)
     const firstSub = catObj ? (catObj.subs.find((s) => s !== catObj.nome) || "") : "";
-    const sub = (rule && rule.sub && catObj && catObj.subs.includes(rule.sub)) ? rule.sub : firstSub;
+    const querSub = apr ? apr.sub : (rule ? rule.sub : "");
+    const sub = (querSub && catObj && catObj.subs.includes(querSub)) ? querSub : firstSub;
     const match = findReconMatch({ iso: p.iso, valor }, used);
     if (match) { used.add(match.id); status = "ignorado"; } // já existe um lançamento igual → vem marcado com X (reative p/ contar)
-    const conf = Math.min((rule ? 85 : 55) + (match ? 12 : 0), 99);
+    const conf = Math.min((apr ? apr.conf : rule ? 85 : 55) + (match ? 12 : 0), 99);
     const sug = { tipo, cat, sub, conta: account };
+    // etiqueta de imóvel aprendida (só vale na categoria de imóvel de renda — igual ao resto do app)
+    if (apr && apr.imovelId && typeof IMV_CAT !== "undefined" && cat === IMV_CAT) {
+      sug.imovelId = apr.imovelId; if (apr.unidadeId) sug.unidadeId = apr.unidadeId;
+    }
     // palpite de imóvel: se a descrição traz o nome do imóvel/inquilino, já pré-preenche (editável)
     const guess = imvGuessFromText(p.desc, tipo);
     if (guess) {
@@ -3958,7 +4132,8 @@ function buildRecon(parsed, account) {
         sug.sub = subs.includes(want) ? want : (subs.find((s) => s !== IMV_CAT) || "");
       }
     }
-    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado };
+    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado,
+      aprend: apr ? { exemplo: apr.exemplo, n: apr.n } : (rule ? { regra: true } : null) }; // de onde veio a sugestão (mostrado no card)
   });
 }
 let _manSeq = 0;
@@ -4268,6 +4443,8 @@ function wire() {
     if (dset) { state.form.data = isoPlusDays(TODAY_ISO, +dset.dataset.dateSet); renderModal(); return; }
     if (e.target.closest("[data-recon-accept-all]")) { reconAcceptAll(); return; }
     if (e.target.closest("[data-recon-accept-dup]")) { reconAcceptDup(); return; }
+    const accSim = e.target.closest("[data-recon-accept-similar]");
+    if (accSim) { reconAcceptSimilar(accSim.dataset.reconAcceptSimilar); return; }
     const acc = e.target.closest("[data-recon-accept]");
     if (acc) { reconAccept(acc.dataset.reconAccept); return; }
     const edt = e.target.closest("[data-recon-edit]");
