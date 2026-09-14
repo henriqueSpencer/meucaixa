@@ -32,6 +32,24 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   servidor com `updated_at` sempre fresco no upsert — o **"push fantasma"** que revertia dados no reload
   sem o usuário ter editado nada (bug real: Loft `alocado 40000→37000`). O cursor **não** avança além dos
   próprios writes (re-puxá-los é benigno; avançar poderia pular uma mudança concorrente de outro aparelho).
+  **Incidente de perda de dados (14/09/2026) — leia antes de mexer no sync.** 56 lançamentos e uma
+  subcategoria recém-criados no desktop foram APAGADOS no servidor quando o app abriu no celular.
+  Cadeia: (1) o autosync (`setInterval` 20s, `visibilitychange`, `online`, `scheduleSync`) chama
+  `sync()` e **descarta o retorno** — só o `boot()` consumia `{pulled, model}`; (2) o `sync()` gravava
+  o snapshot novo no IndexedDB e avisava as outras abas por `bcPost`, mas **`BroadcastChannel` não
+  entrega ao próprio remetente**, então o app DESTA aba nunca soube e seguiu com o modelo velho em
+  memória; (3) a proteção de `saveSnapshot` (`curV > _snapVer`) não pegou, porque foi o próprio sync
+  quem avançou `_snapVer`; (4) a gravação seguinte do modelo velho tirou do snapshot as linhas
+  recém-chegadas → `local` sem elas + `base` com elas = **tombstone** no sync seguinte. Correções:
+  **`notifyStale()`** (o sync avisa o app local, não só as outras abas), **`_pendingApply`** (enquanto
+  o app não reaplicar o estado vindo do servidor, `saveSnapshot` recusa gravar e pede reaplicação;
+  `readSnapshot()` interno não zera o flag, só o `loadSnapshot()` público — que é o app dizendo "adotei
+  este estado"), **trava de exclusão em massa** (`BULK_DEL_MAX=15`: uma leva grande de tombstones não
+  sobe de primeira — zera o cursor, força reconciliar com o servidor e só passa se a ausência se
+  confirmar na rodada seguinte) e **`_bootIncompleto`** no app (boot sem snapshot e sem confirmar o
+  servidor não semeia nem grava — "sem categorias" ali é falta de dados, não conta nova).
+  Regressão em `t_sync.js` (scratchpad): store real contra um Supabase falso; **falha no código
+  anterior** (56 tombstones) e passa no corrigido, com exclusão genuína de 1 linha ainda subindo.
   Lógica pura e testável: `_mergeRows`/`_modelToRows`/`_rowsToModel`. **Multi-usuário**: cada conta só vê
   seus dados (RLS `user_id = auth.uid()`); o upsert usa
   `onConflict: "user_id,id"`. **PK é composta `(user_id, id)`** em todas as tabelas (migração

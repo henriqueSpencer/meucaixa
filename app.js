@@ -4809,7 +4809,9 @@ function exampleSeedModel() {
 // self-heal: um usuário sem NENHUMA categoria (seed antigo/parcial vindo de código em cache velho)
 // não consegue nem lançar transação. Injeta o conjunto padrão e persiste. Idempotente — só age
 // quando está realmente vazio; não mexe nas categorias de quem já tem as suas.
+let _bootIncompleto = false; // boot sem snapshot e sem conseguir confirmar o servidor (ver boot())
 function ensureSeeded() {
+  if (_bootIncompleto) return; // "sem categorias" aqui é falta de dados carregados, não conta nova
   if (catTree.receita.length || catTree.despesa.length) return;
   const def = defaultSeedModel();
   catTree.receita.push(...def.catTree.receita.map(cloneCat));
@@ -4902,7 +4904,11 @@ async function boot() {
     let remoteEmpty = true;
     try { remoteEmpty = await Store.isRemoteEmpty(); } catch (e) { remoteEmpty = false; }
     if (remoteEmpty) { const starter = OF ? seedModel : exampleSeedModel(); await Store.seed(starter); model = starter; }
-    else model = { accounts: [], catTree: { receita: [], despesa: [] }, tx: [], dashOrder: state.dashOrder.slice() };
+    // Sem snapshot local E o servidor NÃO está vazio (ou nem deu pra perguntar, ex.: pull falhou por
+    // rede): entramos em modo degradado, com um modelo vazio que NÃO representa a conta. Marcar isso
+    // é essencial — semear/gravar por cima daqui criaria categorias fantasma e, pior, um estado local
+    // vazio que o sync poderia tentar propagar.
+    else { model = { accounts: [], catTree: { receita: [], despesa: [] }, tx: [], dashOrder: state.dashOrder.slice() }; _bootIncompleto = true; }
   }
   applyModel(model);
   ensureSeeded(); // self-heal: injeta categorias/contas padrão se o usuário ficou sem nenhuma

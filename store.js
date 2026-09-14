@@ -192,15 +192,29 @@
   // v3: cache passa a ser por-usuário — limpa qualquer snapshot de outro usuário no mesmo aparelho.
   // v4/v5: feature de imóveis (transações ganham imovel_id/unidade_id; asset_moves; categorias
   //        de imóvel agrupadas) — força re-puxar tudo pra popular os novos campos no snapshot local.
-  const SYNC_VERSION = 5;
+  // v6: bug de perda de dados (14/09/2026). O autosync desta aba gravava o snapshot vindo do
+  //     servidor sem avisar o app (BroadcastChannel não fala com o próprio remetente); a gravação
+  //     seguinte do modelo em memória — velho — tirava do snapshot as linhas recém-chegadas, e o
+  //     sync mandava TOMBSTONE delas (56 lançamentos + 1 subcategoria apagados no servidor).
+  //     O bump descarta qualquer snapshot possivelmente defasado e re-puxa tudo.
+  const SYNC_VERSION = 6;
+  // acima disto, uma leva de exclusões é tratada como suspeita e exige reconciliação antes de subir
+  const BULK_DEL_MAX = 15;
+  let _bulkDelOk = false;
   let sb = null, userId = null, user = null, syncing = false, syncTimer = null;
   // coordenação entre ABAS: cada gravação de snapshot incrementa "snapVersion" no IndexedDB.
   // _snapVer = a versão que ESTA aba viu por último. Se o IndexedDB estiver numa versão MAIOR na
   // hora de gravar, é porque OUTRA aba gravou depois → não sobrescreve (senão a aba velha empurraria
   // exclusões do que a outra fez — bug grave de perda de dados) e pede recarga via _staleCb.
-  let _snapVer = 0, _staleCb = null, _bc = null;
+  // _pendingApply: versão de snapshot que o SYNC gravou e o app ainda NÃO aplicou. Enquanto estiver
+  // setada, nenhuma gravação do modelo em memória pode sobrescrever o snapshot (ver saveSnapshot).
+  let _snapVer = 0, _staleCb = null, _bc = null, _pendingApply = 0;
   const authCbs = [];
   function bcPost(v) { try { if (_bc) _bc.postMessage({ v }); } catch (e) {} }
+  // BroadcastChannel NÃO entrega ao próprio remetente. Quando é o autosync DESTA aba que traz dados
+  // novos, o `bcPost` avisa todas as abas menos a que precisa saber — e o app segue com o modelo
+  // velho em memória. Por isso o sync chama isto: avisar o app local é obrigatório, não opcional.
+  function notifyStale() { if (_staleCb) { try { _staleCb(); } catch (e) {} } }
 
   async function init() {
     idb = await openIDB();
@@ -266,9 +280,9 @@
     await sb.auth.signOut(); userId = null; user = null;
   }
 
-  // snapshot local (fonte da verdade offline) — escopado ao usuário logado
-  async function loadSnapshot() {
-    // se o snapshot em cache é de OUTRO usuário (troca de conta no mesmo aparelho), descarta.
+  // leitura interna do snapshot: NÃO marca "aplicado" (o próprio sync lê o snapshot duas vezes por
+  // ciclo, e essas leituras não significam que o app adotou o estado).
+  async function readSnapshot() {
     const cachedUid = await kvGet("uid");
     if (userId && cachedUid && cachedUid !== userId) {
       await kvDel("snapshot"); await kvDel("cursor"); await kvDel("lastSynced");
@@ -278,7 +292,23 @@
     _snapVer = (await kvGet("snapVersion")) || 0; // sincroniza a versão vista com o IndexedDB
     return (await kvGet("snapshot")) || null;
   }
+  // snapshot local (fonte da verdade offline) — escopado ao usuário logado.
+  // Quem chama esta versão PÚBLICA é o app, e fazê-lo significa "estou adotando este estado": é o
+  // que libera as gravações novamente (ver _pendingApply).
+  async function loadSnapshot() {
+    const snap = await readSnapshot();
+    _pendingApply = 0;
+    return snap;
+  }
   async function saveSnapshot(model) {
+    if (!_staleCb) _pendingApply = 0; // sem quem avisar, travar a gravação só perderia dados
+    if (_pendingApply) {
+      // o sync trouxe estado do servidor que o app ainda não aplicou. Gravar o modelo em memória
+      // agora apagaria do snapshot as linhas recém-chegadas — e o próximo sync as empurraria como
+      // TOMBSTONE (foi assim que 56 lançamentos sumiram em 14/09/2026). Pede a reaplicação e sai.
+      notifyStale(); scheduleSync();
+      return;
+    }
     const curV = (await kvGet("snapVersion")) || 0;
     if (curV > _snapVer) {
       // OUTRA aba gravou depois que carreguei → meu modelo em memória está velho. NÃO sobrescreve
@@ -330,7 +360,7 @@
     if (!userId || syncing || !navigator.onLine) return { pulled: false };
     syncing = true;
     try {
-      const model = await loadSnapshot();
+      const model = await readSnapshot();
       const localRows = model ? modelToRows(model) : { accounts: [], categories: [], transactions: [], prefs: [], asset_moves: [] };
       const base = (await kvGet("lastSynced")) || {};
 
@@ -356,6 +386,19 @@
       // 2) MERGE 3-vias → novo estado local + linhas a empurrar (edições minhas que o servidor não tocou).
       const { merged, push } = mergeRows(localRows, base, remoteRows);
 
+      // 2.5) TRAVA DE EXCLUSÃO EM MASSA. Todo bug que deixe o modelo em memória atrasado em relação
+      // ao snapshot vira exclusão em massa no servidor — o dano mais caro que este app pode causar.
+      // Na dúvida, NÃO apaga: descarta o cursor (re-pull completo na próxima rodada), manda o app
+      // reaplicar e só libera se a ausência se confirmar depois de reconciliar com o servidor.
+      const tombs = TABLES.reduce((n, t) => n + ((push[t] || []).filter((r) => r.deleted).length), 0);
+      if (tombs >= BULK_DEL_MAX && !_bulkDelOk) {
+        _bulkDelOk = true;                 // a próxima rodada, já reconciliada, pode prosseguir
+        await kvSet("cursor", EPOCH);      // força reconstruir o estado remoto inteiro
+        notifyStale(); scheduleSync();
+        return { pulled: false, blockedDeletes: tombs };
+      }
+      if (tombs < BULK_DEL_MAX) _bulkDelOk = false;
+
       // 3) PUSH das edições genuínas (inclui tombstones de exclusão).
       let pushed = false;
       for (const t of TABLES) {
@@ -368,7 +411,7 @@
 
       // 4) Persistência local. Guarda anti-corrida: se o snapshot mudou DURANTE o sync (edição do
       // usuário / outra aba), não aplica o merge nem avança o cursor — reconcilia no próximo ciclo.
-      const latest = await loadSnapshot();
+      const latest = await readSnapshot();
       const localUnchanged = JSON.stringify(latest ? modelToRows(latest) : localRows) === JSON.stringify(localRows);
       if (!localUnchanged) { scheduleSync(); return { pulled: false }; }
 
@@ -381,6 +424,11 @@
         bcPost(nv);
         await kvSet("lastSynced", merged);
         await kvSet("cursor", maxTs);
+        // o app AINDA está com o modelo velho em memória: trava as gravações e avisa. Quem chamou
+        // sync() também recebe `model` no retorno, mas o autosync (timer/visibilitychange/
+        // scheduleSync) descarta o retorno — sem este aviso o app nunca saberia.
+        if (_staleCb) _pendingApply = nv;
+        notifyStale();
         return { pulled: true, model: model2 };
       }
       // servidor inalterado: se empurramos algo, a baseline agora é o que o servidor passou a ter.
