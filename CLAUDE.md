@@ -184,7 +184,13 @@ Cloudflare Pages, projeto `meucaixa` (**direct-upload via wrangler**; o token OA
 ```bash
 DIST=$(mktemp -d); git archive HEAD | tar -x -C "$DIST"
 npx --yes wrangler@latest pages deploy "$DIST" --project-name=meucaixa --branch=main --commit-dirty=true
+git push origin main      # SEMPRE junto com o deploy — ver abaixo
 ```
+**Todo deploy de produção leva `git push origin main` junto** — autorização permanente do usuário
+(14/09/2026: *"sempre ao subir qualquer coisa em prod pode subir no github"*), não precisa perguntar.
+O repo é **público**; como o deploy já publica exatamente `git archive HEAD`, deixar o GitHub atrás só
+cria divergência entre o que está no ar e o que está versionado. Commit que não foi pra produção segue
+esperando decisão.
 `.assetsignore` enxuga o site. **Deploy é MANUAL por enquanto** (comando acima) — a produção atualiza a
 cada mudança. **Auto-deploy no push** via `.github/workflows/deploy.yml` (wrangler-action, accountId
 `b7345f757a0fc365da5dcdea7a033db5`) está pronto mas **falta o secret `CLOUDFLARE_API_TOKEN`**; enquanto
