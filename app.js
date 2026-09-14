@@ -714,7 +714,6 @@ function catTotals(tipo) {
   return m;
 }
 // mês inicial do donut/ganhos = mês atual (consistente com o Extrato). O usuário navega com as setas.
-function defaultMonth(tipo) { return (OF && OF.refMonthYM) || TODAY_ISO.slice(0, 7); }
 const ymLabel = (ym) => monthLabel(ym + "-01");
 const catColor = (i) => donutPalette[i % donutPalette.length];
 const MES3 = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -828,18 +827,22 @@ function catDonutBlock(tipo) {
     const md = antes[d.nome];
     const delta = md > 0 ? (d.valor - md) / md : null;
     const dCls = delta == null ? "novo" : delta > 0.1 ? "up" : delta < -0.1 ? "down" : "flat";
-    const dTxt = delta == null ? "novo" : `${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}%`;
+    // seta no Δ: sem ela, dois números em % lado a lado (parte do mês × variação) se confundem
+    const dTxt = delta == null ? "novo" : `${delta > 0.1 ? "▲" : delta < -0.1 ? "▼" : "="} ${Math.abs(Math.round(delta * 100))}%`;
+    const share = total > 0 ? (d.valor / total * 100) : 0;
     const tip = md > 0
-      ? `${d.nome}: ${fmt(d.valor)} neste mês · média dos 3 meses anteriores ${fmt(md)} · diferença ${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}% (${fmtSigned(d.valor - md)})`
-      : `${d.nome}: ${fmt(d.valor)} neste mês · não aparecia nos 3 meses anteriores`;
-    return `<li class="cat-leg${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${attr(d.nome)}" title="${attr(tip)}"><i style="background:${catColor(i)}"></i><span>${d.nome}</span><b class="lg-delta ${dCls}">${dTxt}</b><b class="num lg-val">${fmtShort(d.valor)}</b></li>`;
+      ? `${d.nome}: ${fmt(d.valor)} · ${share.toFixed(1)}% do mês · média dos 3 meses anteriores ${fmt(md)} · variação ${delta >= 0 ? "+" : "−"}${Math.abs(Math.round(delta * 100))}% (${fmtSigned(d.valor - md)})`
+      : `${d.nome}: ${fmt(d.valor)} · ${share.toFixed(1)}% do mês · não aparecia nos 3 meses anteriores`;
+    return `<li class="cat-leg${active === d.nome ? " on" : ""}" data-donut-slice="${tipo}|${attr(d.nome)}" title="${attr(tip)}"><i style="background:${catColor(i)}"></i>
+      <span class="lg-mid"><span class="lg-nm">${d.nome}</span><span class="lg-sub"><b class="lg-pct">${share.toFixed(0)}%</b> do mês <b class="lg-delta ${dCls}" title="${attr(md > 0 ? `média dos 3 meses anteriores: ${fmt(md)}` : "não aparecia nos 3 meses anteriores")}">${dTxt}</b></span></span>
+      <b class="num lg-val">${fmtShort(d.valor)}</b></li>`;
   }).join("");
   const head = drill
     ? `<div class="cd-head-l"><button class="cd-back" data-donut-back="${tipo}" aria-label="Voltar">${ic("arrow-left", 16)}</button><div><h3>${drill}</h3><span class="card-sub">subcategorias</span></div></div>`
-    : `<h3>${titleTxt} ${xp("Como ler este gráfico",
-        "fatia = parte do mês · % ao lado do nome = contra a média dos 3 meses anteriores",
-        `mês exibido: <b>${ym ? ymLabel(ym) : "—"}</b><br>o tamanho da fatia mostra o peso dentro do mês<br>o <b>%</b> de cada linha compara com a média dos 3 meses <b>anteriores</b> a este<br>passe o mouse numa linha pra ver os dois valores`,
-        "O tamanho da fatia sozinho não diz se algo mudou — ele muda quando você corta outra categoria, sem ninguém ter gasto mais. Por isso cada linha carrega o Δ, que é o número que sugere ação.")}</h3>`;
+    : `<h3>${titleTxt} ${xp("Os dois números de cada linha",
+        "um diz o peso no mês, o outro diz o que mudou",
+        `<b>34% do mês</b> → quanto a categoria pesa <b>dentro deste mês</b> (é o tamanho da fatia)<br><b>▲ 55%</b> → quanto ela subiu ou caiu <b>contra a média dos 3 meses anteriores</b><br>mês exibido: <b>${ym ? ymLabel(ym) : "—"}</b>`,
+        "Os dois juntos porque sozinhos enganam: a fatia cresce quando você corta outra categoria, sem ninguém ter gasto mais — e a variação não diz se a categoria é grande ou irrelevante.")}</h3>`;
   let actions;
   if (active) {
     actions = drill
@@ -864,20 +867,6 @@ function catMediaAnterior(tipo, ym, drill, n) {
   ms.forEach((k) => { (drill ? bySub(tipo, drill, k) : byCat(tipo, k)).forEach((d) => { out[d.nome] = (out[d.nome] || 0) + d.valor; }); });
   Object.keys(out).forEach((k) => { out[k] = out[k] / ms.length; });
   return out;
-}
-// série dos últimos n meses até `ym` para uma categoria/sub — alimenta a sparkline (small multiples)
-function catSerie(tipo, ym, drill, nome, n) {
-  const all = txMonths().filter((k) => k <= ym);
-  const ms = all.slice(-n);
-  return ms.map((k) => { const row = (drill ? bySub(tipo, drill, k) : byCat(tipo, k)).find((d) => d.nome === nome); return row ? Math.max(0, row.valor) : 0; });
-}
-function sparkSVG(vals, cor, w = 54, h = 16) {
-  if (!vals || vals.length < 2) return "";
-  const max = Math.max(1, ...vals), n = vals.length;
-  const pt = (v, i) => [(i / (n - 1)) * (w - 2) + 1, h - 1.5 - (v / max) * (h - 4)];
-  const d = vals.map((v, i) => { const [x, y] = pt(v, i); return `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`; }).join(" ");
-  const [lx, ly] = pt(vals[n - 1], n - 1);
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><path d="${d}" fill="none" stroke="${cor}" stroke-opacity=".55" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="1.9" fill="${cor}"/></svg>`;
 }
 function blkPatrimonio() {
   const full = netWorthSeries(), N = full.length;
@@ -1000,8 +989,8 @@ function blkForaDoPadrao() {
             "gasto de agora − o quanto você costuma ter gasto até este dia",
             `${_esc(r.cat)}: média de ${_n(r.mediaMes)}/mês<br>até o dia ${p.dia} você costuma ter gasto ${Math.round(r.frac * 100)}% disso = ${_n(r.esperado)}<br>este mês você já está em ${_n(r.atual)}<br><b>excedente ${_n(r.exc)}</b>`,
             "A régua é o histórico da própria categoria, não a fração do calendário — assim aluguel e assinatura, que caem em dia certo, não viram alarme falso.")}</div></div>
-        <div class="fp-right"><b class="num">${fmtNum(r.atual)}</b><span class="fp-delta">${r.pct == null ? "novo" : `+${Math.round(r.pct * 100)}%`}</span></div></div>`).join("")
-    : `<div class="empty-mini">${nBase < 2 ? "Ainda não há meses fechados suficientes para saber o que é o seu padrão." : "Tudo dentro do ritmo por enquanto."}</div>`;
+        <div class="fp-right"><b class="num">${fmtNum(r.atual)}</b><span class="fp-delta">${r.pct == null ? "novo" : `▲ ${Math.round(r.pct * 100)}%`}</span></div></div>`).join("")
+    : `<div class="empty-mini">${nBase < 2 ? "Ainda não há meses fechados suficientes para saber o que é o seu padrão." : p.corrente ? "Tudo dentro do ritmo por enquanto." : "Nenhuma categoria fugiu do padrão neste mês."}</div>`;
   return `<div class="card">
     <div class="card-head"><div><h3>Fora do padrão neste mês ${xp("O que entra nesta lista",
       "categorias em que o gasto de hoje passou do ritmo delas",
@@ -1103,7 +1092,6 @@ function monthTotals(ym) {
   return { rec, desp: Math.max(desp, 0) };
 }
 // mês de referência do Extrato: o do resumo (OF) se houver, senão o último mês com receita/despesa
-// (ignora meses só com transferência — alinhado ao "Despesas por categoria" via defaultMonth)
 // mês de referência do dashboard = MÊS ATUAL (calendário). Se estiver vazio, os cards mostram zero —
 // é o comportamento esperado (não mostrar "junho" em julho).
 function refMonthYM() { return (OF && OF.refMonthYM) || TODAY_ISO.slice(0, 7); }
@@ -1138,7 +1126,9 @@ function gastoMedio(n = 12, antes) { const ms = mesesFechados(n, antes); return 
 // Imóvel e alocação de patrimônio NÃO contam: não dá pra viver do apartamento no mês que vem.
 const caixaDisponivel = () => accounts.filter((a) => !a.arquivada && a.grupo === "fin").reduce((s, a) => s + acctTotal(a), 0);
 // meses de reserva ("runway"): a pergunta mais consequente de finanças pessoais
-function reservaMeses() { const g = gastoMedio(12); return g > 0 ? caixaDisponivel() / g : null; }
+// caixa negativo (fatura a pagar maior que o saldo) não vira "−X meses" — isso não se lê. Devolve 0
+// e a explicação diz o que está acontecendo.
+function reservaMeses() { const g = gastoMedio(12); if (g <= 0) return null; return Math.max(0, caixaDisponivel() / g); }
 
 /* "?" explicativo: abre a fórmula JÁ PREENCHIDA com os números reais da conta. Hover no desktop,
    toque no celular (tabindex + :focus-within) — sem JS. O texto fica no DOM, então dá pra ler,
@@ -1208,7 +1198,7 @@ function statementBand() {
       <div class="stmt-ledger">
         <div class="stmt-row"><span class="sl-k">Reserva <small class="sl-hoje">hoje</small> ${xp("Reserva", "caixa disponível ÷ gasto médio mensal",
           `${_n(caixa)} ÷ ${_n(mediaHoje)} = <b>${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</b>`,
-          `Sempre de hoje, não do mês em foco — o app guarda o saldo atual das contas, não o saldo histórico. Caixa = as ${nFin} ${nFin === 1 ? "conta financeira" : "contas financeiras"} (cartão entra negativo); imóvel e alocação de patrimônio ficam fora.`)}</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
+          `${caixa < 0 ? "<b>Seu caixa está negativo</b> (o que você deve no cartão passou do saldo em conta), então a reserva aparece como zero. " : ""}Sempre de hoje, não do mês em foco — o app guarda o saldo atual das contas, não o saldo histórico. Caixa = as ${nFin} ${nFin === 1 ? "conta financeira" : "contas financeiras"} (cartão entra negativo); imóvel e alocação de patrimônio ficam fora.`)}</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
         <div class="stmt-row"><span class="sl-k">Receitas do mês ${xp("Receitas do mês", `tudo que entrou como receita em ${monthLabel(ym).toLowerCase()}`, `${_n(rec)}`, "Reembolso não conta aqui — ele abate a despesa, não é renda nova.")}</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
         <div class="stmt-row total"><span class="sl-k">${p.corrente ? "Sobrou até agora" : "Sobrou no mês"} ${xp("Sobrou / taxa de poupança", "receitas − gasto, e quanto isso é da receita",
           `${_n(rec)} − ${_n(gasto)} = ${_n(res)}${poup != null ? `<br>${_n(res)} ÷ ${_n(rec)} = <b>${poup}%</b> da receita` : ""}`,
