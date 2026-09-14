@@ -946,6 +946,30 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .cn-btn{width:26px;height:26px;border-radius:7px;color:var(--subtle);display:grid;place-items:center}
 .cn-btn:hover{background:var(--card-2);color:var(--ink)}
 .cn-total{margin-left:auto}
+/* chave "entra no resultado do mês": rótulo por extenso, não só ícone — a regra tem que ser legível
+   sem hover. Desligada = a categoria inteira fica esmaecida e ganha a nota explicando o efeito. */
+.cn-flag{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;letter-spacing:.02em;
+  padding:3px 8px;border-radius:20px;border:1px solid color-mix(in srgb,var(--pos) 35%,transparent);
+  color:var(--pos);background:color-mix(in srgb,var(--pos) 10%,transparent);cursor:pointer;transition:.12s;white-space:nowrap}
+.cn-flag:hover{border-color:var(--pos);background:color-mix(in srgb,var(--pos) 18%,transparent)}
+.cn-flag.off{color:var(--subtle);border-color:var(--border);background:var(--card-2)}
+.cn-flag.off:hover{color:var(--ink);border-color:var(--line-strong)}
+.cn-flag svg{width:11px;height:11px;flex:none}
+.cat-node.cn-off .cn-name,.cat-node.cn-off .cn-total,.cat-node.cn-off .cn-ic{opacity:.55}
+.cat-node.cn-off .cn-bar{opacity:.35}
+.cn-off-note{display:flex;align-items:flex-start;gap:5px;font-size:11px;line-height:1.45;color:var(--subtle);margin-top:8px}
+.cn-off-note svg{flex:none;margin-top:1px}
+/* faixa de ajuda no topo da aba Categorias */
+.cat-help{display:flex;gap:11px;align-items:flex-start;padding:14px 16px;margin-bottom:14px}
+.cat-help>svg{color:var(--brand);flex:none;margin-top:1px}
+.cat-help b{display:block;font-size:13px;margin-bottom:4px}
+.cat-help span{display:block;font-size:12px;line-height:1.6;color:var(--sub)}
+.cat-help i{font-style:normal;color:var(--ink)}
+/* aviso no topo do dashboard do que ficou fora do número */
+.stmt-fora{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--subtle);margin-top:10px;overflow-wrap:anywhere}
+.stmt-fora svg{flex:none;color:var(--brand)}
+.stmt-fora.click{cursor:pointer}
+.stmt-fora.click:hover{color:var(--ink)}
 .sub-pill{cursor:pointer;border:1px solid transparent;transition:.1s}
 .sub-pill:hover{border-color:var(--line-strong);color:var(--ink)}
 

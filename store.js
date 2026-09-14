@@ -29,10 +29,12 @@
     });
     ["receita", "despesa"].forEach((tipo) => {
       ((model.catTree && model.catTree[tipo]) || []).forEach((c, ci) => {
-        rows.categories.push({ id: catPid(tipo, c.nome), tipo, nome: c.nome, parent_id: null, icon: c.icon || null, ordem: ci, deleted: false });
+        // conta_no_mes: false = categoria fora do resultado do mês (patrimônio). Só a categoria-pai
+        // carrega o flag; as subs herdam dela.
+        rows.categories.push({ id: catPid(tipo, c.nome), tipo, nome: c.nome, parent_id: null, icon: c.icon || null, ordem: ci, conta_no_mes: c.contaNoMes !== false, deleted: false });
         (c.subs || []).forEach((s, si) => {
           if (s === c.nome) return; // fallback "sub = próprio nome" não vira linha
-          rows.categories.push({ id: catSid(tipo, c.nome, s), tipo, nome: s, parent_id: catPid(tipo, c.nome), icon: null, ordem: si, deleted: false });
+          rows.categories.push({ id: catSid(tipo, c.nome, s), tipo, nome: s, parent_id: catPid(tipo, c.nome), icon: null, ordem: si, conta_no_mes: true, deleted: false });
         });
       });
     });
@@ -78,6 +80,7 @@
         const subs = live(rows.categories).filter((c) => c.parent_id === p.id).sort((a, b) => (a.ordem || 0) - (b.ordem || 0)).map((c) => c.nome);
         const node = { nome: p.nome, subs: subs.length ? subs : [p.nome], total: 0 };
         if (p.icon) node.icon = p.icon;
+        if (p.conta_no_mes === false) node.contaNoMes = false; // ausente/true = conta (padrão)
         return node;
       });
     });

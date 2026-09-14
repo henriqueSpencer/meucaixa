@@ -627,9 +627,9 @@ function areaChartSVG(s) {
 function receitaDespesaSeries() {
   const months = txMonths();
   if (!months.length) return []; // sem lançamentos → gráfico vazio (nada de dados de exemplo)
-  const rec = {}, desp = {};
+  const rec = {}, desp = {}, fora = catsFora();
   state.tx.forEach((t) => {
-    const k = (t.iso || "").slice(0, 7); if (!k) return;
+    const k = (t.iso || "").slice(0, 7); if (!k || foraDoMes(fora, t)) return;
     if (t.tipo === "receita") rec[k] = (rec[k] || 0) + Math.abs(t.valor);
     else if (t.tipo === "despesa") desp[k] = (desp[k] || 0) + Math.abs(t.valor);
     else if (t.tipo === "reembolso") desp[k] = (desp[k] || 0) - Math.abs(t.valor);
@@ -687,10 +687,42 @@ function txMonths() {
   state.tx.forEach((t) => { const k = (t.iso || "").slice(0, 7); if (k) set.add(k); });
   return [...set].sort();
 }
+/* ---------- categorias fora do resultado do mês ----------
+   Uma categoria marcada `contaNoMes:false` continua mexendo no saldo da conta (o dinheiro saiu de
+   verdade), mas fica FORA de tudo que responde "como foi o meu mês": gasto do mês, ritmo, médias,
+   reserva, Fora do padrão, potes, roscas e o gráfico Receitas × Despesas. É o lugar do movimento de
+   patrimônio — compra de imóvel, reforma, aporte, amortização, ajuste a mercado —, que é conversão
+   de caixa em bem, não consumo. NÃO vale para o patrimônio reconstruído (`netWorthSeries`): lá todo
+   fluxo conta, senão o patrimônio não fecha. O usuário liga/desliga na aba Categorias.  */
+function catsFora() {
+  const s = new Set();
+  ["receita", "despesa"].forEach((tp) => (catTree[tp] || []).forEach((c) => { if (c.contaNoMes === false) s.add(tp + "|" + c.nome); }));
+  return s; // vazio (o padrão) = nenhum filtro, custo zero nos agregadores
+}
+const foraDoMes = (set, t) => set.size > 0 && set.has((t.tipo === "receita" ? "receita" : "despesa") + "|" + (t.cat || ""));
+const catContaNoMes = (tipo, nome) => {
+  const c = (catTree[tipo === "receita" ? "receita" : "despesa"] || []).find((x) => x.nome === nome);
+  return !c || c.contaNoMes !== false;
+};
+// o que ficou de fora num mês — usado pra MOSTRAR o que não entrou (nada escondido)
+function foraDoMesTotais(ym) {
+  const set = catsFora(); const cats = {};
+  let rec = 0, desp = 0;
+  if (set.size) state.tx.forEach((t) => {
+    if ((t.iso || "").slice(0, 7) !== ym || !foraDoMes(set, t)) return;
+    const v = Math.abs(numOr0(t.valor));
+    if (t.tipo === "receita") { rec += v; cats[t.cat] = (cats[t.cat] || 0) + v; }
+    else if (t.tipo === "despesa") { desp += v; cats[t.cat] = (cats[t.cat] || 0) + v; }
+    else if (t.tipo === "reembolso") { desp -= v; cats[t.cat] = (cats[t.cat] || 0) - v; }
+  });
+  const nomes = Object.keys(cats).filter((k) => Math.abs(cats[k]) > 0.005);
+  return { rec, desp, total: rec + desp, nomes, n: nomes.length };
+}
 function byCat(tipo, ym) {
-  const map = {};
+  const map = {}, fora = catsFora();
   state.tx.forEach((t) => {
     if ((t.iso || "").slice(0, 7) !== ym) return;
+    if (foraDoMes(fora, t)) return;
     if (tipo === "despesa") {
       if (t.tipo === "despesa") map[t.cat] = (map[t.cat] || 0) + Math.abs(t.valor);
       else if (t.tipo === "reembolso") map[t.cat] = (map[t.cat] || 0) - Math.abs(t.valor); // reembolso reduz a despesa
@@ -793,9 +825,9 @@ function catDonut(tipo, data, activeCat) {
   return `<svg viewBox="0 0 200 200" width="100%" height="100%"><g transform="rotate(-90 100 100)">${segs}</g></svg>`;
 }
 function bySub(tipo, cat, ym) {
-  const map = {};
+  const map = {}, fora = catsFora();
   state.tx.forEach((t) => {
-    if (t.cat !== cat || (t.iso || "").slice(0, 7) !== ym) return;
+    if (t.cat !== cat || (t.iso || "").slice(0, 7) !== ym || foraDoMes(fora, t)) return;
     const k = t.sub || "Sem subcategoria";
     if (tipo === "despesa") {
       if (t.tipo === "despesa") map[k] = (map[k] || 0) + Math.abs(t.valor);
@@ -957,9 +989,10 @@ function foraDoPadrao() {
   const ym = dashMonthYM(), p = monthProgress(ym);
   const base = mesesFechados(6, ym);
   if (p.frac <= 0 || base.length < 2) return []; // sem histórico não existe "padrão"
-  const set = new Set(base), atual = {}, hist = {}, histAte = {};
+  const set = new Set(base), atual = {}, hist = {}, histAte = {}, fora = catsFora();
   state.tx.forEach((t) => {
     if (t.tipo !== "despesa" && t.tipo !== "reembolso") return;
+    if (foraDoMes(fora, t)) return; // patrimônio não tem "ritmo" — comprar um imóvel não é gasto fora do padrão
     const iso = t.iso || "", k = iso.slice(0, 7); if (!k) return;
     const c = t.cat || "—", v = (t.tipo === "reembolso" ? -1 : 1) * Math.abs(t.valor);
     if (k === ym) { if (+iso.slice(8, 10) <= p.dia) atual[c] = (atual[c] || 0) + v; }
@@ -1012,9 +1045,10 @@ function potesMedia() {
   const ms = mesesFechados(12, dashMonthYM()); if (!ms.length) return null;
   const disp = POTES.filter((p) => catTree.despesa.some((c) => c.nome === p.nome));
   if (disp.length < 3) return null; // conta não usa a estrutura — o bloco não faz sentido
-  const set = new Set(ms), acc = {};
+  const set = new Set(ms), acc = {}, fora = catsFora();
   state.tx.forEach((t) => {
     if (t.tipo !== "despesa" && t.tipo !== "reembolso") return;
+    if (foraDoMes(fora, t)) return;
     const k = (t.iso || "").slice(0, 7); if (!set.has(k)) return;
     acc[t.cat || "—"] = (acc[t.cat || "—"] || 0) + (t.tipo === "reembolso" ? -1 : 1) * Math.abs(t.valor);
   });
@@ -1083,8 +1117,9 @@ function dashEditor() {
 // transferência não conta; reembolso abate a despesa (mesma convenção do byCat).
 function monthTotals(ym) {
   let rec = 0, desp = 0;
+  const fora = catsFora();
   if (ym) state.tx.forEach((t) => {
-    if ((t.iso || "").slice(0, 7) !== ym) return;
+    if ((t.iso || "").slice(0, 7) !== ym || foraDoMes(fora, t)) return;
     if (t.tipo === "receita") rec += Math.abs(t.valor);
     else if (t.tipo === "despesa") desp += Math.abs(t.valor);
     else if (t.tipo === "reembolso") desp -= Math.abs(t.valor);
@@ -1144,7 +1179,7 @@ const _n = (v) => `<b class="num">${fmt(v)}</b>`;
 // grande — que sobe com aporte, com o mercado e com o imóvel, e não mede escolha nenhuma deste mês.
 function statementBand() {
   const ym = dashMonthYM(), hoje = TODAY_ISO.slice(0, 7);
-  const p = monthProgress(ym), t = monthTotals(ym);
+  const p = monthProgress(ym), t = monthTotals(ym), ex = foraDoMesTotais(ym);
   const gasto = t.desp, rec = t.rec;
   // a média de comparação é sempre a dos meses fechados ANTES do mês em foco — navegar pra março
   // compara março com o que vinha antes dele, não com o ano inteiro depois
@@ -1186,14 +1221,17 @@ function statementBand() {
     <div class="stmt-main">
       <div class="stmt-net">
         <span class="stmt-lbl">${p.corrente ? "Gasto até agora" : "Gasto no mês"} ${xp(p.corrente ? "Gasto até agora" : "Gasto no mês", "despesas do mês − reembolsos",
-          `${p.corrente ? `de 01 a ${String(p.dia).padStart(2, "0")}` : `01 a ${p.dias}`}/${ym.slice(5)} = ${_n(gasto)}`,
-          "Transferência e aplicação não entram: dinheiro que muda de lugar não é gasto.")}</span>
+          `${p.corrente ? `de 01 a ${String(p.dia).padStart(2, "0")}` : `01 a ${p.dias}`}/${ym.slice(5)} = ${_n(gasto)}`
+          + (ex.desp > 0.005 ? `<br>fora do mês: ${_n(ex.desp)} em ${ex.nomes.join(", ")}` : ""),
+          "Transferência e aplicação não entram: dinheiro que muda de lugar não é gasto."
+          + (ex.desp > 0.005 ? " Categorias marcadas “fora do mês” na aba Categorias também ficam de fora — elas seguem no saldo e no patrimônio." : ""))}</span>
         <span class="stmt-big num">${fmt(gasto)}</span>
         <span class="stmt-pace ${cls}">${rotulo ? `<b class="pace-tag">${rotulo}</b> ` : ""}${txt} ${desvio == null ? "" : xp(p.corrente ? "Ritmo do mês" : "Comparação do mês",
           p.corrente ? "gasto até hoje ÷ parte do mês que já passou" : "gasto do mês ÷ média dos meses anteriores",
           `${p.corrente ? `${_n(gasto)} ÷ ${pctMes}% = ${_n(ritmo)} projetados<br>` : `${_n(gasto)} fechados<br>`}média de ${nFech} ${nFech === 1 ? "mês fechado" : "meses fechados"} antes de ${monthLabel(ym).toLowerCase()} = ${_n(media)}<br>diferença = <b>${desvio >= 0 ? "+" : "−"}${Math.abs(Math.round(desvio * 100))}%</b>`,
           "A média olha só pra trás do mês em foco — assim navegar no tempo compara cada mês com o que vinha antes dele.")}</span>
         ${bar}
+        ${ex.total > 0.005 ? `<div class="stmt-fora click" data-tab="categorias" title="Abrir a aba Categorias para rever a chave">${ic("circle-alert", 12)} fora deste número: <b class="num">${fmtShort(Math.abs(ex.desp) + Math.abs(ex.rec))}</b> em ${ex.nomes.join(", ")} — ${ex.n === 1 ? "categoria marcada" : "categorias marcadas"} “fora do mês”</div>` : ""}
       </div>
       <div class="stmt-ledger">
         <div class="stmt-row"><span class="sl-k">Reserva <small class="sl-hoje">hoje</small> ${xp("Reserva", "caixa disponível ÷ gasto médio mensal",
@@ -2161,10 +2199,27 @@ function viewCategorias() {
     const totals = catTotals(tipo); // total real (todo o histórico) por categoria, das transações
     const tot = (c) => totals[c.nome] || 0;
     const maxT = Math.max(...catTree[tipo].map(tot), 1);
-    const nodes = catTree[tipo].map((c) => `<div class="cat-node"><div class="cat-node-head cn-click" data-cat-detail="${tipo}|${c.nome}"><span class="cn-ic">${ic(catIconOf(c), 15)}</span><span class="cn-name">${c.nome}</span><span class="cn-actions"><button class="cn-btn" data-cat-edit="${tipo}|${c.nome}" title="Editar">${ic("pencil", 13)}</button><button class="cn-btn" data-cat-del="${tipo}|${c.nome}" title="Excluir">${ic("archive", 13)}</button></span><span class="cn-total num" style="color:${tot(c) ? cor : "var(--line-strong)"}">${tot(c) ? fmtShort(tot(c)) : "—"}</span></div><div class="cn-bar"><span style="width:${(tot(c) / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<span class="sub-chip"><button class="sub-pill" data-cat-detail="${tipo}|${c.nome}|${s}" title="Ver lançamentos">${s}</button><button class="sub-ed" data-sub-edit="${tipo}|${c.nome}|${s}" title="Editar / mover / excluir">${ic("pencil", 10)}</button></span>`).join("")}<button class="sub-add" data-add-sub="${tipo}|${c.nome}">${ic("plus", 11)} subcategoria</button></div></div>`).join("");
-    return `<div class="card cat-col"><div class="cat-col-head" style="border-color:${cor}33"><span class="cat-dot" style="background:${cor}"></span><h3>${titulo}</h3><span class="cat-count">${catTree[tipo].length} categorias</span></div><div class="cat-tree">${nodes}</div><button class="cat-add" style="color:${cor}" data-add-cat="${tipo}">${ic("plus", 14)} Nova categoria de ${tipo === "receita" ? "receita" : "despesa"}</button></div>`;
+    const verbo = tipo === "receita" ? "ganho" : "gasto";
+    const nodes = catTree[tipo].map((c) => {
+      const noMes = c.contaNoMes !== false;
+      // controle com RÓTULO, não só ícone: quem abre a aba tem que entender o que a chave faz sem
+      // adivinhar. O title conta a regra inteira.
+      const flag = `<button class="cn-flag${noMes ? "" : " off"}" data-cat-nomes="${tipo}|${attr(c.nome)}"
+        title="${noMes ? `Entra no ${verbo} do mês, nas médias, no ritmo e nos gráficos. Clique para tirar — use em movimento de patrimônio (compra de imóvel, reforma, aporte, ajuste a mercado).` : `Fora do ${verbo} do mês: continua no saldo da conta e no patrimônio, mas não entra no ritmo, nas médias nem nos gráficos do mês. Clique para voltar a contar.`}"
+        >${ic(noMes ? "check" : "archive", 11)} ${noMes ? "no mês" : "fora do mês"}</button>`;
+      return `<div class="cat-node${noMes ? "" : " cn-off"}"><div class="cat-node-head cn-click" data-cat-detail="${tipo}|${c.nome}"><span class="cn-ic">${ic(catIconOf(c), 15)}</span><span class="cn-name">${c.nome}</span>${flag}<span class="cn-actions"><button class="cn-btn" data-cat-edit="${tipo}|${c.nome}" title="Editar">${ic("pencil", 13)}</button><button class="cn-btn" data-cat-del="${tipo}|${c.nome}" title="Excluir">${ic("archive", 13)}</button></span><span class="cn-total num" style="color:${tot(c) ? cor : "var(--line-strong)"}">${tot(c) ? fmtShort(tot(c)) : "—"}</span></div><div class="cn-bar"><span style="width:${(tot(c) / maxT) * 100}%;background:${cor}"></span></div><div class="cat-subs">${c.subs.map((s) => `<span class="sub-chip"><button class="sub-pill" data-cat-detail="${tipo}|${c.nome}|${s}" title="Ver lançamentos">${s}</button><button class="sub-ed" data-sub-edit="${tipo}|${c.nome}|${s}" title="Editar / mover / excluir">${ic("pencil", 10)}</button></span>`).join("")}<button class="sub-add" data-add-sub="${tipo}|${c.nome}">${ic("plus", 11)} subcategoria</button></div>${noMes ? "" : `<div class="cn-off-note">${ic("circle-alert", 12)} Não entra no ${verbo} do mês, nas médias nem nos gráficos do mês — só no saldo da conta e no patrimônio.</div>`}</div>`;
+    }).join("");
+    const nOff = catTree[tipo].filter((c) => c.contaNoMes === false).length;
+    return `<div class="card cat-col"><div class="cat-col-head" style="border-color:${cor}33"><span class="cat-dot" style="background:${cor}"></span><h3>${titulo}</h3><span class="cat-count">${catTree[tipo].length} categorias${nOff ? ` · ${nOff} fora do mês` : ""}</span></div><div class="cat-tree">${nodes}</div><button class="cat-add" style="color:${cor}" data-add-cat="${tipo}">${ic("plus", 14)} Nova categoria de ${tipo === "receita" ? "receita" : "despesa"}</button></div>`;
   }).join("");
-  return `<div class="cat-cols">${cols}</div>`;
+  // explicação fixa no topo: a regra fica na tela, não num tooltip que só quem procura acha
+  const ajuda = `<div class="card cat-help">${ic("sparkles", 16)}<div>
+    <b>“no mês” × “fora do mês”</b>
+    <span>Cada categoria tem uma chave que diz se ela entra no <b>resultado do mês</b> — o gasto/ganho do mês, o ritmo, as médias, a reserva, o “Fora do padrão”, as roscas e o gráfico Receitas × Despesas.
+    Deixe <b>fora do mês</b> o que move patrimônio em vez de ser consumo ou renda: <i>compra de imóvel, reforma, aporte, amortização, ajuste a mercado</i>. Esses lançamentos continuam saindo/entrando no <b>saldo da conta</b> e contando no <b>patrimônio</b> — só param de poluir a leitura do mês.
+    Na dúvida: se você somaria o valor ao custo do bem na hora de vender, é patrimônio; se é o custo de viver aquele mês, é gasto.</span>
+  </div></div>`;
+  return ajuda + `<div class="cat-cols">${cols}</div>`;
 }
 
 /* ---------- Histórico de alterações (audit_log) — visão git-like por dia ---------- */
@@ -2179,12 +2234,12 @@ function _dayLabel(k) {
 }
 const _hhmm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 // campos exibíveis no diff (nome técnico → rótulo PT), na ordem que aparecem
-const HIST_FIELDS = { descricao: "descrição", valor: "valor", tipo: "tipo", cat: "categoria", sub: "subcategoria", conta: "conta", origem: "origem", destino: "destino", iso: "data", status: "status", nome: "nome", sub_: "sub", saldo: "saldo", parent_id: "categoria-pai", arquivada: "arquivada", ordem: "ordem" };
+const HIST_FIELDS = { descricao: "descrição", valor: "valor", tipo: "tipo", cat: "categoria", sub: "subcategoria", conta: "conta", origem: "origem", destino: "destino", iso: "data", status: "status", nome: "nome", sub_: "sub", saldo: "saldo", parent_id: "categoria-pai", arquivada: "arquivada", ordem: "ordem", conta_no_mes: "entra no resultado do mês" };
 function _fmtField(f, v) {
   if (v === null || v === undefined || v === "") return "vazio";
   if (f === "valor" || f === "saldo") return fmt(Number(v));
   if (f === "iso") return String(v).split("-").reverse().join("/");
-  if (f === "arquivada") return v === true || v === "true" ? "sim" : "não";
+  if (f === "arquivada" || f === "conta_no_mes") return v === true || v === "true" ? "sim" : "não";
   return String(v);
 }
 function _histDiff(od, nd) {
@@ -3320,6 +3375,13 @@ function subOptionsHTML(tipo, catName, selected, excludeSub) {
   const subs = node ? node.subs.filter((s) => s !== excludeSub) : [];
   return `<option value=""${!selected ? " selected" : ""}>Sem subcategoria</option>` + subs.map((s) => `<option${s === selected ? " selected" : ""}>${_esc(s)}</option>`).join("");
 }
+// liga/desliga "entra no resultado do mês" de uma categoria (aba Categorias). Só muda leitura:
+// nenhum lançamento é tocado e nenhum saldo se mexe — dá pra voltar atrás a qualquer momento.
+function toggleCatNoMes(tipo, nome) {
+  const node = (catTree[tipo] || []).find((c) => c.nome === nome); if (!node) return;
+  if (node.contaNoMes === false) delete node.contaNoMes; else node.contaNoMes = false;
+  resetDonuts(); scheduleSave(); renderView();
+}
 function openCatEdit(tipo, nome) { const node = catTree[tipo].find((c) => c.nome === nome); state.pop = { kind: "catEdit", tipo, nome, curName: nome, editIcon: catIconOf(node) }; renderPop(); }
 function saveCatRename() {
   const p = state.pop, inp = document.querySelector('[data-ce="nome"]'), nv = inp ? inp.value.trim() : (p.curName || "");
@@ -4363,6 +4425,10 @@ function wire() {
     if (idrop && !e.target.closest("[data-imp-file]")) { const inp = idrop.querySelector("[data-imp-file]"); if (inp) inp.click(); return; }
     const dmn = e.target.closest("[data-dash-month]");
     if (dmn) { dashMonthNav(dmn.dataset.dashMonth); return; }
+    // o toggle vive DENTRO do cabeçalho clicável da categoria — tem que ser testado antes do
+    // `data-cat-detail`, senão o clique abre o detalhe em vez de virar a chave
+    const cnm = e.target.closest("[data-cat-nomes]");
+    if (cnm) { const [tp, nm] = cnm.dataset.catNomes.split("|"); toggleCatNoMes(tp, nm); return; }
     const cdet = e.target.closest("[data-cat-detail]");
     if (cdet) { const [tp, ct, sb] = cdet.dataset.catDetail.split("|"); openCatDetail(tp, ct, sb); return; }
     if (e.target.closest("[data-cat-detail-back]")) { state.catDetail = null; renderView(); return; }

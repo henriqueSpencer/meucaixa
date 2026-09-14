@@ -108,6 +108,23 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
     "Últimas transações": degrau Dado puro, e a aba Transações já faz melhor). **`normalizeDashOrder()`**
     limpa chave morta do `dashOrder` salvo em prefs (senão `DASH_BLOCKS[k].render()` estoura) e injeta
     blocos novos preservando a ordem que o usuário já tinha.
+- **Categoria "no mês" × "fora do mês"** (`contaNoMes`, coluna `conta_no_mes` em `categories`, migração
+  `categories_conta_no_mes`): cada categoria tem uma chave **visível na aba Categorias** (`.cn-flag`, com
+  rótulo por extenso — não só ícone) que decide se ela entra no **resultado do mês**. Desligada, a
+  categoria sai de `monthTotals` (gasto/ganho do mês, ritmo, médias, reserva, poupança),
+  `receitaDespesaSeries`, `byCat`/`bySub` (roscas), `foraDoPadrao` e `potesMedia` — mas **continua** no
+  saldo da conta, no extrato e em `netWorthSeries`/`netWorth` (lá todo fluxo conta, senão o patrimônio não
+  fecha). É o lugar do movimento de patrimônio: compra de imóvel, **reforma**, aporte, amortização, ajuste
+  a mercado — conversão de caixa em bem, não consumo. Peças: `catsFora()` (Set `tipo|cat`, montado uma vez
+  por agregação; **vazio = custo zero**, que é o padrão), `foraDoMes(set,t)`, `catContaNoMes`,
+  `foraDoMesTotais(ym)` e `toggleCatNoMes` (só muda leitura: nenhum lançamento ou saldo é tocado, e dá pra
+  voltar atrás). **Nada fica escondido** (pedido explícito do usuário: "não gosto dessas configurações por
+  trás"): a aba Categorias tem uma **faixa de ajuda fixa** explicando a regra, a categoria desligada fica
+  esmaecida com a nota do efeito embaixo, o `statementBand` mostra **`.stmt-fora`** ("fora deste número:
+  R$ X em Patrimônio", clicável → aba Categorias) e o "?" do gasto lista o que saiu. A mudança aparece no
+  **Histórico** (`HIST_FIELDS.conta_no_mes`). Default `true` em todo mundo — ligar a chave é ato do
+  usuário, migração nenhuma mexe em número existente. No `store.js` só a **categoria-pai** carrega o flag
+  (subs herdam) e `rowsToModel` só grava `contaNoMes` quando é `false`.
 - **Dados reais, sem mock**: dashboard/Extrato/gráficos calculam das transações reais. `refMonthYM()` =
   último mês com receita/despesa (pula meses só-transferência); título/seletor de mês refletem ele.
   `TODAY_ISO` = data real de hoje (era fixa). Totais das categorias vêm de `catTotals()` (as linhas do
