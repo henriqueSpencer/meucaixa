@@ -126,11 +126,13 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .kpi-delta{font-size:12px;margin-top:6px;font-weight:600}
 
 /* extrato — cabeçalho-assinatura da Visão geral */
-.statement{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px;overflow:hidden}
-.stmt-top{display:flex;align-items:baseline;justify-content:space-between;padding:13px 22px;border-bottom:2px solid var(--ink)}
+/* sem overflow:hidden — ele cortava os popovers do "?". Nenhum filho tem fundo próprio, então a
+   borda arredondada continua limpa. */
+.statement{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:16px}
+.stmt-top{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:13px 22px;border-bottom:2px solid var(--ink)}
 .stmt-eyebrow{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink)}
 .stmt-period{font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--sub);font-weight:600}
-.stmt-main{display:grid;grid-template-columns:1fr auto;gap:22px 48px;padding:22px;align-items:end}
+.stmt-main{display:grid;grid-template-columns:1fr auto;gap:22px 48px;padding:22px;align-items:end;overflow:visible}
 .stmt-net{display:flex;flex-direction:column;gap:9px}
 .stmt-lbl{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--sub);font-weight:600}
 .stmt-big{font-size:42px;font-weight:700;line-height:1;letter-spacing:-.03em;color:var(--ink)}
@@ -139,6 +141,58 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .sl-k{color:var(--sub)}
 .sl-op{color:var(--subtle);text-align:center;font-family:'JetBrains Mono',monospace}
 .sl-v{text-align:right;font-weight:600;min-width:120px}
+/* "?" explicativo: abre a conta por trás do número. Hover no desktop, foco (toque/Tab) no celular.
+   Sem JS — o conteúdo é DOM de verdade, então dá pra ler, copiar e conferir. */
+.xp{position:relative;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;
+  border:1px solid var(--line-strong);background:var(--card-2);color:var(--sub);
+  font-family:'Inter',sans-serif;font-size:10px;font-weight:700;line-height:1;cursor:help;vertical-align:middle;
+  margin-left:5px;flex:none;text-transform:none;letter-spacing:0}
+.xp:hover,.xp:focus{border-color:var(--brand);color:var(--brand);background:color-mix(in srgb,var(--brand) 12%,transparent);outline:none}
+/* ancorado pelo lado do "?" (não centralizado): centralizar jogava metade do balão pra fora do
+   card quando o "?" ficava perto da borda esquerda — e o .fin-root tem overflow-x:clip, cortava. */
+.xp-pop{position:absolute;left:-10px;top:calc(100% + 9px);z-index:60;
+  display:none;width:max-content;max-width:min(300px,74vw);text-align:left;
+  background:var(--elev);border:1px solid var(--line-strong);border-radius:11px;padding:12px 14px;
+  box-shadow:0 16px 40px -14px rgba(0,0,0,.45);cursor:default;
+  font-size:12.5px;font-weight:400;color:var(--sub);line-height:1.55;white-space:normal}
+.xp:hover .xp-pop,.xp:focus .xp-pop,.xp:focus-within .xp-pop{display:block}
+.xp-pop::before{content:"";position:absolute;left:14px;top:-5px;width:9px;height:9px;transform:rotate(45deg);
+  background:var(--elev);border-left:1px solid var(--line-strong);border-top:1px solid var(--line-strong)}
+.xp-pop b{display:block;color:var(--ink);font-size:13px;font-weight:700;margin-bottom:3px}
+.xp-pop em{display:block;font-style:normal;color:var(--subtle);font-size:11.5px;margin-bottom:7px}
+.xp-calc{display:block;background:var(--card-2);border:1px solid var(--hair);border-radius:8px;padding:8px 10px;
+  font-size:12.5px;color:var(--ink);line-height:1.7}
+.xp-calc .num{font-weight:600}
+.xp-note{display:block;margin-top:8px;font-size:11.5px;color:var(--subtle);line-height:1.5}
+/* nas colunas da direita o popover ancora pela direita — senão vaza da tela (o .fin-root tem overflow-x:clip) */
+.stmt-ledger .xp-pop,.rd-stats .rd-stat:last-child .xp-pop{left:auto;right:-10px}
+.stmt-ledger .xp-pop::before,.rd-stats .rd-stat:last-child .xp-pop::before{left:auto;right:14px}
+.legend i.line.dash{background:none!important;border-top:2px dashed var(--line-strong);height:0;width:16px}
+.legend i.ring{width:9px;height:9px;border-radius:50%;background:none;border:1.4px solid var(--neg)}
+.legend-note{font-size:11.5px;color:var(--subtle);line-height:1.55;margin-top:8px;text-align:center;max-width:62ch;margin-left:auto;margin-right:auto}
+/* seletor de mês do topo: manda em todos os blocos de mês da Visão geral */
+.stmt-nav{display:flex;align-items:center;gap:4px}
+.stmt-mes{font-family:'Space Grotesk',sans-serif;font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);min-width:11ch;text-align:center}
+.stmt-arrow{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;color:var(--sub);border:1px solid transparent}
+.stmt-arrow:hover:not(:disabled){background:var(--card-2);border-color:var(--border);color:var(--ink)}
+.stmt-arrow:disabled{opacity:.3;cursor:default}
+.stmt-hoje{margin-left:4px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--brand);border:1px solid color-mix(in srgb,var(--brand) 40%,transparent);border-radius:20px;padding:3px 10px}
+.stmt-hoje:hover{background:color-mix(in srgb,var(--brand) 12%,transparent)}
+.sl-hoje{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--subtle);border:1px solid var(--hair);border-radius:20px;padding:1px 6px;margin-left:2px}
+/* leitura de ritmo do mês: o herói deixou de ser patrimônio líquido (sobe sozinho) e passou a ser
+   "quanto gastei contra o meu normal" — a única versão do número que sugere ação. */
+.stmt-pace{font-size:12.5px;color:var(--sub);line-height:1.5;max-width:46ch}
+.stmt-pace b.num{color:var(--ink)}
+.pace-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border-radius:20px;padding:2px 9px;margin-right:6px}
+.stmt-pace.ok .pace-tag{color:var(--pos);background:color-mix(in srgb,var(--pos) 12%,transparent)}
+.stmt-pace.over .pace-tag{color:var(--neg);background:color-mix(in srgb,var(--neg) 12%,transparent)}
+.stmt-pace.under .pace-tag{color:var(--brand);background:color-mix(in srgb,var(--brand) 14%,transparent)}
+.pace-bar{position:relative;height:9px;border-radius:6px;background:var(--card-2);border:1px solid var(--border);overflow:hidden;margin-top:4px;max-width:420px}
+.pace-fill{display:block;height:100%;background:var(--line-strong);transition:width .3s}
+.pace-fill.ok{background:var(--pos)} .pace-fill.over{background:var(--neg)} .pace-fill.under{background:var(--brand)}
+.pace-mark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.55;border-radius:2px}
+.pace-legend{font-size:11.5px;color:var(--subtle);margin-top:5px}
+.sl-pct{font-size:11.5px;color:var(--subtle);font-weight:600}
 .stmt-row.total{border-bottom:none;border-top:2px solid var(--ink);margin-top:3px;padding-top:9px}
 .stmt-row.total .sl-k{color:var(--ink);font-weight:700}
 .stmt-row.total .sl-v{font-weight:700}
@@ -162,7 +216,13 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 
 /* tooltip do gráfico: escondido por padrão, aparece no hover (desktop) ou no toque (.on, celular) */
 .rd-tip,.rd-guide{opacity:0;transition:opacity .1s;pointer-events:none}
-.rd-col:hover .rd-tip,.rd-col:hover .rd-guide,.rd-col.on .rd-tip,.rd-col.on .rd-guide{opacity:1}
+.rd-col:hover .rd-tip,.rd-col:hover .rd-guide{opacity:1}
+/* .on = mês fixado no toque. Em tela com mouse o hover já mostra, e fixar no clique deixava a
+   informação de um mês colada na tela sem jeito óbvio de tirar — então só vale onde não há hover. */
+@media (hover:none){.rd-col.on .rd-tip,.rd-col.on .rd-guide{opacity:1}}
+/* mês em foco no seletor do topo: só a guia vertical, discreta — sem abrir o tooltip */
+.rd-col.foco .rd-guide{opacity:.4}
+.rd-col.foco:hover .rd-guide{opacity:1}
 
 /* donut */
 .donut-wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
@@ -524,6 +584,9 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .dash-personalize.on{background:var(--brand);color:#fff;border-color:var(--brand)}
 .dash-hint{font-size:12.5px;color:var(--sub)}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+/* bloco que ocupa a linha inteira da grade (Receitas × Despesas: a série temporal precisa de largura) */
+.dash-grid>.dash-wide{grid-column:1/-1}
+.chart-wide{height:290px}
 /* editor de ordem (lista compacta, arrastável) */
 .dash-editor{display:flex;flex-direction:column;gap:10px;max-width:640px;margin-bottom:16px}
 .dash-edit-row{display:flex;align-items:center;gap:13px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:13px 15px;transition:.12s}
@@ -799,12 +862,58 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .donut-center .dc-nm{font-size:11px;font-weight:600;color:var(--ink);max-width:120px;text-align:center;line-height:1.15}
 .donut-center .dc-pct{font-size:11px;color:var(--subtle);margin-top:1px}
 .cd-legend{gap:1px}
-.cat-leg{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--sub);transition:background .1s;list-style:none}
+/* duas linhas por categoria: em uma só, nome + % do mês + variação + valor não cabem num card de
+   meia largura — o nome ficava com ~30px. */
+.cat-leg{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:9px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--sub);transition:background .1s;list-style:none}
+.lg-mid{min-width:0;display:flex;flex-direction:column;gap:1px}
+.lg-nm{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg-sub{font-size:11px;color:var(--subtle);display:flex;align-items:center;gap:5px;white-space:nowrap}
+.lg-sub .lg-pct{color:var(--sub);font-weight:700}
 .cat-leg:hover,.cat-leg.on{background:var(--card-2)}
 .cat-leg i{width:9px;height:9px;border-radius:3px;flex-shrink:0}
-.cat-leg span{color:var(--ink)}
-.cat-leg .lg-pct{color:var(--subtle);font-size:11.5px;font-weight:600;min-width:30px;text-align:right}
+/* Δ na legenda da rosca: a comparação que o círculo sozinho não dá */
+.cat-leg .lg-delta{font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:600;letter-spacing:-.02em}
+.cat-leg .lg-delta.up{color:var(--neg)} .cat-leg .lg-delta.down{color:var(--pos)}
+.cat-leg .lg-delta.flat{color:var(--subtle)} .cat-leg .lg-delta.novo{color:var(--brand)}
 .cat-leg .lg-val{font-weight:600;min-width:64px;text-align:right}
+/* categorias em barras ordenadas (substituiu a rosca): valor + Δ vs. média de 3 meses + sparkline */
+.cat-bars{list-style:none;display:flex;flex-direction:column;gap:11px;margin:2px 0 0}
+.cat-bar{cursor:pointer;padding:3px 5px;margin:0 -5px;border-radius:8px;transition:background .12s}
+.cat-bar:hover{background:var(--card-2)}
+.cat-bar.on{background:color-mix(in srgb,var(--brand) 10%,transparent)}
+.cb-top{display:flex;align-items:center;gap:9px;font-size:13px}
+.cb-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.cb-sp{display:flex;align-items:center;flex:none;opacity:.9}
+.cb-delta{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;flex:none;min-width:44px;text-align:right}
+.cb-delta.up{color:var(--neg)} .cb-delta.down{color:var(--pos)}
+.cb-delta.flat{color:var(--subtle)} .cb-delta.novo{color:var(--brand)}
+.cb-val{flex:none;min-width:62px;text-align:right;color:var(--ink);font-weight:600}
+.cb-track{height:6px;border-radius:4px;background:var(--card-2);overflow:hidden;margin-top:5px}
+.cb-track i{display:block;height:100%;border-radius:4px}
+/* fora do padrão: o bloco que aponta ação sem o usuário procurar */
+.fp-list{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.fp-row{display:flex;align-items:center;gap:11px;padding:10px 6px;border-radius:9px;border-bottom:1px solid var(--hair)}
+.fp-row:last-child{border-bottom:0}
+.fp-row.click{cursor:pointer} .fp-row.click:hover{background:var(--card-2)}
+.fp-ic{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex:none;background:color-mix(in srgb,var(--neg) 12%,transparent);color:var(--neg)}
+.fp-mid{flex:1;min-width:0}
+.fp-nm{font-size:14px;font-weight:600;color:var(--ink)}
+.fp-sub{font-size:11.5px;color:var(--subtle);margin-top:1px}
+.fp-right{text-align:right;flex:none}
+.fp-right b{display:block;font-size:14px;color:var(--ink)}
+.fp-delta{font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:600;color:var(--neg)}
+/* comprometido × escolha: a estrutura do gasto numa barra só */
+.potes-bar{display:flex;height:30px;border-radius:8px;overflow:hidden;border:1px solid var(--border);margin:10px 0 12px}
+.potes-bar i{display:block;height:100%}
+.potes-leg{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:8px 14px;margin:0}
+.potes-leg li{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--sub);cursor:pointer;border-radius:6px;padding:2px 4px;margin:0 -4px}
+.potes-leg li:hover{background:var(--card-2)}
+.potes-leg li i{width:9px;height:9px;border-radius:3px;flex:none}
+.potes-leg li span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.potes-leg li b{color:var(--ink);font-weight:600}
+.potes-leg li em{font-style:normal;color:var(--subtle);font-size:11px;min-width:28px;text-align:right}
+.potes-foot{font-size:12.5px;color:var(--sub);margin-top:12px;padding-top:11px;border-top:1px solid var(--hair);line-height:1.55}
+.potes-foot b{color:var(--ink)}
 .cd-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:12px;border-top:2px solid var(--ink)}
 .cd-total{font-size:13px;color:var(--sub)}
 .cd-total b{margin-left:6px;font-size:14px}

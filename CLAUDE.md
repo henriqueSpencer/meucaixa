@@ -77,6 +77,37 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
 - **Configurações (`viewConfig`)**: perfil (nome editável via `Store.updateName`→`user_metadata.full_name`;
   e-mail read-only), segurança (alterar senha, reusa `data-setpass`), seus dados (resumo + `exportBackup`
   = download JSON do `currentModel`), aparência (tema segue o sistema), sessão (sair) + versão (`APP_VERSION`).
+- **Visão geral acionável** (revisão por Tufte / DIKW / métrica acionável × de vaidade): a tela responde
+  “comparado a quê?” em todo número. **Um seletor de mês só** (`state.dashMonth`/`dashMonthYM()`/
+  `dashMonthNav`) manda em TODOS os blocos de mês — as setas do bloco de categorias escrevem no mesmo
+  estado (`donutMonthNav` delega), pra não existirem dois seletores discordando. Peças:
+  - **`statementBand()`** deixou de ser "Patrimônio líquido" em corpo grande (métrica de vaidade: sobe com
+    aporte, mercado e valorização, não mede escolha do mês) e virou **o mês contra o próprio normal**:
+    gasto até hoje, **ritmo projetado** (`gasto ÷ fração do mês`), média dos meses fechados **anteriores ao
+    mês em foco**, barra com marca do esperado, e **Reserva** (`caixa ÷ gasto médio`). Em **mês fechado** o
+    texto troca projeção por total final e a etiqueta vira "na média" (não "no ritmo").
+  - **`monthProgress`/`mesesFechados(n, antes)`/`gastoMedio`/`caixaDisponivel`/`reservaMeses`**: toda média
+    exclui o mês corrente (está pela metade). `caixaDisponivel` = só contas `grupo:"fin"` (cartão entra
+    negativo); imóvel/alocação ficam fora — não paga boleto. Caixa negativo ⇒ reserva **0**, não "−X meses".
+  - **`blkForaDoPadrao`/`foraDoPadrao()`**: categorias cujo gasto já passou do ritmo delas. A régua é o
+    **histórico da própria categoria** (quanto dela costuma estar gasto até o dia D), **não** a fração do
+    calendário — supor gasto uniforme fazia o bloco acusar "Fixos +275%" todo mês, porque aluguel e
+    assinatura caem em dia certo. Corte duplo: excedente ≥ R$50 **e** ≥25% de um mês típico da categoria.
+  - **`blkPotes`/`potesMedia()`**: barra Fixos·Sobrevivência·Lazer·Extras (média dos 12 meses fechados) →
+    "o que já estava decidido × o que dá pra mexer". **Se esconde** (render "") quando a conta não usa a
+    estrutura Kakeibo; `viewDashboard` filtra blocos vazios.
+  - **`xp(titulo, formula, conta, nota)`**: o "?" que abre a **fórmula preenchida com os números reais**.
+    Puro CSS (hover + `tabindex`/`:focus` p/ toque). ⚠️ o popover **não pode ter ancestral com
+    `overflow:hidden`** (o `.statement` tinha, e cortava) e ancora **pelo lado do "?"**, não centralizado —
+    centralizar jogava metade pra fora e o `.fin-root` tem `overflow-x:clip`.
+  - **Roscas de categoria**: o usuário preferiu rosca a barras. Cada linha da legenda tem **duas linhas**:
+    `N% do mês` (parte do total — o que a fatia mostra) e `▲/▼ N%` (variação vs. média dos 3 meses
+    anteriores, `catMediaAnterior`). **A seta é obrigatória**: dois números em % lado a lado sem marcação
+    se confundem. Numa linha só não cabe — o nome fica com ~30px em card de meia largura.
+  - **`DASH_BLOCKS`** = foraDoPadrao · potes · categorias · ganhos · receitaDespesa · patrimonio (saiu
+    "Últimas transações": degrau Dado puro, e a aba Transações já faz melhor). **`normalizeDashOrder()`**
+    limpa chave morta do `dashOrder` salvo em prefs (senão `DASH_BLOCKS[k].render()` estoura) e injeta
+    blocos novos preservando a ordem que o usuário já tinha.
 - **Dados reais, sem mock**: dashboard/Extrato/gráficos calculam das transações reais. `refMonthYM()` =
   último mês com receita/despesa (pula meses só-transferência); título/seletor de mês refletem ele.
   `TODAY_ISO` = data real de hoje (era fixa). Totais das categorias vêm de `catTotals()` (as linhas do
@@ -84,12 +115,17 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   (`monthly`/`receitasMes`/etc.) só sobrevivem como fallback do modo dev com `OF_DATA`.
 - **Gráficos SVG puro (sem lib)**: helpers `fmtCompact` (9,3k · 12k · 1,2M — eixos e rótulos, sem "R$") e
   `niceAxis(lo,hi,ticks)` (passo/piso/topo redondos 1/2/2,5/5×10ⁿ, suporta faixa negativa). **Receitas ×
-  Despesas** (`barChartSVG`, `blkReceitaDespesa`) é um **combo**: barras (viewBox fixo **520×240** — mexer
-  nisso encolhe o desenho no container por causa do `preserveAspectRatio="meet"`; geometria de barra por
-  nº de meses via `bwCap`) + **linha de Saldo** roxa (`C_SALDO`) + **tooltip por mês** (hover no desktop via
-  CSS `.rd-col:hover`, toque no celular via `state.rdSel`/`.on` — sem re-render no hover) + **3 cards** de
-  resumo (`rdStats`: guardado/média/poupança, só **meses fechados**, exclui o corrente). Não há rótulo fixo
-  no topo nem scroll (tentativas anteriores). O **saldo negativo** desce abaixo de zero (eixo via `niceAxis`).
+  Despesas** (`barChartSVG(data, sel, W, H, foco)`, `blkReceitaDespesa`) é um **combo**: barras + **linha de
+  Saldo** roxa (`C_SALDO`) + **3 médias móveis de 3 meses** (receita/despesa/saldo, tracejadas na cor de
+  cada série) + **anel** nos meses cuja despesa passa de ±1,5σ + **tooltip por mês** em 2 colunas (*no mês*
+  × *méd 3m*; a linha de Saldo usa `fmtSigned` porque `fmtShort` aplica `Math.abs` e esconderia o sinal) +
+  **3 cards** (`rdStats`: guardado/média/poupança, só **meses fechados**, exclui o corrente).
+  ⚠️ **viewBox**: o card é `dash-wide` (ocupa a linha inteira da grade) e passa **900×260** — com 520 de
+  largura o `preserveAspectRatio="meet"` centralizaria o desenho e deixaria tarja vazia dos dois lados; a
+  largura da barra escala por `k = W/520` pra manter a densidade. **Tooltip fixado no clique
+  (`state.rdSel`/`.on`) só vale em `@media (hover:none)`** — no desktop o hover já mostra, e fixar deixava a
+  informação de um mês colada na tela. O mês em foco no seletor do topo usa a classe **`.foco`**, que acende
+  só a guia vertical: pôr o índice dele em `sel` abria o tooltip permanentemente (bug real).
 - **PWA**: `manifest.json` + `sw.js` (shell offline: network-first no HTML, stale-while-revalidate nos
   assets; Supabase passa direto pela rede). Ícones em `icons/` (carteira brass 192/512). **Favicon**: o
   Safari ignorava SVG/PNG externo → usa **SVG inline (data-URI)** no `<link rel=icon>` do `index.html`
