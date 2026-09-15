@@ -106,7 +106,7 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .cta{display:flex;align-items:center;gap:6px;background:#A8823C;color:#fff;font-weight:600;font-size:13.5px;padding:9px 15px;border-radius:9px;transition:.15s}
 .cta:hover{filter:brightness(1.06)}
 .cta.big{padding:12px 22px;font-size:14.5px}
-.content{padding:24px 30px 60px;max-width:1180px;width:100%}
+.content{padding:24px 30px 60px;max-width:1520px;width:100%}
 
 /* cards */
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px}
