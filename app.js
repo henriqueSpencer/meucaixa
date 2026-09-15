@@ -495,6 +495,13 @@ const C_SALDO = "#8B7BD8"; // linha de saldo (roxo-azulado)
 // toque no celular via classe .on em state.rdSel). `sel` = índice do mês fixado no toque (ou null).
 // W/H definem o viewBox. O card largo passa 900×260 porque com 520 de largura o "meet" centralizaria
 // o desenho e deixaria tarja vazia dos dois lados — o gráfico não cresceria junto com o card.
+// largura do viewBox do card largo = largura real do card (content − padding do content − padding do card).
+// Fixo em 900, num card de 1460px o "meet" centralizava o desenho e sobrava tarja vazia dos dois lados.
+// Piso 900 (mobile/estreito continua como antes). O `resize` re-renderiza o dashboard (ver init).
+function wideChartW() {
+  const w = (typeof elView !== "undefined" && elView && elView.clientWidth) ? elView.clientWidth - 60 - 36 : 0;
+  return Math.max(900, Math.round(w));
+}
 function barChartSVG(data, sel, W = 520, H = 240, foco = -1) {
   const padL = 40, padR = 12, padT = 18, padB = 28, k = W / 520;
   const n = data.length || 1;
@@ -673,7 +680,7 @@ function blkReceitaDespesa() {
     </div>
     ${opts.length ? `<div class="pc-ranges"><div class="pc-chips">${chips}</div></div>` : ""}
     ${cards}
-    <div class="chart chart-wide">${barChartSVG(s, sel, 900, 260, iFoco)}</div>
+    <div class="chart chart-wide">${barChartSVG(s, sel, wideChartW(), 260, iFoco)}</div>
     <div class="legend"><span><i style="background:${C.receita}"></i> Receitas</span><span><i style="background:${C.despesa}"></i> Despesas</span><span><i class="line" style="background:${C_SALDO}"></i> Saldo</span>${n >= 4 ? `<span><i class="line dash"></i> Média móvel 3m (tracejado, na cor de cada série)</span><span><i class="ring"></i> Mês atípico</span>` : ""}</div>
     ${n >= 4 ? `<div class="legend-note">Cada série tem sua média móvel de 3 meses tracejada na mesma cor — receitas, despesas e saldo. Passe o mouse (ou toque) num mês para ver os dois números lado a lado. O anel marca os meses cuja despesa passou de 1,5 desvio-padrão da média do período. ${xp("Médias móveis e mês atípico",
       "média dos 3 últimos meses até cada ponto, em cada série",
@@ -4703,6 +4710,13 @@ async function init() {
   elSub = document.getElementById("pg-sub");
   elBadge = document.getElementById("nav-badge");
   elModal = document.getElementById("modal-root");
+  // redimensionar a janela muda a largura do card largo (viewBox do gráfico) e o nº de colunas da grade:
+  // re-renderiza o dashboard, só quando não há edição/modal em curso (senão perderia foco/estado)
+  let _rsT = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(_rsT);
+    _rsT = setTimeout(() => { if (_booted && state.tab === "dashboard" && !state.modal && !state.dashEdit && !state.acctDetail && !state.assetRecon) renderView(); }, 200);
+  });
   // listeners de autenticação (a tela de login existe antes do wire() do app)
   document.addEventListener("submit", (e) => {
     if (e.target.closest("[data-auth-form]")) { e.preventDefault(); submitAuth(); return; }

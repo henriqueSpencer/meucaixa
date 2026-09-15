@@ -592,9 +592,11 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 /* bloco que ocupa a linha inteira da grade (Receitas × Despesas: a série temporal precisa de largura) */
 .dash-grid>.dash-wide{grid-column:1/-1}
-/* tela larga: 3 blocos lado a lado. `dense` deixa um bloco de 1 coluna preencher a vaga que o bloco largo
-   (2 colunas) deixou na linha anterior — senão sobrava buraco no meio da grade. */
-@media(min-width:1600px){.dash-grid{grid-template-columns:repeat(3,1fr);grid-auto-flow:dense}.dash-grid>.dash-wide{grid-column:span 2}}
+/* tela larga: 3 blocos lado a lado. SEM `grid-auto-flow:dense`: ele puxava pra cima o bloco de 1 coluna que
+   vinha DEPOIS do bloco largo (pra tapar a vaga que o largo deixou), e a ordem que o usuário escolheu em
+   "Personalizar página" não era respeitada ("Fora do padrão fica indo pra cima"). Buraco no fim de uma
+   linha é o preço de manter a ordem. */
+@media(min-width:1600px){.dash-grid{grid-template-columns:repeat(3,1fr)}}
 .chart-wide{height:290px}
 /* editor de ordem (lista compacta, arrastável) */
 .dash-editor{display:flex;flex-direction:column;gap:10px;max-width:640px;margin-bottom:16px}
