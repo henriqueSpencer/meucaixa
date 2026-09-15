@@ -592,6 +592,9 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
 /* bloco que ocupa a linha inteira da grade (Receitas × Despesas: a série temporal precisa de largura) */
 .dash-grid>.dash-wide{grid-column:1/-1}
+/* tela larga: 3 blocos lado a lado. `dense` deixa um bloco de 1 coluna preencher a vaga que o bloco largo
+   (2 colunas) deixou na linha anterior — senão sobrava buraco no meio da grade. */
+@media(min-width:1600px){.dash-grid{grid-template-columns:repeat(3,1fr);grid-auto-flow:dense}.dash-grid>.dash-wide{grid-column:span 2}}
 .chart-wide{height:290px}
 /* editor de ordem (lista compacta, arrastável) */
 .dash-editor{display:flex;flex-direction:column;gap:10px;max-width:640px;margin-bottom:16px}
@@ -1099,6 +1102,8 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .hist-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
 .hist-refresh{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:7px 12px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--sub);cursor:pointer}
 .hist-refresh:hover{color:var(--ink);border-color:var(--line-strong)}
+.hist-more{display:flex;justify-content:center;padding:6px 0 20px}
+.hist-day-more{display:block;width:100%;text-align:center;padding:10px 14px;border-top:1px solid var(--hair);font-size:12.5px}
 .hist-day{margin-bottom:14px;border:1px solid var(--border);border-radius:12px;background:var(--card);overflow:hidden}
 .hist-day-head{display:flex;align-items:center;gap:9px;width:100%;padding:12px 14px;background:none;border:none;cursor:pointer;text-align:left;font-family:inherit}
 .hist-day-head:hover{background:var(--card-2)}

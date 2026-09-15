@@ -266,9 +266,15 @@
     return data || { totais: {}, usuarios: [] };
   }
   // histórico de alterações (audit_log) — mais recente primeiro
-  async function fetchAudit(limit) {
+  // paginado por cursor: `beforeId` = id da última linha já carregada (traz as anteriores a ela). O cursor
+  // é o `id` (bigint, append-only), NÃO o `changed_at`: uma migração em massa grava milhares de linhas com o
+  // MESMO timestamp (Kakeibo: 2.756 num só), e `lt(changed_at)` pularia todas. Sem paginar, o Histórico
+  // parava nas N mais recentes — e esse dia engolia a página inteira, mostrando "só dois dias".
+  async function fetchAudit(limit, beforeId) {
     if (!userId) return [];
-    const { data, error } = await sb.from("audit_log").select("*").order("changed_at", { ascending: false }).limit(limit || 300);
+    let q = sb.from("audit_log").select("*").order("id", { ascending: false }).limit(limit || 300);
+    if (beforeId) q = q.lt("id", beforeId);
+    const { data, error } = await q;
     if (error) throw error;
     return data || [];
   }

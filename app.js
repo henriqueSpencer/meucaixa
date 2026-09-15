@@ -2278,27 +2278,51 @@ function renderHistBody() {
   a.forEach((r) => { const k = _dayKey(r.changed_at); (groups[k] = groups[k] || []).push(r); });
   const days = Object.keys(groups).sort().reverse();
   if (!state.histOpen) state.histOpen = new Set(days.slice(0, 1)); // só o dia mais recente aberto por padrão
+  if (!state.histAll) state.histAll = new Set(); // dias em que o usuário pediu "mostrar todas"
   const body = days.map((k) => {
     const rows = groups[k], n = rows.length, open = state.histOpen.has(k);
+    const all = state.histAll.has(k) || n <= HIST_DAY_MAX;
+    const shown = all ? rows : rows.slice(0, HIST_DAY_MAX);
+    const resto = all ? "" : `<button class="link hist-day-more" data-hist-day-all="${k}">Mostrar todas as ${n} alterações deste dia (+${n - HIST_DAY_MAX})</button>`;
     return `<div class="hist-day${open ? " open" : ""}">
       <button class="hist-day-head" data-hist-day="${k}">
         <span class="hd-chev">${ic("chevron-down", 16)}</span>
         <span class="hd-label">${_dayLabel(k)}</span>
         <span class="hd-count">${n} ${n === 1 ? "alteração" : "alterações"}</span>
       </button>
-      ${open ? `<div class="hist-list">${rows.map(histEntry).join("")}</div>` : ""}
+      ${open ? `<div class="hist-list">${shown.map(histEntry).join("")}</div>${resto}` : ""}
     </div>`;
   }).join("");
-  return `<div class="hist-top"><span class="card-sub">${a.length} ${a.length === 1 ? "alteração registrada" : "alterações registradas"}${a.length >= 300 ? " (últimas 300)" : ""}</span><button class="ghost hist-refresh" data-hist-refresh>${ic("rotate", 14)} Atualizar</button></div>${body}`;
+  const nDias = days.length;
+  const more = state.auditMore ? `<div class="hist-more"><button class="ghost hist-refresh" data-hist-more>${ic("chevron-down", 14)} Carregar dias anteriores</button></div>`
+    : `<div class="hist-more"><span class="card-sub">Início do histórico — tudo carregado.</span></div>`;
+  return `<div class="hist-top"><span class="card-sub">${a.length} ${a.length === 1 ? "alteração" : "alterações"} em ${nDias} ${nDias === 1 ? "dia" : "dias"}${state.auditMore ? " (mais antigas ainda não carregadas)" : ""}</span><button class="ghost hist-refresh" data-hist-refresh>${ic("rotate", 14)} Atualizar</button></div>${body}${more}`;
 }
+const HIST_PAGE = 500;      // alterações por requisição
+const HIST_DAY_MAX = 150;   // linhas mostradas por dia antes do "mostrar todas" (um dia de migração tem milhares)
 async function loadHistorico(force) {
   if (state._auditLoading) return;
   if (state.audit && state.audit !== "error" && !force) return; // já carregado; refresh só com force
   state._auditLoading = true;
   const hasCache = state.audit && state.audit !== "error";
   if (!hasCache) { state.audit = null; const r0 = document.getElementById("hist-root"); if (r0) r0.innerHTML = renderHistBody(); } // spinner só sem cache
-  try { state.audit = await Store.fetchAudit(300); }
+  try { state.audit = await Store.fetchAudit(HIST_PAGE); state.auditMore = state.audit.length >= HIST_PAGE; }
   catch (e) { if (!hasCache) state.audit = "error"; }
+  state._auditLoading = false;
+  const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody();
+}
+// "Carregar mais": puxa a página anterior ao último registro já carregado e anexa (o agrupamento por dia é
+// refeito no render, então um dia cortado na fronteira da página se completa sozinho).
+async function loadHistoricoMore() {
+  if (state._auditLoading || !Array.isArray(state.audit) || !state.audit.length) return;
+  state._auditLoading = true;
+  const btn = document.querySelector("[data-hist-more]"); if (btn) { btn.disabled = true; btn.textContent = "Carregando…"; }
+  try {
+    const last = state.audit[state.audit.length - 1];
+    const more = await Store.fetchAudit(HIST_PAGE, last.id);
+    state.audit = state.audit.concat(more);
+    state.auditMore = more.length >= HIST_PAGE;
+  } catch (e) { state.auditMore = true; }
   state._auditLoading = false;
   const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody();
 }
@@ -4453,6 +4477,9 @@ function wire() {
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn) { document.querySelector(".fin-root").classList.remove("nav-open"); if (tabBtn.dataset.tab !== "conciliacao") state.reconFrom = null; state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
+    if (e.target.closest("[data-hist-more]")) { loadHistoricoMore(); return; }
+    const hall = e.target.closest("[data-hist-day-all]");
+    if (hall) { if (!state.histAll) state.histAll = new Set(); state.histAll.add(hall.dataset.histDayAll); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
     if (e.target.closest("[data-admin-refresh]")) { loadAdmin(true); return; }
     const hday = e.target.closest("[data-hist-day]");
     if (hday) { const k = hday.dataset.histDay; if (!state.histOpen) state.histOpen = new Set(); state.histOpen.has(k) ? state.histOpen.delete(k) : state.histOpen.add(k); const r = document.getElementById("hist-root"); if (r) r.innerHTML = renderHistBody(); return; }
