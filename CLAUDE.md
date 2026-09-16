@@ -122,7 +122,15 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
     `N% do mês` (parte do total — o que a fatia mostra) e `▲/▼ N%` (variação vs. média dos 3 meses
     anteriores, `catMediaAnterior`). **A seta é obrigatória**: dois números em % lado a lado sem marcação
     se confundem. Numa linha só não cabe — o nome fica com ~30px em card de meia largura.
-  - **`DASH_BLOCKS`** = foraDoPadrao · potes · categorias · ganhos · receitaDespesa · patrimonio (saiu
+  - **Esconder bloco** (`prefs.dashHidden`, array de chaves; `dashHidden`/`dashIsHidden`/`toggleDashBlock`,
+  botão-olho `data-dash-vis` em cada linha do "Personalizar página"): a ordem (`dashOrder`) fica intacta —
+  religar devolve o bloco na posição em que estava. `dashGrid()` filtra os escondidos e mostra a nota
+  "N blocos escondidos · personalizar" abaixo da grade (nada fica escondido sem aviso).
+- **Grade em 3 colunas** a partir de 1600px de viewport (`.content` cap 1520px). **SEM `grid-auto-flow:dense`**:
+  ele puxava pra cima o bloco de 1 coluna que vinha DEPOIS do bloco largo, desrespeitando a ordem do usuário
+  (bug real: "Fora do padrão fica indo pra cima"). O gráfico largo usa `wideChartW()` (largura real do card
+  como viewBox, piso 900) e um `resize` com debounce re-renderiza o dashboard.
+- **`DASH_BLOCKS`** = foraDoPadrao · potes · categorias · ganhos · receitaDespesa · patrimonio (saiu
     "Últimas transações": degrau Dado puro, e a aba Transações já faz melhor). **`normalizeDashOrder()`**
     limpa chave morta do `dashOrder` salvo em prefs (senão `DASH_BLOCKS[k].render()` estoura) e injeta
     blocos novos preservando a ordem que o usuário já tinha.
@@ -192,6 +200,11 @@ Frontend estático no **Cloudflare Pages** (CDN, sem cold start) falando **diret
   'delete'), `old_data`/`new_data` (jsonb), `label` e `changed_at`. Ignora update que só mexeu em
   `updated_at`. RLS só-select por usuário. Alimenta a aba **Histórico** (`fetchAudit`→`viewHistorico`,
   diff git-like agrupado por dia). Registra a partir de agora — não reconstrói edições passadas.
+  **Paginado por cursor no `id`** (`fetchAudit(limit, beforeId)`, páginas de `HIST_PAGE=500`, botão "Carregar
+  dias anteriores"/`loadHistoricoMore`) — NÃO por `changed_at`: uma migração em massa grava milhares de linhas
+  com o MESMO timestamp (Kakeibo: 2.756 numa só) e `lt(changed_at)` pularia todas. Sem paginar, o limite
+  fixo de 300 fazia o Histórico "mostrar só dois dias". Dia com > `HIST_DAY_MAX=150` linhas mostra 150 e
+  o botão "Mostrar todas" (`state.histAll`).
 - Administrável pelo MCP do Supabase nesta máquina (`list_tables`/`execute_sql`/`apply_migration`).
 - **Login de produção** exige, no painel (Authentication → URL Configuration): Site URL
   `https://meucaixa.pages.dev` e Redirect URL `https://meucaixa.pages.dev/**`.

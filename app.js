@@ -435,6 +435,8 @@ const ICON = {
   "shirt": '<path d="M8 3 4 6l2 3 2-1v10h8V8l2 1 2-3-4-3-3 2a2 2 0 0 1-4 0z"/>',
   "smile": '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8"/><line x1="9" y1="9.5" x2="9.01" y2="9.5"/><line x1="15" y1="9.5" x2="15.01" y2="9.5"/>',
   "calendar": '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="8" y1="2.5" x2="8" y2="6.5"/><line x1="16" y1="2.5" x2="16" y2="6.5"/>',
+  "eye": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  "eye-off": '<path d="M17.9 17.9A10.9 10.9 0 0 1 12 19c-6.5 0-10-7-10-7a18.5 18.5 0 0 1 5.1-5.9"/><path d="M9.9 4.2A10.5 10.5 0 0 1 12 5c6.5 0 10 7 10 7a18.6 18.6 0 0 1-2.2 3.2"/><path d="M14.1 14.1a3 3 0 1 1-4.2-4.2"/><line x1="2" y1="2" x2="22" y2="22"/>',
 };
 
 /* nome da categoria → ícone (default por reconhecimento) */
@@ -1092,6 +1094,18 @@ const DASH_BLOCKS = {
   receitaDespesa: { title: "Receitas × Despesas", sub: "gráfico de barras", icon: "trending-up", cor: C.brand, render: blkReceitaDespesa },
   patrimonio: { title: "Evolução do patrimônio", sub: "área", icon: "building", cor: C.patrimonio, render: blkPatrimonio },
 };
+// blocos que o usuário desligou em "Personalizar página" — ficam em prefs.dashHidden (sincronizado), fora
+// da ordem (a ordem é preservada; religar devolve o bloco na posição em que estava).
+const dashHidden = () => (state.prefs && Array.isArray(state.prefs.dashHidden)) ? state.prefs.dashHidden : [];
+const dashIsHidden = (k) => dashHidden().includes(k);
+function toggleDashBlock(k) {
+  if (!DASH_BLOCKS[k]) return;
+  if (!state.prefs) state.prefs = {};
+  const h = dashHidden().filter((x) => x !== k);
+  if (!dashIsHidden(k)) h.push(k);
+  state.prefs.dashHidden = h;
+  renderView();
+}
 // dashOrder vem das prefs sincronizadas e pode ter chave de bloco que não existe mais (ex.: "ganhos"),
 // o que quebraria o render. Filtra o desconhecido e injeta os blocos novos na posição declarada.
 function normalizeDashOrder() {
@@ -1106,10 +1120,12 @@ function dashEditor() {
   const rows = state.dashOrder.map((key, idx) => {
     const b = DASH_BLOCKS[key];
     if (!b) return "";
-    return `<div class="dash-edit-row${state.dragKey === key ? " dragging" : ""}" draggable="true" data-dash-row="${key}">
+    const off = dashIsHidden(key);
+    return `<div class="dash-edit-row${state.dragKey === key ? " dragging" : ""}${off ? " off" : ""}" draggable="true" data-dash-row="${key}">
       <span class="der-grip" title="Arraste para reordenar">${ic("grip", 17)}</span>
       <span class="der-ic" style="background:${b.cor}1A;color:${b.cor}">${ic(b.icon, 17)}</span>
-      <span class="der-txt"><b>${b.title}</b><span>${b.sub}</span></span>
+      <span class="der-txt"><b>${b.title}</b><span>${off ? "escondido — não aparece na Visão geral" : b.sub}</span></span>
+      <button class="der-vis${off ? " off" : ""}" data-dash-vis="${key}" title="${off ? "Mostrar este bloco" : "Esconder este bloco"}" aria-pressed="${off ? "false" : "true"}">${ic(off ? "eye-off" : "eye", 14)} ${off ? "Escondido" : "Visível"}</button>
       <span class="der-pos">${idx + 1}º</span>
       <span class="der-moves">
         <button class="dash-move" data-dash-move="${key}:up" title="Subir" ${idx === 0 ? "disabled" : ""}>${ic("chevron-up", 15)}</button>
@@ -1463,10 +1479,17 @@ function viewDashboard() {
   return `
   <div class="dash-tools">
     <button class="ghost dash-personalize ${edit ? "on" : ""}" data-dash-edit>${ic(edit ? "check" : "sliders", 15)} ${edit ? "Concluir" : "Personalizar página"}</button>
-    ${edit ? `<span class="dash-hint">Arraste os blocos ou use as setas para mudar a ordem.</span>` : ""}
+    ${edit ? `<span class="dash-hint">Arraste os blocos ou use as setas para mudar a ordem. Use o olho para esconder um bloco.</span>` : ""}
   </div>
   ${statementBand()}
-  ${edit ? dashEditor() : `<div class="dash-grid">${state.dashOrder.map((k) => (DASH_BLOCKS[k] ? DASH_BLOCKS[k].render() : "")).filter(Boolean).join("")}</div>`}`;
+  ${edit ? dashEditor() : dashGrid()}`;
+}
+function dashGrid() {
+  const vis = state.dashOrder.filter((k) => DASH_BLOCKS[k] && !dashIsHidden(k));
+  const html = vis.map((k) => DASH_BLOCKS[k].render()).filter(Boolean).join("");
+  const nOff = state.dashOrder.filter((k) => DASH_BLOCKS[k] && dashIsHidden(k)).length;
+  const nota = nOff ? `<div class="dash-hidden-note">${ic("eye-off", 13)} ${nOff} ${nOff === 1 ? "bloco escondido" : "blocos escondidos"} · <button class="link" data-dash-edit>personalizar</button></div>` : "";
+  return `<div class="dash-grid">${html}</div>${nota}`;
 }
 
 const chipLabel = (t) => (t === "cartao" ? "cartão" : t === "invest" ? "investimento" : t === "imovel" ? "imóvel" : t);
@@ -4529,6 +4552,8 @@ function wire() {
     if (e.target.closest("[data-acct-back]")) { backAcct(); return; }
     // dashboard
     if (e.target.closest("[data-dash-edit]")) { state.dashEdit = !state.dashEdit; renderView(); return; }
+    const dVis = e.target.closest("[data-dash-vis]");
+    if (dVis) { toggleDashBlock(dVis.dataset.dashVis); return; }
     const dMove = e.target.closest("[data-dash-move]");
     if (dMove) { const [key, dir] = dMove.dataset.dashMove.split(":"); moveDash(key, dir); return; }
     const mt = e.target.closest("[data-modal-tipo]");
