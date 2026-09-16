@@ -459,6 +459,10 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .sub-ed{display:grid;place-items:center;width:22px;color:var(--subtle);background:var(--hair);border-left:1px solid var(--border);border-radius:0 6px 6px 0}
 .sub-ed:hover{color:var(--brand);background:var(--card-2)}
 .sub-pill{font-size:11.5px;color:var(--sub);background:var(--hair);padding:4px 9px;border-radius:6px}
+/* total da subcategoria: número miúdo e apagado dentro da própria pílula — a informação está lá sem virar
+   mais uma linha/tabela que separe as coisas (pedido do usuário: "de maneira discreta") */
+.sub-val{font-style:normal;font-size:10.5px;font-weight:600;color:var(--subtle);margin-left:6px;letter-spacing:.01em}
+.sub-pill:hover .sub-val{color:var(--sub)}
 .sub-add{font-size:11.5px;color:var(--subtle);display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border:1px dashed var(--line-strong);border-radius:6px}
 .sub-add:hover{color:var(--brand);border-color:var(--brand)}
 .cat-add{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:14px 18px;border-top:1px solid var(--border);width:100%;justify-content:center}
