@@ -241,6 +241,12 @@ tag e limpe as tabelas.
   tabela), então sem ordenar a aba Transações mostrava 300 lançamentos arbitrários dizendo serem "os
   mais recentes" e "Últimas transações" no dashboard mostrava lançamentos velhos. Se criar outro
   caminho que insere em `state.tx`, chame `sortTx()`.
+- **Conta "fora do total"** (`a.foraTotal` ⇄ coluna `accounts.fora_total`, migração `accounts_fora_total`;
+  chave `.af-flag` com rótulo no card da conta financeira + item no ⋯; `toggleAcctFora`): tira a conta do
+  **Total** das contas financeiras (aba Contas, que mostra "fora: R$ X em N contas") e do **caixa disponível/
+  reserva** (`contasFinContam()`), e o "?" da reserva avisa. **Não** mexe no patrimônio líquido (`netWorth`)
+  nem no saldo/extrato da conta. Caso de uso: dinheiro numa conta sua que não é seu pra gastar (caução,
+  terceiro, conta compartilhada). Aparece no Histórico (`HIST_FIELDS.fora_total`).
 - **`ordem` da conta é o que persiste** (`rowsToModel` ordena por ele). Mexer só na posição do array
   `accounts` não grava nada — chame `reindexAccounts()` (feito em `moveAcct`/`saveAcctForm`).
 - **`fmt`/`fmtNum`/`fmtShort` toleram valor ausente** (`numOr0`): um campo nulo não pode derrubar a

@@ -22,6 +22,7 @@
       rows.accounts.push({
         id: String(a.id), nome: a.nome, sub: a.sub || null, tipo: a.tipo || null,
         saldo: num(a.saldo), grupo: a.grupo || null, arquivada: !!a.arquivada,
+        fora_total: !!a.foraTotal, // conta que não soma no total das financeiras (migração accounts_fora_total)
         icon: a.icon || null, ordem: a.ordem != null ? a.ordem : i,
         alocado: a.alocado != null ? num(a.alocado) : null, custo: a.custo != null ? num(a.custo) : null,
         deleted: false,
@@ -67,6 +68,7 @@
       .slice().sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
       .map((a) => {
         const o = { id: a.id, nome: a.nome, sub: a.sub || "", tipo: a.tipo, saldo: num(a.saldo), grupo: a.grupo, arquivada: !!a.arquivada };
+        if (a.fora_total) o.foraTotal = true;
         if (a.icon) o.icon = a.icon;
         if (a.ordem != null) o.ordem = a.ordem;
         if (a.alocado != null) o.alocado = num(a.alocado);

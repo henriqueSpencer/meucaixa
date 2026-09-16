@@ -306,6 +306,10 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 .imv-un-st.occ{color:var(--pos)}
 .lead-aside{display:flex;align-items:center;gap:16px;flex:none}
 .lead-total{text-align:right;white-space:nowrap;flex:none;align-self:center}
+.lead-fora{display:block;font-size:11px;color:var(--subtle);margin-top:2px;font-weight:500}
+.acct.af-off{opacity:.72}
+.acct.af-off .acct-saldo,.acct.af-off .alloc-val strong{color:var(--subtle)!important}
+.af-flag{flex-shrink:0}
 .lead-total span{display:block;font-size:11px;color:var(--subtle);text-transform:uppercase;letter-spacing:.05em}
 .lead-total strong{font-size:19px;font-weight:700;color:var(--ink)}
 .acct-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:15px}

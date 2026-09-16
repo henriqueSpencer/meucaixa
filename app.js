@@ -1197,7 +1197,11 @@ const gastoMes = (ym) => monthTotals(ym).desp; // já é líquido de reembolso
 function gastoMedio(n = 12, antes) { const ms = mesesFechados(n, antes); return ms.length ? ms.reduce((s, ym) => s + gastoMes(ym), 0) / ms.length : 0; }
 // caixa disponível = só contas financeiras (cartão entra negativo, é dívida de curto prazo).
 // Imóvel e alocação de patrimônio NÃO contam: não dá pra viver do apartamento no mês que vem.
-const caixaDisponivel = () => accounts.filter((a) => !a.arquivada && a.grupo === "fin").reduce((s, a) => s + acctTotal(a), 0);
+// contas financeiras que CONTAM: ativas e sem a chave "fora do total" (a.foraTotal — dinheiro que está numa
+// conta sua mas não é seu pra gastar: de terceiro, caução, conta compartilhada…). A chave tira a conta do
+// Total da aba Contas e do caixa disponível/reserva; o patrimônio líquido NÃO muda (a conta segue existindo).
+const contasFinContam = () => accounts.filter((a) => !a.arquivada && a.grupo === "fin" && !a.foraTotal);
+const caixaDisponivel = () => contasFinContam().reduce((s, a) => s + acctTotal(a), 0);
 // meses de reserva ("runway"): a pergunta mais consequente de finanças pessoais
 // caixa negativo (fatura a pagar maior que o saldo) não vira "−X meses" — isso não se lê. Devolve 0
 // e a explicação diz o que está acontecendo.
@@ -1244,7 +1248,7 @@ function statementBand() {
   const res = rec - gasto;
   const poup = rec > 0 ? Math.round(res / rec * 100) : null;
   const reserva = reservaMeses(), caixa = caixaDisponivel(), mediaHoje = gastoMedio(12);
-  const nFin = accounts.filter((a) => !a.arquivada && a.grupo === "fin").length;
+  const nFin = contasFinContam().length, nFinFora = accounts.filter((a) => !a.arquivada && a.grupo === "fin" && a.foraTotal).length;
   // seletor de mês: manda em todos os blocos de mês da página
   const ms = monthsAxis(), i = ms.indexOf(ym);
   const nav = `<span class="stmt-nav">
@@ -1274,7 +1278,7 @@ function statementBand() {
       <div class="stmt-ledger">
         <div class="stmt-row"><span class="sl-k">Reserva <small class="sl-hoje">hoje</small> ${xp("Reserva", "caixa disponível ÷ gasto médio mensal",
           `${_n(caixa)} ÷ ${_n(mediaHoje)} = <b>${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</b>`,
-          `${caixa < 0 ? "<b>Seu caixa está negativo</b> (o que você deve no cartão passou do saldo em conta), então a reserva aparece como zero. " : ""}Sempre de hoje, não do mês em foco — o app guarda o saldo atual das contas, não o saldo histórico. Caixa = as ${nFin} ${nFin === 1 ? "conta financeira" : "contas financeiras"} (cartão entra negativo); imóvel e alocação de patrimônio ficam fora.`)}</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
+          `${caixa < 0 ? "<b>Seu caixa está negativo</b> (o que você deve no cartão passou do saldo em conta), então a reserva aparece como zero. " : ""}Sempre de hoje, não do mês em foco — o app guarda o saldo atual das contas, não o saldo histórico. Caixa = as ${nFin} ${nFin === 1 ? "conta financeira" : "contas financeiras"} (cartão entra negativo); imóvel e alocação de patrimônio ficam fora${nFinFora ? `, e ${nFinFora === 1 ? "1 conta marcada" : nFinFora + " contas marcadas"} "fora do total" na aba Contas também` : ""}.`)}</span><span class="sl-op">≈</span><span class="sl-v num" style="color:${reserva == null ? "var(--subtle)" : reserva >= 6 ? "var(--pos)" : reserva >= 3 ? "var(--ink)" : "var(--neg)"}">${reserva == null ? "—" : reserva.toFixed(1).replace(".", ",") + " meses"}</span></div>
         <div class="stmt-row"><span class="sl-k">Receitas do mês ${xp("Receitas do mês", `tudo que entrou como receita em ${monthLabel(ym).toLowerCase()}`, `${_n(rec)}`, "Reembolso não conta aqui — ele abate a despesa, não é renda nova.")}</span><span class="sl-op">+</span><span class="sl-v num" style="color:var(--pos)">${fmtNum(rec)}</span></div>
         <div class="stmt-row total"><span class="sl-k">${p.corrente ? "Sobrou até agora" : "Sobrou no mês"} ${xp("Sobrou / taxa de poupança", "receitas − gasto, e quanto isso é da receita",
           `${_n(rec)} − ${_n(gasto)} = ${_n(res)}${poup != null ? `<br>${_n(res)} ÷ ${_n(rec)} = <b>${poup}%</b> da receita` : ""}`,
@@ -1516,11 +1520,19 @@ function acctMenuHTML(a) {
     <button data-acct-edit="${a.id}">${ic("pencil", 14)} Editar</button>
     <button data-acct-move="${a.id}:up">${ic("chevron-up", 14)} Mover pra cima</button>
     <button data-acct-move="${a.id}:down">${ic("chevron-down", 14)} Mover pra baixo</button>
+    ${a.grupo === "fin" ? `<button data-acct-fora="${a.id}">${ic(a.foraTotal ? "check" : "eye-off", 14)} ${a.foraTotal ? "Voltar a contar no total" : "Não contar no total"}</button>` : ""}
     <button class="danger" data-acct-archive="${a.id}">${ic("archive", 14)} Arquivar</button>
   </div>`;
 }
 function acctEditForm(a) {
   return `<div class="acct-edit"><label class="fld-label">Nome da conta</label><input class="acct-edit-input" value="${attr(a.nome)}" data-acct-input="${a.id}"><div class="acct-edit-actions"><button class="mini-btn primary" data-acct-save="${a.id}">Salvar</button><button class="mini-btn" data-acct-cancel>Cancelar</button></div></div>`;
+}
+// chave "no total / fora do total" no card da conta financeira — com rótulo, não só ícone (mesmo padrão da
+// chave "no mês" das categorias): quem olha o card entende sem abrir menu
+function acctForaFlag(a) {
+  if (a.grupo !== "fin") return "";
+  const off = !!a.foraTotal;
+  return `<button class="cn-flag af-flag${off ? " off" : ""}" data-acct-fora="${a.id}" title="${off ? "Fora do total das contas financeiras e da reserva. Clique para voltar a contar." : "Entra no total das contas financeiras e na reserva. Clique para tirar — use quando o dinheiro está numa conta sua mas não é seu pra gastar."}">${ic(off ? "eye-off" : "check", 11)} ${off ? "fora do total" : "no total"}</button>`;
 }
 function acctCard(a) {
   const kebab = `<button class="acct-kebab" data-acct-menu="${a.id}" title="Opções">${ic("more-vertical", 18)}</button>`;
@@ -1539,11 +1551,11 @@ function acctCard(a) {
     // carteira: total = caixa + investido (a mercado)
     const caixa = carteiraCaixa(a), invest = invInvestido(a), total = acctTotal(a);
     const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="alloc-lines"><div><span>Caixa</span><b class="num">${fmt(caixa)}</b></div><div><span>Investido (mercado)</span><b class="num">${fmt(invest)}</b></div></div><div class="alloc-val"><span>Total</span><strong class="num" style="color:${total < 0 ? C.despesa : "var(--ink)"}">${fmt(total)}</strong></div>`;
-    return `<div class="card acct"><div class="acct-top"><span class="acct-ic">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
+    return `<div class="card acct${a.foraTotal ? " af-off" : ""}"><div class="acct-top"><span class="acct-ic">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r">${acctForaFlag(a)}<span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
   }
   const saldo = acctTotal(a);
   const body = `<div class="acct-name">${a.nome}</div><div class="acct-sub">${a.sub}</div><div class="acct-saldo num" style="color:${saldo < 0 ? C.despesa : "var(--ink)"}">${fmt(saldo)}</div>`;
-  return `<div class="card acct"><div class="acct-top"><span class="acct-ic">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r"><span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
+  return `<div class="card acct${a.foraTotal ? " af-off" : ""}"><div class="acct-top"><span class="acct-ic">${ic(acctIconOf(a), 18)}</span><div class="acct-top-r">${acctForaFlag(a)}<span class="acct-chip ${a.tipo}">${chipLabel(a.tipo)}</span>${kebab}</div></div>${editing ? acctEditForm(a) : `<div class="acct-body" data-acct-open="${a.nome}">${body}</div>`}${acctMenuHTML(a)}</div>`;
 }
 const MES_NOMES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 function monthLabel(ym) { const m = +ym.slice(5, 7), y = ym.slice(0, 4); const nm = MES_NOMES[m - 1] || "—"; return `${nm.charAt(0).toUpperCase()}${nm.slice(1)} ${y}`; }
@@ -1705,13 +1717,15 @@ function viewContas() {
   const fin = active.filter((a) => a.grupo === "fin");
   const pat = active.filter((a) => a.grupo === "pat");
   const patTotal = pat.reduce((s, a) => s + acctTotal(a), 0);
-  const finTotal = fin.reduce((s, a) => s + acctTotal(a), 0);
+  const finFora = fin.filter((a) => a.foraTotal);
+  const finTotal = fin.filter((a) => !a.foraTotal).reduce((s, a) => s + acctTotal(a), 0);
+  const foraTotal = finFora.reduce((s, a) => s + acctTotal(a), 0);
   const archived = accounts.filter((a) => a.arquivada);
   const archBlock = archived.length ? `
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:var(--subtle)">Arquivadas</span><p>Ocultas do dia a dia e fora do patrimônio. Reative quando quiser.</p></div></div>
   <div class="archived-list">${archived.map((a) => `<div class="arch-row"><span class="acct-ic small">${ic(acctIconOf(a), 16)}</span><div class="arch-info"><div class="arch-name">${a.nome}</div><div class="acct-sub">${a.sub}</div></div><span class="num arch-saldo">${fmt(acctTotal(a))}</span><button class="mini-btn" data-acct-archive="${a.id}">${ic("archive", 13)} Desarquivar</button></div>`).join("")}</div>` : "";
   return `
-  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar, reordenar ou arquivar.</p></div><div class="lead-aside">${fin.length ? `<div class="lead-total"><span>Total</span><strong class="num">${fmt(finTotal)}</strong></div>` : ""}<button class="mini-btn" data-tipos-help>${ic("book", 13)} Sobre os tipos de conta</button></div></div>
+  <div class="section-lead"><div><span class="lead-eyebrow" style="color:${C.brand}">Contas financeiras</span><p>Clique numa conta pra ver os lançamentos dela. Use o ⋯ pra editar, reordenar ou arquivar. A chave <b>no total</b> tira/põe a conta no total ao lado e na reserva.</p></div><div class="lead-aside">${fin.length ? `<div class="lead-total"><span>Total</span><strong class="num">${fmt(finTotal)}</strong>${finFora.length ? `<small class="lead-fora" title="${attr(finFora.map((a) => a.nome).join(", "))}">fora: ${fmt(foraTotal)} em ${finFora.length} ${finFora.length === 1 ? "conta" : "contas"}</small>` : ""}</div>` : ""}<button class="mini-btn" data-tipos-help>${ic("book", 13)} Sobre os tipos de conta</button></div></div>
   <div class="acct-grid">${fin.map(acctCard).join("")}</div>
   <div class="section-lead alloc"><div><span class="lead-eyebrow" style="color:${C.patrimonio}">Alocações de patrimônio</span><p>Comprar um bem não é despesa: você transfere o dinheiro pra cá e ele vira patrimônio.</p></div>${pat.length ? `<div class="lead-total"><span>Total</span><strong class="num">${fmt(patTotal)}</strong></div>` : ""}</div>
   <div class="acct-grid">${pat.map(acctCard).join("")}<button class="card acct add-acct" data-add-acct>${ic("plus", 22)}<span>Nova conta ou alocação</span></button></div>
@@ -2280,12 +2294,12 @@ function _dayLabel(k) {
 }
 const _hhmm = (ts) => { const d = new Date(ts); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
 // campos exibíveis no diff (nome técnico → rótulo PT), na ordem que aparecem
-const HIST_FIELDS = { descricao: "descrição", valor: "valor", tipo: "tipo", cat: "categoria", sub: "subcategoria", conta: "conta", origem: "origem", destino: "destino", iso: "data", status: "status", nome: "nome", sub_: "sub", saldo: "saldo", parent_id: "categoria-pai", arquivada: "arquivada", ordem: "ordem", conta_no_mes: "entra no resultado do mês" };
+const HIST_FIELDS = { descricao: "descrição", valor: "valor", tipo: "tipo", cat: "categoria", sub: "subcategoria", conta: "conta", origem: "origem", destino: "destino", iso: "data", status: "status", nome: "nome", sub_: "sub", saldo: "saldo", parent_id: "categoria-pai", arquivada: "arquivada", ordem: "ordem", conta_no_mes: "entra no resultado do mês", fora_total: "fora do total" };
 function _fmtField(f, v) {
   if (v === null || v === undefined || v === "") return "vazio";
   if (f === "valor" || f === "saldo") return fmt(Number(v));
   if (f === "iso") return String(v).split("-").reverse().join("/");
-  if (f === "arquivada" || f === "conta_no_mes") return v === true || v === "true" ? "sim" : "não";
+  if (f === "arquivada" || f === "conta_no_mes" || f === "fora_total") return v === true || v === "true" ? "sim" : "não";
   return String(v);
 }
 function _histDiff(od, nd) {
@@ -2876,6 +2890,7 @@ function moveAcct(id, dir) {
 // `ordem` é o que o banco guarda (rowsToModel ordena por ele). Mexer só na posição do array não
 // persistia nada: no reload a ordem antiga voltava. Reindexa sempre que a lista muda.
 function reindexAccounts() { accounts.forEach((a, i) => { a.ordem = i; }); }
+function toggleAcctFora(id) { const a = acctById(id); if (a) { if (a.foraTotal) delete a.foraTotal; else a.foraTotal = true; } state.acctMenu = null; renderView(); }
 function toggleArchive(id) { const a = acctById(id); if (a) a.arquivada = !a.arquivada; state.acctMenu = null; refreshSideNet(); renderView(); }
 /* dashboard */
 function moveDash(key, dir) {
@@ -4561,6 +4576,8 @@ function wire() {
     if (e.target.closest("[data-acct-cancel]")) { cancelEditAcct(); return; }
     const aMove = e.target.closest("[data-acct-move]");
     if (aMove) { const [id, dir] = aMove.dataset.acctMove.split(":"); moveAcct(id, dir); return; }
+    const aFora = e.target.closest("[data-acct-fora]");
+    if (aFora) { toggleAcctFora(aFora.dataset.acctFora); return; }
     const aArch = e.target.closest("[data-acct-archive]");
     if (aArch) { toggleArchive(aArch.dataset.acctArchive); return; }
     const aOpen = e.target.closest("[data-acct-open]");
