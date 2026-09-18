@@ -501,8 +501,10 @@ const C_SALDO = "#8B7BD8"; // linha de saldo (roxo-azulado)
 // Fixo em 900, num card de 1460px o "meet" centralizava o desenho e sobrava tarja vazia dos dois lados.
 // Piso 900 (mobile/estreito continua como antes). O `resize` re-renderiza o dashboard (ver init).
 function wideChartW() {
-  const w = (typeof elView !== "undefined" && elView && elView.clientWidth) ? elView.clientWidth - 60 - 36 : 0;
-  return Math.max(900, Math.round(w));
+  const cw = (typeof elView !== "undefined" && elView && elView.clientWidth) ? elView.clientWidth : 0;
+  if (!cw) return 900;
+  const pad = cw <= 760 ? 32 : 60; // padding do .content (16px de cada lado no celular)
+  return Math.max(300, Math.round(cw - pad - 36));
 }
 function barChartSVG(data, sel, W = 520, H = 240, foco = -1) {
   const padL = 40, padR = 12, padT = 18, padB = 28, k = W / 520;
@@ -2211,7 +2213,11 @@ function viewConciliacao() {
     return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${learned}${inst}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
   }).join("");
   const addLine = `<button class="recon-add-line" data-recon-add>${ic("plus", 14)} Adicionar lançamento manualmente</button>`;
-  return bar + addLine + `<div class="recon-list">${list}</div>`;
+  // rodapé fixo (só aparece ≤760px, via CSS): no celular a lista é longa e o "Salvar"/"Aceitar pendentes"
+  // ficavam lá em cima — o usuário aceitava item por item e tinha que rolar tudo de volta pra salvar.
+  // Mesmos data-attributes dos botões da barra (nenhum handler novo).
+  const sticky = state.recon.length ? `<div class="recon-sticky"><span class="rs-prog num">${conc}/${totalR}</span>${pend ? `<button class="ghost" data-recon-accept-all>${ic("check", 14)} Aceitar ${pend}</button>` : ""}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${conc ? `Salvar ${conc}` : "Salvar"}</button></div>` : "";
+  return bar + addLine + `<div class="recon-list">${list}</div>${sticky}`;
 }
 
 function catDetailRow(t, hideSub) {

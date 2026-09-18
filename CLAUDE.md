@@ -277,6 +277,18 @@ tag e limpe as tabelas.
   isRemoteEmpty/seed/fetchAudit/user`) e appendar o `app.js` como `<script>` inline — aí
   `win.eval("state.tx")` e `win.eval("moveAcct('c5','up')")` funcionam e dá pra dirigir a UI de verdade
   (`<input type=file>` com `Object.defineProperty(inp,"files",…)` + `dispatchEvent(new Event("change"))`).
+  **Layout mobile sem automação de browser**: jsdom não faz layout, então pra ver corte/overflow em 390px
+  use **Chrome headless por linha de comando** (`--headless=new --screenshot`/`--dump-dom`, sem MCP): copie o
+  app pro scratchpad trocando `vendor/supabase.js`+`store.js` por um **`stub.js`** (Store falso + modelo
+  fictício de 6 meses) e um `scene.js` que lê `?tab=&scene=` (recon/acct/modal/edit) e chama `renderView()`.
+  ⚠️ o headless impõe **janela mínima de 500px** — embuta o app num **`<iframe width=390>`** (`frame.html`)
+  e recorte a captura; um modo `?debug=1` lista os elementos com `getBoundingClientRect().right > innerWidth`
+  (postMessage pro frame pai + `--dump-dom`). Foi assim que se achou o `1fr` (= `minmax(auto,1fr)`) da
+  `.dash-grid` alargando a coluna pra 432px — **em grid mobile use `minmax(0,1fr)`**.
+- **Mobile — regras que já quebraram**: `.recon-sticky` (rodapé fixo da conciliação com Aceitar N/Salvar N,
+  só ≤760px, `position:sticky;bottom`), `.recon-arrow` some ≤560, `.section-lead` quebra linha (o aside com
+  Total+botão espremia o parágrafo), topbar esconde o subtítulo ≤560, e `wideChartW()` usa a largura real do
+  card também no celular (viewBox 900 num card de 322px deixava o gráfico ilegível).
 
 ## Investimentos (carteira de ativos) — EM PRODUÇÃO
 Contas `tipo:"invest"` (carteiras/corretoras) registram **ativos** — ações/ETF/FII/renda fixa — em vez de

@@ -983,7 +983,8 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 /* faixa de ajuda no topo da aba Categorias */
 .cat-help{display:flex;gap:11px;align-items:flex-start;padding:14px 16px;margin-bottom:14px}
 .cat-help>svg{color:var(--brand);flex:none;margin-top:1px}
-.cat-help b{display:block;font-size:13px;margin-bottom:4px}
+.cat-help>div>b{display:block;font-size:13px;margin-bottom:4px}
+.cat-help span b{display:inline;font-weight:600;color:var(--ink)}
 .cat-help span{display:block;font-size:12px;line-height:1.6;color:var(--sub)}
 .cat-help i{font-style:normal;color:var(--ink)}
 /* aviso no topo do dashboard do que ficou fora do número */
@@ -1066,8 +1067,11 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 @media(max-width:560px){.rc-eq{display:none}.recon-check{gap:12px}}
 
 @media(max-width:940px){
-  .kpi-row{grid-template-columns:1fr 1fr}
-  .grid-2,.grid-2b,.cat-cols,.dash-grid{grid-template-columns:1fr}
+  /* minmax(0,1fr), NÃO 1fr: `1fr` = minmax(auto,1fr) e o conteúdo mínimo de um card (rosca + legenda lado a
+     lado, barra de potes) alargava a coluna pra 432px num viewport de 390 — todo card saía cortado à direita */
+  .kpi-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .grid-2,.grid-2b,.cat-cols,.dash-grid{grid-template-columns:minmax(0,1fr)}
+  .dash-grid>.card,.grid-2>.card,.grid-2b>.card{min-width:0}
   .content{padding:18px}
   .topbar{padding:16px 18px}
 }
@@ -1099,8 +1103,49 @@ html,body{margin:0;padding:0;background:#F1EEE4}
     background:var(--sidebar);border-top:1px solid #2A2A20;
     padding:8px 6px calc(8px + env(safe-area-inset-bottom))}
 }
+/* rodapé fixo da conciliação — existe no HTML sempre, mas só o celular mostra (ver media query) */
+.recon-sticky{display:none}
+@media(max-width:760px){
+  .recon-sticky{display:flex;align-items:center;gap:8px;position:sticky;bottom:calc(74px + env(safe-area-inset-bottom));z-index:40;
+    margin-top:12px;padding:10px 12px;background:var(--elev);border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+  .recon-sticky .rs-prog{font-size:12.5px;font-weight:700;color:var(--sub);flex:none}
+  .recon-sticky .ghost{flex:1;justify-content:center;white-space:nowrap}
+  .recon-sticky .recon-save{flex:1.2;justify-content:center}
+}
 @media(max-width:560px){
-  .kpi-row{grid-template-columns:1fr 1fr;gap:12px}
+  .kpi-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+  /* topbar: o subtítulo repetia o mês (a faixa do mês já diz) e empurrava tudo pra 3 linhas */
+  .topbar p{display:none}
+  .topbar{align-items:center}
+  .month{white-space:nowrap;padding:7px 10px;font-size:12.5px}
+  /* cabeçalho de seção (Contas): o aside (Total + botão) não cabia ao lado do texto e espremia o parágrafo
+     numa coluna de uma palavra por linha */
+  .section-lead{flex-wrap:wrap}
+  .section-lead p{max-width:none}
+  .lead-aside{width:100%;justify-content:space-between}
+  /* rosca: o nav do mês vai pra linha de baixo em vez de espremer o título (e o "?" ir sozinho pra outra linha) */
+  .cat-donut-card .card-head{flex-wrap:wrap;gap:6px}
+  .cd-nav{margin-left:auto;white-space:nowrap}
+  .legend{flex-wrap:wrap;gap:8px 14px}
+  .legend span{white-space:nowrap}
+  /* conciliação: card compacto — sem a seta (era só decoração e custava 30px de altura), data·descrição·valor
+     numa linha, botões ocupando a largura */
+  .recon-main{padding:12px 14px;gap:8px}
+  .recon-arrow{display:none}
+  .recon-raw{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;align-items:baseline}
+  .recon-raw .raw-label{grid-column:1/-1}
+  .recon-raw .raw-val{margin-top:0;font-size:14px;white-space:nowrap}
+  .recon-sug{padding-top:10px}
+  .recon-actions{padding:10px 14px;flex-wrap:wrap}
+  .recon-actions .act.accept{flex:1;justify-content:center}
+  .recon-actions .conc-tag,.recon-actions .skip-tag{flex:1}
+  .recon-bar{flex-wrap:wrap;gap:12px;padding:14px}
+  .recon-bar-acts{width:100%;flex-wrap:wrap}
+  .recon-bar-acts .ghost{flex:1;justify-content:center;white-space:nowrap}
+  .recon-bar-acts .recon-save{flex:1 1 100%;justify-content:center}
+  /* extrato da conta: "caixa · aplicado · mercado · total" do mês quebra linha em vez de vazar */
+  .month-div{flex-wrap:wrap;row-gap:4px}
+  .md-bal{white-space:normal;margin-left:0}
   .stmt-main{grid-template-columns:1fr;gap:18px}
   .stmt-ledger{min-width:0}
   .stmt-big{font-size:34px}
