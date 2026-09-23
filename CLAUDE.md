@@ -285,6 +285,17 @@ tag e limpe as tabelas.
   e recorte a captura; um modo `?debug=1` lista os elementos com `getBoundingClientRect().right > innerWidth`
   (postMessage pro frame pai + `--dump-dom`). Foi assim que se achou o `1fr` (= `minmax(auto,1fr)`) da
   `.dash-grid` alargando a coluna pra 432px — **em grid mobile use `minmax(0,1fr)`**.
+- **Reset de botão em `:where()` — não volte pra `.fin-root button`** (bug real, set/2026, achado num print de
+  celular em tema CLARO: "botões inferiores meio apagados"). `.fin-root button{background:none;color:inherit}`
+  tem especificidade **(0,1,1)** e por isso **vence toda regra de UMA classe só (0,1,0)** — silenciosamente
+  apagando cor/fundo de **~100 botões** (`.cta`, `.cta-side`, `.auth-btn`, `.recon-save`, `.ghost`, `.mini-btn`,
+  `.mnav-i`, `.mnav-fab`, `.chip`, `.imv-btn`…). Regras com 2 classes ou atributo (`.act.accept`,
+  `.recon-save[disabled]`, `.mnav-i.on`) escapavam, o que fazia o defeito **parecer proposital**. No tema
+  ESCURO passava batido (o `color:inherit` cai em `--ink`, que é claro); no CLARO os itens inativos da barra
+  inferior viravam quase-preto sobre a barra escura e o FAB perdia o dourado. Correção: o reset virou
+  **`:where(.fin-root button)`** = especificidade **zero**, então qualquer regra de componente ganha (o reset
+  segue valendo sobre o estilo do navegador, que é sempre mais fraco que autor). **Auditoria**: script que
+  cruza as classes usadas em `<button>` com as regras de uma classe só que declaram color/background.
 - **Mobile — regras que já quebraram**: `.recon-sticky` (rodapé fixo da conciliação com Aceitar N/Salvar N,
   só ≤760px, `position:sticky;bottom`), `.recon-arrow` some ≤560, `.section-lead` quebra linha (o aside com
   Total+botão espremia o parágrafo), topbar esconde o subtítulo ≤560, e `wideChartW()` usa a largura real do

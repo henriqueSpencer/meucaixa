@@ -19,8 +19,14 @@ html,body{margin:0;padding:0;background:#F1EEE4}
     --sidebar:#16160F;--elev:#2A2A20;
     --pos:#4FB07A;--neg:#D9604B}
 }
+/* RESET DE BOTÃO EM `:where()` = especificidade ZERO. Sem isso o seletor era `.fin-root button` (0,1,1),
+   que VENCE toda regra de uma classe só (0,1,0) — e `background:none;color:inherit` apagava o estilo de ~100
+   botões: o FAB da barra mobile virava um círculo escuro, os itens inativos da barra herdavam `--ink`
+   (invisíveis sobre a barra escura no tema CLARO — o bug relatado), e `.cta`/`.recon-save`/`.auth-btn`
+   perdiam o preenchimento. Regras com 2 classes (`.act.accept`, `.recon-save[disabled]`) escapavam, o que
+   deixava o defeito parecendo proposital. */
 .fin-root .num{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
-.fin-root button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+:where(.fin-root button){font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
 .fin-root h1,.fin-root h3{font-family:'Space Grotesk','Inter',sans-serif;letter-spacing:-.01em}
 .fin-root :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:6px}
 .fin-root svg{display:inline-block;vertical-align:middle;flex-shrink:0}
@@ -55,7 +61,7 @@ html,body{margin:0;padding:0;background:#F1EEE4}
 /* ---- barra de navegação mobile + backdrop da gaveta (escondidos no desktop) ---- */
 .mnav{display:none}
 .nav-backdrop{display:none}
-.mnav-i{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;flex:1;padding:6px 2px;color:#8A8B7C;font-size:10.5px;font-weight:600;position:relative;transition:.14s;-webkit-tap-highlight-color:transparent}
+.mnav-i{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;flex:1;padding:6px 2px;color:#9A9C8B;font-size:10.5px;font-weight:600;position:relative;transition:.14s;-webkit-tap-highlight-color:transparent}
 .mnav-i.on{color:#E3C77E}
 .mnav-i:active{opacity:.6}
 .mnav-more{position:relative}

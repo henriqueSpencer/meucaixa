@@ -1054,7 +1054,7 @@ function blkForaDoPadrao() {
     <div class="card-head"><div><h3>Fora do padrão neste mês ${xp("O que entra nesta lista",
       "categorias em que o gasto de hoje passou do ritmo delas",
       `base: os últimos ${nBase} meses fechados<br>entra quem está <b>≥ R$ 50</b> acima do esperado <b>e</b> esse excedente vale <b>≥ 25%</b> de um mês típico da categoria`,
-      "Os dois cortes juntos evitam encher a lista de ruído: R$ 60 a mais numa categoria de R$ 2.000 não muda decisão nenhuma.")}</h3><span class="card-sub">comparado ao ritmo dos últimos ${nBase} meses fechados, no dia ${p.dia} de ${p.dias}</span></div></div>
+      "Os dois cortes juntos evitam encher a lista de ruído: R$ 60 a mais numa categoria de R$ 2.000 não muda decisão nenhuma.")}</h3><span class="card-sub">${nBase ? `comparado ao ritmo ${nBase === 1 ? "do último mês fechado" : `dos últimos ${nBase} meses fechados`}, no dia ${p.dia} de ${p.dias}` : `no dia ${p.dia} de ${p.dias} — ainda sem mês fechado pra comparar`}</span></div></div>
     <div class="fp-list">${body}</div>
   </div>`;
 }
