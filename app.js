@@ -29,14 +29,11 @@ const OF = (typeof window !== "undefined" && window.OF_DATA) ? window.OF_DATA : 
 const REF_LABEL = OF ? OF.refMonthLabel : "Julho";
 
 /* ---------- 2. dados ---------- */
-const accounts = OF ? OF.accounts : [
-  { id: "cc", nome: "Conta Corrente", sub: "Nubank", tipo: "banco", saldo: 8450, grupo: "fin" },
-  { id: "pp", nome: "Poupança", sub: "Caixa", tipo: "banco", saldo: 22300, grupo: "fin" },
-  { id: "cred", nome: "Cartão de Crédito", sub: "Fatura em aberto", tipo: "cartao", saldo: -3180, grupo: "fin" },
-  { id: "cart", nome: "Carteira", sub: "Dinheiro", tipo: "dinheiro", saldo: 320, grupo: "fin" },
-  { id: "inv", nome: "Investimentos", sub: "Tesouro & CDB", tipo: "invest", saldo: 45700, grupo: "fin" },
-  { id: "carro", nome: "Carro — Honda City", sub: "Alocação de patrimônio", tipo: "patrimonio", saldo: 78000, grupo: "pat", alocado: 82000, custo: -4000 },
-];
+// ⚠️ O mock abaixo é APENAS fallback de desenvolvimento (com `dados.js`/OF_DATA). Em produção o modelo
+// começa VAZIO e só é preenchido por `applyModel()` com o que veio do servidor/IndexedDB. Motivo (bug real,
+// 23/09/2026): com o mock em memória, um `saveState()` disparado ANTES do `applyModel` gravava o snapshot
+// com os dados falsos e o sync os empurrava pro servidor como lançamentos genuínos — uma conta real
+// amanheceu com "Pró-labore", "iFood" e "Carro — Honda City". Sem payload falso, o acidente não existe.
 
 const monthly = OF ? OF.monthly : [
   { mes: "Fev", receita: 14200, despesa: 9800 },
@@ -67,37 +64,10 @@ const despesaPorCat = OF ? OF.despesaPorCat : [
   { nome: "Pessoal", valor: 370 },
 ];
 
-const catTree = OF ? OF.catTree : {
-  receita: [
-    { nome: "Trabalho", subs: ["Pró-labore PJ", "Freelance", "Consultoria"], total: 15800 },
-    { nome: "Rendimentos", subs: ["Juros", "Dividendos"], total: 0 },
-    { nome: "Reembolsos", subs: ["Despesas de cliente", "Outros"], total: 540 },
-    { nome: "Vendas", subs: ["Itens usados"], total: 0 },
-  ],
-  despesa: [
-    { nome: "Moradia", subs: ["Aluguel", "Condomínio", "Energia", "Internet"], total: 2690 },
-    { nome: "Alimentação", subs: ["Supermercado", "Restaurante", "Delivery"], total: 1980 },
-    { nome: "Transporte", subs: ["Combustível", "Aplicativos", "Manutenção", "Passagens"], total: 1120 },
-    { nome: "Impostos & Contabilidade", subs: ["DAS Simples", "Contabilidade"], total: 890 },
-    { nome: "Saúde", subs: ["Plano", "Farmácia", "Consultas"], total: 760 },
-    { nome: "Lazer", subs: ["Streaming", "Bares", "Viagens"], total: 640 },
-    { nome: "Educação", subs: ["Cursos", "Livros"], total: 450 },
-    { nome: "Pessoal", subs: ["Assinaturas", "Roupas"], total: 370 },
-  ],
-};
+const accounts = OF ? OF.accounts : [];
 
-const initialTx = OF ? OF.tx : [
-  { id: 1, data: "15/07", desc: "Pró-labore", tipo: "receita", cat: "Trabalho", sub: "Pró-labore PJ", conta: "Conta Corrente", valor: 12000, status: "conciliado" },
-  { id: 2, data: "14/07", desc: "iFood", tipo: "despesa", cat: "Alimentação", sub: "Delivery", conta: "Cartão de Crédito", valor: -68.9, status: "conciliado" },
-  { id: 3, data: "13/07", desc: "Aporte investimentos", tipo: "transferencia", origem: "Conta Corrente", destino: "Investimentos", valor: 3000, status: "conciliado" },
-  { id: 4, data: "12/07", desc: "Posto Shell", tipo: "despesa", cat: "Transporte", sub: "Combustível", conta: "Cartão de Crédito", valor: -220, status: "pendente" },
-  { id: 5, data: "11/07", desc: "Reembolso viagem cliente", tipo: "reembolso", cat: "Transporte", sub: "Passagens", conta: "Conta Corrente", valor: 540, status: "conciliado" },
-  { id: 6, data: "10/07", desc: "Aluguel", tipo: "despesa", cat: "Moradia", sub: "Aluguel", conta: "Conta Corrente", valor: -1800, status: "conciliado" },
-  { id: 7, data: "09/07", desc: "DAS Simples Nacional", tipo: "despesa", cat: "Impostos & Contabilidade", sub: "DAS Simples", conta: "Conta Corrente", valor: -890, status: "conciliado" },
-  { id: 8, data: "05/07", desc: "Freela edtech", tipo: "receita", cat: "Trabalho", sub: "Freelance", conta: "Conta Corrente", valor: 3800, status: "conciliado" },
-  { id: 9, data: "03/07", desc: "Nordestão", tipo: "despesa", cat: "Alimentação", sub: "Supermercado", conta: "Cartão de Crédito", valor: -412, status: "conciliado" },
-  { id: 10, data: "01/07", desc: "Compra do carro", tipo: "transferencia", origem: "Conta Corrente", destino: "Carro — Honda City", valor: 82000, status: "conciliado", nota: "Alocação de patrimônio" },
-];
+const catTree = OF ? OF.catTree : { receita: [], despesa: [] };
+const initialTx = OF ? OF.tx : [];
 
 accounts.forEach((a, i) => { if (a.arquivada === undefined) a.arquivada = false; a.ordem = i; });
 // movimentos de ativos (compra/venda) das contas de investimento — a posição/preço-médio é derivada
@@ -2730,7 +2700,15 @@ function applyModel(m) {
 // e o rodapé ainda dizia "os 300 mais recentes". Data desc; sem data vai pro fim.
 function sortTx() { state.tx.sort((a, b) => (b.iso || "").localeCompare(a.iso || "")); }
 let _saveT = null;
-function saveState() { if (window.Store && Store.isAuthed()) Store.saveSnapshot(currentModel()); }
+// GRAVAR SÓ DEPOIS QUE O BOOT ADOTOU UM MODELO REAL. `renderView()` chama `scheduleSave()`, então qualquer
+// render que aconteça antes do `applyModel()` gravaria — e empurraria — o modelo em memória, que naquele
+// instante não representa a conta de ninguém. Foi assim que dados de exemplo apareceram numa conta real
+// (23/09/2026). Fora do boot completo, o app é só-leitura.
+let _bootDone = false;
+function saveState() {
+  if (!_bootDone) return;
+  if (window.Store && Store.isAuthed()) Store.saveSnapshot(currentModel());
+}
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
 
 function renderView() {
@@ -5029,6 +5007,7 @@ async function boot() {
   maybeStartTour();
   // cotações frescas em segundo plano (só se houver ativos lançados)
   if (hasHoldings()) { fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); }
+  _bootDone = true; // a partir daqui o modelo em memória é o da conta — gravar é seguro (ver saveState)
   // pull em segundo plano: se outro aparelho mudou, atualiza a tela — mas NÃO re-renderiza por cima de um
   // fluxo transitório aberto (modal/conciliação de extrato/conciliação da B3), senão a tela "pisca" e some.
   Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); if (!(state.modal || state.imported || state.assetRecon)) renderView(); } }).catch(() => {});

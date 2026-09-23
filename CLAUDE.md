@@ -285,6 +285,20 @@ tag e limpe as tabelas.
   e recorte a captura; um modo `?debug=1` lista os elementos com `getBoundingClientRect().right > innerWidth`
   (postMessage pro frame pai + `--dump-dom`). Foi assim que se achou o `1fr` (= `minmax(auto,1fr)`) da
   `.dash-grid` alargando a coluna pra 432px — **em grid mobile use `minmax(0,1fr)`**.
+- **O mock de dev NÃO existe em produção** (incidente 23/09/2026 — leia antes de mexer no boot). A conta de
+  uma usuária real amanheceu com "Pró-labore", "iFood" e "Carro — Honda City": eram os `const` mock do topo
+  do `app.js`, que em produção (`OF` nulo) eram o **modelo inicial em memória**. Como `renderView()` termina
+  em `scheduleSave()`, qualquer render ANTES do `applyModel()` gravava o snapshot com o mock e o sync o
+  empurrava como lançamentos genuínos. O merge 3-vias salvou o que ela já tinha (remoto vence), mas as
+  linhas que ela **não** tinha entraram: 4 contas, 38 categorias, 10 lançamentos (`iso` nulo, ids `1..10` —
+  assinatura do mock). Três camadas de correção: (1) `accounts`/`catTree`/`initialTx` começam **vazios**
+  sem `OF` e os blocos mock foram **apagados** — sem payload falso o acidente não existe; (2) **`_bootDone`**:
+  `saveState()` não grava nada antes do boot adotar um modelo real (fora disso o app é só-leitura);
+  (3) **`isRemoteEmpty()` exige PROVA** — `sb.auth.getUser()` valida a sessão no servidor (sem JWT o
+  PostgREST devolve 0 linhas por RLS **sem erro**, e conta cheia parecia nova), `count == null` deixou de
+  contar como zero, e agora olha **todas** as tabelas. Regressão em `t_seed.js` (scratchpad): store+app
+  reais contra um Supabase falso que devolve vazio na "janela ruim" — **falha no código anterior**
+  (semeia 4 contas + 50 categorias + 15 lançamentos numa conta com dados) e passa no corrigido.
 - **Reset de botão em `:where()` — não volte pra `.fin-root button`** (bug real, set/2026, achado num print de
   celular em tema CLARO: "botões inferiores meio apagados"). `.fin-root button{background:none;color:inherit}`
   tem especificidade **(0,1,1)** e por isso **vence toda regra de UMA classe só (0,1,0)** — silenciosamente

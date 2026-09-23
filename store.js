@@ -199,7 +199,7 @@
   //     seguinte do modelo em memória — velho — tirava do snapshot as linhas recém-chegadas, e o
   //     sync mandava TOMBSTONE delas (56 lançamentos + 1 subcategoria apagados no servidor).
   //     O bump descarta qualquer snapshot possivelmente defasado e re-puxa tudo.
-  const SYNC_VERSION = 6;
+  const SYNC_VERSION = 7; // 7: incidente 23/09/2026 — força descartar snapshot local que possa conter o mock de dev
   // acima disto, uma leva de exclusões é tratada como suspeita e exige reconciliação antes de subir
   const BULK_DEL_MAX = 15;
   let _bulkDelOk = false;
@@ -448,10 +448,23 @@
 
   // usuário nunca fez onboarding? (0 contas) → semeia o starter. Checa CONTAS, não transações:
   // um usuário pode ter categorias/contas sem nenhum lançamento ainda.
+  // Só devolve `true` com PROVA de que a conta está vazia. Qualquer dúvida vira exceção — o chamador
+  // trata como "não sei" e NÃO semeia. Semear por engano escreve dados falsos na conta de alguém.
+  // Três armadilhas que a versão antiga tinha:
+  //  (1) sem JWT válido o PostgREST devolve 0 linhas por RLS, SEM erro → conta cheia parecia nova.
+  //      `getUser()` valida a sessão no servidor e é a única forma de descartar isso.
+  //  (2) `count` pode vir `null` (resposta sem o cabeçalho de contagem); `count || 0` tratava isso como zero.
+  //  (3) olhava só `accounts` — agora qualquer vestígio em qualquer tabela já desqualifica.
   async function isRemoteEmpty() {
-    const { count, error } = await sb.from("accounts").select("id", { count: "exact", head: true });
-    if (error) throw error;
-    return (count || 0) === 0;
+    const { data: u, error: uerr } = await sb.auth.getUser();
+    if (uerr || !u || !u.user || !u.user.id || u.user.id !== userId) throw new Error("sessão não confirmada");
+    for (const t of TABLES) {
+      const { count, error } = await sb.from(t).select("id", { count: "exact", head: true });
+      if (error) throw error;
+      if (count == null) throw new Error("contagem indisponível em " + t);
+      if (count > 0) return false;
+    }
+    return true;
   }
   async function seed(model) {
     await saveSnapshot(model);
