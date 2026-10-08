@@ -540,6 +540,18 @@ recarregada devido a um problema", 08/10/2026) — sem nenhum erro no console, s
 Com a paginação: 100KB/render, trocar categoria 301→35ms, heap final 132MB. `reconAcceptAll`, o saldo
 projetado e o batimento seguem valendo sobre **todos** os itens, não só os desenhados. Mesmo remédio que a
 conciliação da B3 já tinha.
+**NUNCA redesenhe a tela DENTRO do handler do evento** (causa raiz do travamento de 08/10/2026, confirmada
+pelos logs do usuário). `renderView()` troca `elView.innerHTML` — isso **destrói o próprio `<select>`/botão
+que está despachando o evento**, com o menu nativo ainda se desfazendo. Com a lista toda aberta (146 cards,
+358KB, 5453 nós) o **Safari mata a aba**: sem erro de JS, sem laço de render, sem crescimento de memória —
+o log simplesmente para. Por isso só os campos que redesenham (`cat`, `tipo`, `imovelId`) quebravam, e os
+que não redesenham (sub, conta, data, descrição) não. Duas defesas: (1) **`renderViewSoon()`** — tira o
+redesenho do despacho (`setTimeout 0` + `blur()`), usado em TODA ação de clique/change que troca a lista
+(recon e conciliação da B3); (2) **`reconCardHTML(r)` + `reconPatchCards(ids)`** — abrir/fechar edição e
+trocar `cat`/`imovelId` trocam **só o card mexido** (`outerHTML`), não os 146. `tipo` ainda faz render
+completo porque muda o sinal → mexe no saldo projetado. Se o card não estiver na página desenhada,
+`reconPatchCards` cai no render completo. Validado em jsdom com os extratos reais: um card distante
+mantém a MESMA referência de nó depois de editar outro.
 **Diagnóstico embutido** (`app.js`, sempre ligado): `mclog()` grava um anel de eventos **em `localStorage`**
 (`mc_log`; no arranque o anterior vira `mc_log_prev`) — essencial porque quando o Safari mata a aba por
 memória o console é apagado junto e não sobra rastro. Registra: arranque (com `APP_VERSION`, pra flagrar

@@ -2118,6 +2118,71 @@ function viewAssetRecon() {
   }).join("");
   return bar + `<div class="ar-groups">${groups}</div>`;
 }
+// HTML de UM card da conciliação. Extraído do `map` pra poder redesenhar só o card mexido em vez da
+// lista inteira: com os 146 itens abertos, um render completo troca ~358KB de HTML e destrói o próprio
+// botão/select que está despachando o evento — o Safari derruba a aba (08/10/2026).
+// Redesenhar DENTRO do handler do evento destrói o elemento que está despachando (o <select> com o menu
+// nativo ainda se desfazendo, ou o próprio botão clicado). Com a lista inteira aberta isso derruba a aba no
+// Safari, sem erro de JS. Estes dois helpers tiram o redesenho de dentro do despacho — e, quando dá, trocam
+// só o card mexido em vez dos 146.
+let _rvSoon = null;
+function renderViewSoon() {
+  if (_rvSoon) return;
+  _rvSoon = setTimeout(() => { _rvSoon = null; try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {} renderView(); }, 0);
+}
+// troca o HTML de UM card (ou de alguns) sem tocar no resto da lista
+function reconPatchCards(ids) {
+  setTimeout(() => {
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
+    let faltou = false;
+    [...new Set(ids.filter(Boolean))].forEach((id) => {
+      const r = state.recon.find((x) => String(x.id) === String(id));
+      const el = document.querySelector(`[data-recon-id="${id}"]`);
+      if (!r || !el) { faltou = true; return; }
+      el.outerHTML = reconCardHTML(r);
+    });
+    if (faltou) renderView(); // item fora da página desenhada → cai no render completo
+    mclog("conciliação: card redesenhado", { ids: ids.filter(Boolean).join(",") });
+  }, 0);
+}
+function reconCardHTML(r) {
+    const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
+    const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
+    const catList = r.sug.tipo === "receita" ? catTree.receita : catTree.despesa;
+    const curCat = catList.find((c) => c.nome === r.sug.cat);
+    const subs = curCat ? curCat.subs : [];
+    const sug = !isEdit
+      ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat}${r.sug.sub ? ` <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span>` : ""} <span class="dot">·</span> ${r.sug.conta}</span>`}${imvReconTag(r.sug)}</div>`
+      : `<div class="edit-body">
+          <input data-recon-field="desc" value="${attr(r.raw)}" placeholder="Descrição">
+          <div class="edit-row"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><input type="date" data-recon-field="data" value="${r.iso || ""}"></div>
+          ${r.sug.tipo === "transferencia"
+            ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
+            : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>${imvReconFieldHTML(r.sug)}<button class="sp-open-btn" data-recon-split="${r.id}" title="Ex.: um PIX que junta dois aluguéis">✂ Dividir em vários lançamentos</button>`}
+        </div>`;
+    // de onde veio a sugestão: mostra o lançamento seu que serviu de régua (transparência > mágica)
+    const learned = r.aprend && !isEdit
+      ? (r.aprend.regra
+        ? `<div class="recon-learn">${ic("sparkles", 12)} pelo tipo de estabelecimento — você ainda não lançou nada parecido</div>`
+        : `<div class="recon-learn">${ic("sparkles", 12)} como você classificou <b>“${_esc(String(r.aprend.exemplo).slice(0, 42))}${String(r.aprend.exemplo).length > 42 ? "…" : ""}”</b>${r.aprend.n > 1 ? ` <span class="dot">·</span> ${r.aprend.n} lançamentos parecidos` : ""}</div>`)
+      : "";
+    const match = r.match && !isEdit ? `<div class="recon-match${r.matchId != null ? " click" : ""}"${r.matchId != null ? ` data-tx-open="${r.matchId}"` : ""}>${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b>${r.matchId != null ? ` ${ic("arrow-right", 12)}` : ""}</div>` : "";
+    const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
+    const inst = r.note ? `<div class="recon-inst">${ic("circle-alert", 12)} ${r.note}</div>` : "";
+    // corrigiu um item? o mesmo estabelecimento costuma vir várias vezes no extrato — oferece aplicar
+    // a correção a todos os parecidos de uma vez (nada é gravado até "Salvar conciliação")
+    const simN = isEdit ? reconSimilares(r).length : 0;
+    const actions = isEdit
+      ? `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Salvar</button>${simN ? `<button class="act accept alt" data-recon-accept-similar="${r.id}" title="Usa esta mesma categoria nos outros lançamentos do extrato com descrição parecida">${ic("sparkles", 13)} e nos ${simN} parecidos</button>` : ""}<button class="act edit" data-recon-edit="${r.id}">${ic("x", 13)} Cancelar</button>`
+      : done
+        ? `<span class="conc-tag">${ic("check", 14)} Conciliado</span><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-reactivate="${r.id}" title="Desfazer">${ic("undo", 13)}</button>`
+        : skip
+          ? `<span class="skip-tag">${r.note ? "Parcela pulada" : "Ignorado"}</span><button class="act edit" data-recon-reactivate="${r.id}">reativar</button>`
+          : `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Aceitar</button><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-ignore="${r.id}">${ic("x", 13)}</button>`;
+    const rawDate = r.iso ? r.iso.split("-").reverse().join("/") : "";
+    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${learned}${inst}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
+}
+
 function viewConciliacao() {
   if (!state.imported) {
     if (!state.reconAccount) state.reconAccount = (accounts.find((a) => !a.arquivada) || {}).nome;
@@ -2229,43 +2294,7 @@ function viewConciliacao() {
   if (iEdit >= mostra) mostra = iEdit + 1; // o item em edição nunca pode ficar fora da página
   const visiveis = state.recon.slice(0, mostra);
   const restantes = state.recon.length - visiveis.length;
-  const list = visiveis.map((r) => {
-    const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
-    const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
-    const catList = r.sug.tipo === "receita" ? catTree.receita : catTree.despesa;
-    const curCat = catList.find((c) => c.nome === r.sug.cat);
-    const subs = curCat ? curCat.subs : [];
-    const sug = !isEdit
-      ? `<div class="sug-body">${badgeHTML(r.sug.tipo, true)}${r.sug.tipo === "transferencia" ? `<span class="sug-cat">${r.sug.origem} ${ic("arrow-right", 12)} ${r.sug.destino}</span>` : `<span class="sug-cat">${r.sug.cat}${r.sug.sub ? ` <span class="dot">·</span> <span class="muted2">${r.sug.sub}</span>` : ""} <span class="dot">·</span> ${r.sug.conta}</span>`}${imvReconTag(r.sug)}</div>`
-      : `<div class="edit-body">
-          <input data-recon-field="desc" value="${attr(r.raw)}" placeholder="Descrição">
-          <div class="edit-row"><select data-recon-field="tipo">${Object.keys(TIPOS).map((k) => `<option ${k === r.sug.tipo ? "selected" : ""}>${TIPOS[k].label}</option>`).join("")}</select><input type="date" data-recon-field="data" value="${r.iso || ""}"></div>
-          ${r.sug.tipo === "transferencia"
-            ? `<div class="edit-row edit-tf"><select data-recon-field="origem">${acctOptions(r.sug.origem || r.sug.conta || state.reconAccount)}</select><span class="tf-mini">${ic("arrow-right", 14)}</span><select data-recon-field="destino">${acctOptions(r.sug.destino || "")}</select></div>`
-            : `<div class="edit-row"><select data-recon-field="cat">${catList.map((c) => `<option ${c.nome === r.sug.cat ? "selected" : ""}>${c.nome}</option>`).join("")}</select><select data-recon-field="sub">${["", ...subs].map((s) => `<option value="${s}" ${s === (r.sug.sub || "") ? "selected" : ""}>${s || "— sem subcategoria —"}</option>`).join("")}</select></div><select data-recon-field="conta">${acctOptions(r.sug.conta || r.sug.destino)}</select>${imvReconFieldHTML(r.sug)}<button class="sp-open-btn" data-recon-split="${r.id}" title="Ex.: um PIX que junta dois aluguéis">✂ Dividir em vários lançamentos</button>`}
-        </div>`;
-    // de onde veio a sugestão: mostra o lançamento seu que serviu de régua (transparência > mágica)
-    const learned = r.aprend && !isEdit
-      ? (r.aprend.regra
-        ? `<div class="recon-learn">${ic("sparkles", 12)} pelo tipo de estabelecimento — você ainda não lançou nada parecido</div>`
-        : `<div class="recon-learn">${ic("sparkles", 12)} como você classificou <b>“${_esc(String(r.aprend.exemplo).slice(0, 42))}${String(r.aprend.exemplo).length > 42 ? "…" : ""}”</b>${r.aprend.n > 1 ? ` <span class="dot">·</span> ${r.aprend.n} lançamentos parecidos` : ""}</div>`)
-      : "";
-    const match = r.match && !isEdit ? `<div class="recon-match${r.matchId != null ? " click" : ""}"${r.matchId != null ? ` data-tx-open="${r.matchId}"` : ""}>${ic("circle-alert", 12)} corresponde a um lançamento existente: <b>${r.match}</b>${r.matchId != null ? ` ${ic("arrow-right", 12)}` : ""}</div>` : "";
-    const hint = r.sug.tipo === "transferencia" && !isEdit ? `<div class="recon-hint">não entra como despesa — só move saldo</div>` : "";
-    const inst = r.note ? `<div class="recon-inst">${ic("circle-alert", 12)} ${r.note}</div>` : "";
-    // corrigiu um item? o mesmo estabelecimento costuma vir várias vezes no extrato — oferece aplicar
-    // a correção a todos os parecidos de uma vez (nada é gravado até "Salvar conciliação")
-    const simN = isEdit ? reconSimilares(r).length : 0;
-    const actions = isEdit
-      ? `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Salvar</button>${simN ? `<button class="act accept alt" data-recon-accept-similar="${r.id}" title="Usa esta mesma categoria nos outros lançamentos do extrato com descrição parecida">${ic("sparkles", 13)} e nos ${simN} parecidos</button>` : ""}<button class="act edit" data-recon-edit="${r.id}">${ic("x", 13)} Cancelar</button>`
-      : done
-        ? `<span class="conc-tag">${ic("check", 14)} Conciliado</span><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-reactivate="${r.id}" title="Desfazer">${ic("undo", 13)}</button>`
-        : skip
-          ? `<span class="skip-tag">${r.note ? "Parcela pulada" : "Ignorado"}</span><button class="act edit" data-recon-reactivate="${r.id}">reativar</button>`
-          : `<button class="act accept" data-recon-accept="${r.id}">${ic("check", 14)} Aceitar</button><button class="act edit" data-recon-edit="${r.id}">${ic("pencil", 13)} Editar</button><button class="act skip-btn" data-recon-ignore="${r.id}">${ic("x", 13)}</button>`;
-    const rawDate = r.iso ? r.iso.split("-").reverse().join("/") : "";
-    return `<div class="card recon${done ? " done" : ""}${skip ? " skip" : ""}" data-recon-id="${r.id}"><div class="recon-main"><div class="recon-raw"><div class="raw-label">no extrato${rawDate ? ` · ${rawDate}` : ""}</div><div class="raw-desc">${r.raw}</div><div class="raw-val num" style="color:${r.valor < 0 ? "var(--neg)" : "var(--pos)"}">${fmt(r.valor)}</div></div><div class="recon-arrow">${ic("sparkles", 15)}</div><div class="recon-sug"><div class="raw-label">sugestão · <span style="color:${confCor};font-weight:700">${r.conf}% confiança</span></div>${sug}${learned}${inst}${match}${hint}</div></div><div class="recon-actions">${actions}</div></div>`;
-  }).join("");
+  const list = visiveis.map(reconCardHTML).join("");
   const addLine = `<button class="recon-add-line" data-recon-add>${ic("plus", 14)} Adicionar lançamento manualmente</button>`;
   // rodapé fixo (só aparece ≤760px, via CSS): no celular a lista é longa e o "Salvar"/"Aceitar pendentes"
   // ficavam lá em cima — o usuário aceitava item por item e tinha que rolar tudo de volta pra salvar.
@@ -3388,8 +3417,8 @@ function assetReconAcceptBroker(broker) {
   ar.rows.forEach((r) => { if (r.broker === broker && r.status === "pendente" && r.contaId) r.status = "conciliado"; });
   state.editing = null; renderView();
 }
-function assetReconToggleGroup(broker) { state.arCollapsed = state.arCollapsed || {}; state.arCollapsed[broker] = !state.arCollapsed[broker]; renderView(); }
-function assetReconMoreGroup(broker) { state.arPage = state.arPage || {}; state.arPage[broker] = (state.arPage[broker] || 30) + 30; renderView(); }
+function assetReconToggleGroup(broker) { state.arCollapsed = state.arCollapsed || {}; state.arCollapsed[broker] = !state.arCollapsed[broker]; renderViewSoon(); }
+function assetReconMoreGroup(broker) { state.arPage = state.arPage || {}; state.arPage[broker] = (state.arPage[broker] || 30) + 30; renderViewSoon(); }
 // (re)calcula, por linha: a conta destino (via broker→conta) e se já existe naquela conta (dedup). Chamado ao
 // abrir e a cada mudança do mapa — não roda a cada render (senão apagaria aceitar/ignorar manuais).
 function assetReconDedupAll(onlyBroker) {
@@ -3409,7 +3438,7 @@ function assetReconSetBroker(broker, contaId) {
   const ar = state.assetRecon; if (!ar) return;
   if (contaId === "__new__") { contaId = createInvestAccount(broker); scheduleSave(); }
   ar.brokerMap[broker] = contaId;
-  assetReconDedupAll(broker); state.editing = null; renderView();
+  assetReconDedupAll(broker); state.editing = null; renderViewSoon();
 }
 // cria uma conta tipo investimento na hora (usada pelo de-para "criar carteira")
 function createInvestAccount(nome) {
@@ -3444,7 +3473,7 @@ function assetReconProjByConta() {
     return { conta: a, totals, posArr, nProv: provs.length, provTot: provs.reduce((s, r) => s + numOr0(r.valor), 0), nTrade: meus.length - provs.length };
   }).filter(Boolean);
 }
-function assetReconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
+function assetReconEdit(id) { state.editing = state.editing === id ? null : id; renderViewSoon(); }
 function assetReconAccept(id) {
   const ar = state.assetRecon; if (!ar) return;
   const r = ar.rows.find((x) => x.id === id); if (!r) return;
@@ -3461,9 +3490,9 @@ function assetReconAccept(id) {
   }
   r.status = r.contaId ? "conciliado" : "pendente"; renderView(); // sem conta mapeada não dá pra aceitar
 }
-function assetReconIgnore(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "ignorado"; state.editing = null; renderView(); }
-function assetReconReactivate(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "pendente"; state.editing = null; renderView(); }
-function assetReconAcceptAll() { state.assetRecon.rows.forEach((r) => { if (r.status === "pendente" && r.contaId) r.status = "conciliado"; }); state.editing = null; renderView(); }
+function assetReconIgnore(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "ignorado"; state.editing = null; renderViewSoon(); }
+function assetReconReactivate(id) { const r = state.assetRecon.rows.find((x) => x.id === id); if (r) r.status = "pendente"; state.editing = null; renderViewSoon(); }
+function assetReconAcceptAll() { state.assetRecon.rows.forEach((r) => { if (r.status === "pendente" && r.contaId) r.status = "conciliado"; }); state.editing = null; renderViewSoon(); }
 // provento → {qtd, preco} guardados no ledger. Guardamos a QUANTIDADE de ativos que gerou o provento
 // (ex.: 44 cotas) e o preço = valor/qtd, pra qtd×preco reproduzir o valor LÍQUIDO recebido (no JCP o
 // "preço unitário" da B3 é bruto, antes do IR — por isso derivamos do valor líquido). Sem qtd → qtd=1.
@@ -3692,7 +3721,9 @@ function reconFieldChange(id, field, value) {
   else if (field === "imovelId") { r.sug.imovelId = value; r.sug.unidadeId = ""; } // troca imóvel → some/aparece a unidade
   // fora da categoria de imóvel de renda o imóvel não faz sentido → limpa (senão sobraria etiqueta órfã)
   if (r.sug.cat !== IMV_CAT) { r.sug.imovelId = ""; r.sug.unidadeId = ""; }
-  renderView();
+  // `tipo` muda o sinal do item → mexe no saldo projetado e no batimento: precisa redesenhar a tela toda.
+  // `cat`/`imovelId` não mexem em nenhum total — basta trocar o card.
+  if (field === "tipo") renderViewSoon(); else reconPatchCards([id]);
 }
 // lê os campos da edição inline aberta e devolve o patch pro item (vazio se não está editando)
 function reconPatchFromEdit(id, r0) {
@@ -3712,7 +3743,7 @@ function reconAccept(id) {
   const patch = reconPatchFromEdit(id, r0);
   // aceitar é uma decisão reversível — nada é gravado até "Salvar conciliação" (reconCommit)
   state.recon = state.recon.map((r) => (r.id === id ? { ...r, ...patch, status: "conciliado" } : r));
-  state.editing = null; renderView();
+  state.editing = null; renderViewSoon();
 }
 // semelhança simples entre duas listas de tokens (Jaccard) — aqui os dois lados vêm do MESMO extrato,
 // então não precisa do IDF do histórico
@@ -3745,12 +3776,12 @@ function reconAcceptSimilar(id) {
   state.editing = null; renderView();
 }
 // aceita de uma vez tudo que está pendente (o caminho normal quando o extrato traz muitos itens novos)
-function reconAcceptAll() { state.recon = state.recon.map((r) => (r.status === "pendente" ? { ...r, status: "conciliado" } : r)); state.editing = null; renderView(); }
+function reconAcceptAll() { state.recon = state.recon.map((r) => (r.status === "pendente" ? { ...r, status: "conciliado" } : r)); state.editing = null; renderViewSoon(); }
 // "importar mesmo assim": aceita também os que vieram com ✕ por já existirem. Continua pulando as
 // parcelas n>1 (o total já entrou na 1ª — aceitá-las lançaria o valor em dobro de verdade).
-function reconAcceptDup() { state.recon = state.recon.map((r) => (r.status === "ignorado" && r.match && !r.pulado ? { ...r, status: "conciliado" } : r)); state.editing = null; renderView(); }
-function reconIgnore(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "ignorado" } : r)); state.editing = null; renderView(); }
-function reconReactivate(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "pendente" } : r)); state.editing = null; renderView(); }
+function reconAcceptDup() { state.recon = state.recon.map((r) => (r.status === "ignorado" && r.match && !r.pulado ? { ...r, status: "conciliado" } : r)); state.editing = null; renderViewSoon(); }
+function reconIgnore(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "ignorado" } : r)); state.editing = null; renderViewSoon(); }
+function reconReactivate(id) { state.recon = state.recon.map((r) => (r.id === id ? { ...r, status: "pendente" } : r)); state.editing = null; renderViewSoon(); }
 // grava de vez: cria TODOS os lançamentos aceitos e encerra a sessão.
 // Item com correspondência já vem com ✕ (proteção contra duplicata), mas se o usuário reativou e
 // aceitou, ele QUER importar — antes o commit filtrava `!r.match` e simplesmente não criava nada,
@@ -3772,9 +3803,14 @@ function reconCommit() {
   state.recon = []; state.reconFiles = []; state.imported = false; state.reconAccount = null; state.editing = null; state.reconBank = "";
   state.reconDone = { criados: novos.length, dup, bat };
   refreshSideNet();
-  renderView();
+  renderViewSoon();
 }
-function reconEdit(id) { state.editing = state.editing === id ? null : id; renderView(); }
+function reconEdit(id) {
+  const antes = state.editing;                       // o card que estava aberto também precisa voltar ao normal
+  state.editing = state.editing === id ? null : id;
+  mclog("conciliação: abrir/fechar edição", { id, abertoAntes: antes || null });
+  reconPatchCards([antes, id]);
+}
 
 /* ---------- dividir um item da conciliação em vários lançamentos ----------
    ex.: um PIX de 1950 que junta o aluguel de dois imóveis. Cada parte vira um item de conciliação
@@ -4657,7 +4693,7 @@ function wire() {
     if (e.target.closest("[data-nav-close]")) { document.querySelector(".fin-root").classList.remove("nav-open"); return; }
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn) { document.querySelector(".fin-root").classList.remove("nav-open"); if (tabBtn.dataset.tab !== "conciliacao") state.reconFrom = null; state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
-    if (e.target.closest("[data-recon-more]")) { state.reconPage = (state.reconPage || 40) + 40; renderView(); return; }
+    if (e.target.closest("[data-recon-more]")) { state.reconPage = (state.reconPage || 40) + 40; renderViewSoon(); return; }
     if (e.target.closest("[data-crash-reset-recon]")) { crashResetRecon(); return; }
     if (e.target.closest("[data-crash-home]")) { state._erro = null; state.tab = "dashboard"; state.acctDetail = null; state.assetRecon = null; state.catDetail = null; state.editing = null; renderView(); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
@@ -4856,7 +4892,7 @@ function wire() {
       const patch = { classe: amc.value, contaId: g("conta") || state.pop.contaId, data: g("data"), ticker: g("ticker"), nome: g("nome") };
       const q = g("qtd"), pr = g("preco"), vl = g("valor");
       if (q !== undefined) patch.qtd = q; if (pr !== undefined) patch.preco = pr; if (vl !== undefined) patch.valor = vl;
-      Object.assign(state.pop, patch); renderPop();
+      Object.assign(state.pop, patch); setTimeout(renderPop, 0); // fora do change: o <select> está se desfazendo
     }
     // conciliação de ativos: trocar a carteira de destino → re-dedup
     const arMap = e.target.closest("[data-ar-map]");
