@@ -2145,7 +2145,18 @@ function viewConciliacao() {
     : `<strong>${conc} de ${totalR} conciliados</strong><span>${ign} ignorados</span>`;
   const voltarLabel = semArquivo ? "Importar arquivo" : "Reimportar";
   const bar = head + check + jaImportado + `<div class="recon-bar card"><div class="recon-prog"><div class="recon-prog-head">${progHead}</div><div class="bar"><span style="width:${totalR ? (conc / totalR) * 100 : 0}%"></span></div>${resumo}</div><div class="recon-bar-acts"><button class="ghost" data-action="reimport">${voltarLabel}</button>${acceptAll}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${saveLabel}</button></div></div>`;
-  const list = state.recon.map((r) => {
+  // PAGINAÇÃO (mesmo remédio da conciliação da B3). Dois extratos juntos dão ~150 itens e o `buildRecon`
+  // aceita até 300: renderizar todos gerava ~350KB de HTML POR RENDER, e cada clique (abrir edição, trocar
+  // categoria, aceitar) redesenha a lista inteira. Medido com os arquivos reais do usuário: 300ms e dezenas
+  // de MB por interação, heap 70→235MB em 3 cliques — o Safari do celular derrubava a aba
+  // ("Esta página web foi recarregada devido a um problema", 08/10/2026).
+  const RECON_PAGE = 40;
+  let mostra = state.reconPage || RECON_PAGE;
+  const iEdit = state.editing ? state.recon.findIndex((r) => r.id === state.editing) : -1;
+  if (iEdit >= mostra) mostra = iEdit + 1; // o item em edição nunca pode ficar fora da página
+  const visiveis = state.recon.slice(0, mostra);
+  const restantes = state.recon.length - visiveis.length;
+  const list = visiveis.map((r) => {
     const confCor = r.conf >= 90 ? C.receita : r.conf >= 75 ? C.patrimonio : C.despesa;
     const done = r.status === "conciliado", skip = r.status === "ignorado", isEdit = state.editing === r.id;
     const catList = r.sug.tipo === "receita" ? catTree.receita : catTree.despesa;
@@ -2187,7 +2198,10 @@ function viewConciliacao() {
   // ficavam lá em cima — o usuário aceitava item por item e tinha que rolar tudo de volta pra salvar.
   // Mesmos data-attributes dos botões da barra (nenhum handler novo).
   const sticky = state.recon.length ? `<div class="recon-sticky"><span class="rs-prog num">${conc}/${totalR}</span>${pend ? `<button class="ghost" data-recon-accept-all>${ic("check", 14)} Aceitar ${pend}</button>` : ""}<button class="recon-save" data-recon-commit ${conc ? "" : "disabled"}>${ic("check", 15)} ${conc ? `Salvar ${conc}` : "Salvar"}</button></div>` : "";
-  return bar + addLine + `<div class="recon-list">${list}</div>${sticky}`;
+  const maisBtn = restantes
+    ? `<button class="recon-add-line" data-recon-more>${ic("chevron-down", 14)} Mostrar mais ${Math.min(restantes, RECON_PAGE)} de ${restantes} restantes</button>`
+    : "";
+  return bar + addLine + `<div class="recon-list">${list}</div>${maisBtn}${sticky}`;
 }
 
 function catDetailRow(t, hideSub) {
@@ -2638,6 +2652,7 @@ const state = {
   imported: false, reconAccount: null, reconFiles: [], reconDone: null, modalRecon: false,
   reconFrom: null, // conta de onde o usuário abriu a conciliação (atalho "voltar pra conta")
   reconBank: "", // saldo real digitado do app do banco (batimento contra o projetado)
+  reconPage: 0,  // quantos cards da conciliação estão desenhados (paginação — ver viewConciliacao)
   filter: "todas",
   modal: false,
   modalTipo: "despesa",
@@ -4390,7 +4405,7 @@ const ACTIONS = {
     state.reconAccount = sel ? sel.value : (accounts.find((a) => !a.arquivada) || {}).nome;
     const all = reconAllParsed();
     if (!all.length) return; // sem arquivos lidos não há o que importar (botão fica desabilitado)
-    state.recon = buildRecon(all, state.reconAccount);
+    state.recon = buildRecon(all, state.reconAccount); state.reconPage = 0;
     state.imported = true; state.editing = null; renderView();
   },
   // prosseguir SEM arquivo: entra na conciliação com a lista vazia — pra conferir o saldo do banco
@@ -4399,10 +4414,10 @@ const ACTIONS = {
     state.reconDone = null; state.reconBank = "";
     const sel = document.querySelector("[data-imp-acct]");
     state.reconAccount = sel ? sel.value : (accounts.find((a) => !a.arquivada) || {}).nome;
-    state.recon = []; state.reconFiles = [];
+    state.recon = []; state.reconFiles = []; state.reconPage = 0;
     state.imported = true; state.editing = null; renderView();
   },
-  "reimport": () => { state.imported = false; state.recon = []; state.reconAccount = null; state.reconFiles = []; state.editing = null; state.reconBank = ""; renderView(); }, // limpa a lista tb (senão o badge fica aceso)
+  "reimport": () => { state.imported = false; state.recon = []; state.reconPage = 0; state.reconAccount = null; state.reconFiles = []; state.editing = null; state.reconBank = ""; renderView(); }, // limpa a lista tb (senão o badge fica aceso)
 };
 
 function wire() {
@@ -4560,6 +4575,7 @@ function wire() {
     if (e.target.closest("[data-nav-close]")) { document.querySelector(".fin-root").classList.remove("nav-open"); return; }
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn) { document.querySelector(".fin-root").classList.remove("nav-open"); if (tabBtn.dataset.tab !== "conciliacao") state.reconFrom = null; state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
+    if (e.target.closest("[data-recon-more]")) { state.reconPage = (state.reconPage || 40) + 40; renderView(); return; }
     if (e.target.closest("[data-crash-reset-recon]")) { crashResetRecon(); return; }
     if (e.target.closest("[data-crash-home]")) { state._erro = null; state.tab = "dashboard"; state.acctDetail = null; state.assetRecon = null; state.catDetail = null; state.editing = null; renderView(); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }

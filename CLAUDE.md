@@ -531,6 +531,21 @@ Consequência: reativar um correspondente soma no projetado por cima do saldo
 que já o reflete (o projetado vira "total dos ativos", não previsão exata do saldo pós-save) — comportamento
 pedido explicitamente.
 
+**A lista da conciliação PAGINA** (`RECON_PAGE=40`, `state.reconPage`, botão "Mostrar mais N de M restantes";
+o item em edição é sempre puxado pra página). Sem isso, importar **dois extratos de uma vez** (set+out = 146
+itens; o `buildRecon` aceita até 300) gerava **~350KB de HTML por render** — e cada clique (abrir edição,
+trocar categoria, aceitar) redesenha a lista inteira. Medido com os arquivos reais: 300ms e dezenas de MB por
+interação, heap 70→235MB em 3 cliques; o **Safari do celular derrubava a aba** ("Esta página web foi
+recarregada devido a um problema", 08/10/2026) — sem nenhum erro no console, só pulls repetidos no Network.
+Com a paginação: 100KB/render, trocar categoria 301→35ms, heap final 132MB. `reconAcceptAll`, o saldo
+projetado e o batimento seguem valendo sobre **todos** os itens, não só os desenhados. Mesmo remédio que a
+conciliação da B3 já tinha.
+**Disjuntor do sync** (`store.js`): um `sync()` que aborta (guarda anti-corrida / `_pendingApply` / trava de
+exclusão) se re-agendava a cada 1,5s e, como o cursor só avança no fim, cada rodada **re-baixava o banco
+inteiro**. Agora `syncAbortou(motivo)` aplica backoff 1,5→3→6→12→30→60s, avisa no console a partir da 3ª
+tentativa e **`Store.diag()`** devolve `{abortosSeguidos, ultimoMotivo, cursor, pendingApply, difGuard}` —
+`difGuard` diz QUAL tabela divergiu e se foi só a ordem. `syncOk()` zera nos dois caminhos de sucesso.
+
 **Batimento com o banco** (`.recon-check`, card logo abaixo do `recon-head`): o usuário digita em
 **"Saldo no banco"** (`state.reconBank`, texto cru) o saldo que está vendo no app do banco e o MeuCaixa
 mostra **`banco − saldo projetado`**; **zero ⇒ "Bate na vírgula"**, senão mostra a diferença assinada + o

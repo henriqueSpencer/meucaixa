@@ -314,7 +314,7 @@
       // o sync trouxe estado do servidor que o app ainda não aplicou. Gravar o modelo em memória
       // agora apagaria do snapshot as linhas recém-chegadas — e o próximo sync as empurraria como
       // TOMBSTONE (foi assim que 56 lançamentos sumiram em 14/09/2026). Pede a reaplicação e sai.
-      notifyStale(); scheduleSync();
+      notifyStale(); syncAbortou("app ainda não aplicou o estado vindo do servidor (_pendingApply)");
       return;
     }
     const curV = (await kvGet("snapVersion")) || 0;
@@ -343,7 +343,29 @@
   }
   function stopAutoSync() { if (syncTimer) clearInterval(syncTimer); syncTimer = null; }
   let syncSched = null;
-  function scheduleSync() { clearTimeout(syncSched); syncSched = setTimeout(() => sync().catch(() => {}), 1500); }
+  // DISJUNTOR DO SYNC. Um sync que aborta (guarda anti-corrida, _pendingApply, trava de exclusão) se
+  // re-agendava a cada 1,5s — e como o cursor só avança no fim, cada rodada re-baixava o BANCO INTEIRO.
+  // Em laço isso derruba a aba por memória (Safari: "Esta página web foi recarregada devido a um
+  // problema", relato real 08/10/2026). Agora o intervalo cresce a cada aborto seguido e estaciona em 60s.
+  let _abortos = 0, _ultimoAborto = "";
+  const BACKOFF = [1500, 3000, 6000, 12000, 30000, 60000];
+  function syncAbortou(motivo) {
+    _ultimoAborto = motivo; _abortos++;
+    if (_abortos === 3 || _abortos % 10 === 0) {
+      try { console.warn(`[MeuCaixa] sync não conclui há ${_abortos} tentativas seguidas (motivo: ${motivo}). Rode Store.diag() e mande o resultado.`); } catch (e) {}
+    }
+    scheduleSync(BACKOFF[Math.min(_abortos - 1, BACKOFF.length - 1)]);
+  }
+  function syncOk() { _abortos = 0; _ultimoAborto = ""; }
+  // diagnóstico pro usuário colar no suporte: diz se o sync está travado e por quê
+  async function diag() {
+    const snap = await readSnapshot();
+    return { abortosSeguidos: _abortos, ultimoMotivo: _ultimoAborto || "(nenhum)",
+      cursor: (await kvGet("cursor")) || null, pendingApply: _pendingApply, snapVersion: _snapVer,
+      temSnapshot: !!snap, difDoGuard: _difGuard || null, syncVersion: SYNC_VERSION };
+  }
+  let _difGuard = null;
+  function scheduleSync(ms) { clearTimeout(syncSched); syncSched = setTimeout(() => sync().catch(() => {}), ms || 1500); }
 
   const EPOCH = "1970-01-01T00:00:00Z";
   // PostgREST corta em 1000 linhas/requisição → pagina com .range() até esgotar.
@@ -402,7 +424,7 @@
       if (tombs >= BULK_DEL_MAX && !_bulkDelOk) {
         _bulkDelOk = true;                 // a próxima rodada, já reconciliada, pode prosseguir
         await kvSet("cursor", EPOCH);      // força reconstruir o estado remoto inteiro
-        notifyStale(); scheduleSync();
+        notifyStale(); syncAbortou("trava de exclusão em massa (" + tombs + " tombstones)");
         return { pulled: false, blockedDeletes: tombs };
       }
       if (tombs < BULK_DEL_MAX) _bulkDelOk = false;
@@ -420,8 +442,25 @@
       // 4) Persistência local. Guarda anti-corrida: se o snapshot mudou DURANTE o sync (edição do
       // usuário / outra aba), não aplica o merge nem avança o cursor — reconcilia no próximo ciclo.
       const latest = await readSnapshot();
-      const localUnchanged = JSON.stringify(latest ? modelToRows(latest) : localRows) === JSON.stringify(localRows);
-      if (!localUnchanged) { scheduleSync(); return { pulled: false }; }
+      const latestRows = latest ? modelToRows(latest) : localRows;
+      const localUnchanged = JSON.stringify(latestRows) === JSON.stringify(localRows);
+      if (!localUnchanged) {
+        // registra a PRIMEIRA diferença — sem isso um laço aqui é invisível e indistinguível de "o app
+        // está lento". `difGuard` sai no Store.diag().
+        _difGuard = null;
+        for (const t of TABLES) {
+          const a = JSON.stringify(localRows[t] || []), b = JSON.stringify(latestRows[t] || []);
+          if (a === b) continue;
+          const sa = new Set((localRows[t] || []).map((r) => JSON.stringify(r)));
+          const sb2 = new Set((latestRows[t] || []).map((r) => JSON.stringify(r)));
+          const add = [...sb2].filter((x) => !sa.has(x)), rem = [...sa].filter((x) => !sb2.has(x));
+          _difGuard = { tabela: t, novas: add.length, sumidas: rem.length,
+            mesmaOrdem: add.length === 0 && rem.length === 0, exemplo: (add[0] || rem[0] || "").slice(0, 220) };
+          break;
+        }
+        syncAbortou("snapshot mudou durante o sync" + (_difGuard ? ` (${_difGuard.tabela}${_difGuard.mesmaOrdem ? ", só a ORDEM mudou" : `: +${_difGuard.novas}/-${_difGuard.sumidas}`})` : ""));
+        return { pulled: false };
+      }
 
       if (remoteChanged) {
         const model2 = rowsToModel(merged);
@@ -436,12 +475,14 @@
         // sync() também recebe `model` no retorno, mas o autosync (timer/visibilitychange/
         // scheduleSync) descarta o retorno — sem este aviso o app nunca saberia.
         if (_staleCb) _pendingApply = nv;
+        syncOk();
         notifyStale();
         return { pulled: true, model: model2 };
       }
       // servidor inalterado: se empurramos algo, a baseline agora é o que o servidor passou a ter.
       if (pushed) await kvSet("lastSynced", merged);
       await kvSet("cursor", maxTs);
+      syncOk();
       return { pulled: false };
     } finally { syncing = false; }
   }
@@ -490,6 +531,7 @@
   async function deleteDoc(path) { if (sb) { try { await sb.storage.from("imovel-docs").remove([path]); } catch (e) {} } }
 
   window.Store = {
+    diag,
     init, onAuth, onStale, isAuthed, signIn, signInWithGoogle, signInPassword, signUpPassword, setPassword, updateName, fetchAudit, isAdmin, adminOverview, signOut,
     loadSnapshot, saveSnapshot, sync, isRemoteEmpty, seed, uploadDoc, docSignedUrl, deleteDoc,
     get userId() { return userId; },
