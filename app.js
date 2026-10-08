@@ -2711,7 +2711,46 @@ function saveState() {
 }
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
 
+// REDE DE PROTEÇÃO DA TELA. Sem isto, uma exceção em qualquer view deixava o usuário preso: o
+// `elView.innerHTML` nunca era substituído, a tela "não saía do lugar" e trocar de aba não adiantava
+// porque o render quebrava de novo — foi o que aconteceu com uma conciliação em 08/10/2026. Agora o erro
+// é mostrado com saídas claras (recomeçar a conciliação / voltar ao início) e o detalhe técnico fica
+// visível pra copiar. Também guarda em `state._erro` pra aparecer mesmo se o erro veio de outro caminho.
+let _emCrash = false;
 function renderView() {
+  if (_emCrash) return; // nunca re-entra (um erro dentro da própria tela de erro congelaria o app)
+  try {
+    renderViewInner();
+  } catch (e) {
+    state._erro = { msg: String((e && e.message) || e), stack: String((e && e.stack) || ""), tela: state.tab, quando: new Date().toISOString() };
+    try { console.error("[MeuCaixa] falha ao desenhar a tela", state.tab, e); } catch (_) {}
+    _emCrash = true;
+    try { if (elView) elView.innerHTML = viewCrash(state._erro); } catch (_) {}
+    _emCrash = false;
+  }
+}
+// tela de recuperação: diz o que quebrou e oferece as duas saídas que resolvem na prática
+function viewCrash(err) {
+  const emRecon = !!(state.imported || (state.recon && state.recon.length));
+  return `<div class="card hist-empty" style="text-align:left">
+    <h3>${ic("circle-alert", 18)} Algo quebrou ao desenhar esta tela</h3>
+    <p style="max-width:62ch;margin:8px 0 0">Seus dados estão a salvo — nada foi apagado e nada foi gravado errado. O que falhou foi só o desenho da tela${emRecon ? ", provavelmente a conciliação em andamento" : ""}.</p>
+    <div class="acct-actions" style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      ${emRecon ? `<button class="mini-btn primary" data-crash-reset-recon>${ic("rotate", 14)} Recomeçar a conciliação</button>` : ""}
+      <button class="mini-btn" data-crash-home>${ic("layout", 14)} Voltar ao início</button>
+    </div>
+    <details style="margin-top:16px"><summary class="card-sub" style="cursor:pointer">Detalhe técnico (copie e mande pro suporte)</summary>
+      <pre class="he-sys" style="white-space:pre-wrap;margin-top:8px;font-size:11.5px">${_esc(err.tela + " · " + err.msg + "\n" + err.stack)}</pre>
+    </details>
+  </div>`;
+}
+// zera SÓ o estado transitório da conciliação (nada do modelo é tocado)
+function crashResetRecon() {
+  state.recon = []; state.imported = false; state.editing = null; state.reconFiles = [];
+  state.reconBank = ""; state.reconDone = null; state.assetRecon = null; state.modal = false; state.pop = null;
+  state._erro = null; renderView(); renderModal(); renderPop();
+}
+function renderViewInner() {
   // módulo de imóveis é opcional (flag em Configurações): esconde a aba e cai no dashboard se desligado
   const niEl = document.getElementById("nav-imoveis"); if (niEl) niEl.style.display = imvEnabled() ? "" : "none";
   if (imvEnabled()) { let ch = imvEnsureCategories(); ch = imvLinkOrphanAccounts() || ch; if (ch) scheduleSave(); }
@@ -4521,6 +4560,8 @@ function wire() {
     if (e.target.closest("[data-nav-close]")) { document.querySelector(".fin-root").classList.remove("nav-open"); return; }
     const tabBtn = e.target.closest("[data-tab]");
     if (tabBtn) { document.querySelector(".fin-root").classList.remove("nav-open"); if (tabBtn.dataset.tab !== "conciliacao") state.reconFrom = null; state.tab = tabBtn.dataset.tab; state.acctDetail = null; state.acctMenu = null; state.acctEdit = null; state.catDetail = null; state.assetRecon = null; renderView(); if (state.tab === "historico") loadHistorico(true); if (state.tab === "admin") loadAdmin(true); if (state.tab === "patrimonial" && hasHoldings()) { if (!quotesTs) fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); } return; }
+    if (e.target.closest("[data-crash-reset-recon]")) { crashResetRecon(); return; }
+    if (e.target.closest("[data-crash-home]")) { state._erro = null; state.tab = "dashboard"; state.acctDetail = null; state.assetRecon = null; state.catDetail = null; state.editing = null; renderView(); return; }
     if (e.target.closest("[data-hist-refresh]")) { loadHistorico(true); return; }
     if (e.target.closest("[data-hist-more]")) { loadHistoricoMore(); return; }
     const hall = e.target.closest("[data-hist-day-all]");
@@ -5000,6 +5041,10 @@ async function boot() {
   refreshDataLabels();
   hideAuth(); // remove o "carregando", se estava
   if (!_wired) { wire(); _wired = true; }
+  // ANTES de desenhar: o modelo em memória já é o da conta, então gravar é seguro. Se ficasse depois do
+  // render, uma exceção de desenho deixaria `saveState()` mudo PARA SEMPRE e o usuário perderia tudo que
+  // fizesse na sessão sem nenhum aviso.
+  _bootDone = true;
   renderView(); renderModal(); renderPop();
   // é admin? (RPC no banco) → revela a aba Admin. Silencioso pra quem não é.
   if (Store.isAdmin) Store.isAdmin().then((ok) => { state.isAdmin = !!ok; updateAdminNav(); }).catch(() => {});
@@ -5007,7 +5052,6 @@ async function boot() {
   maybeStartTour();
   // cotações frescas em segundo plano (só se houver ativos lançados)
   if (hasHoldings()) { fetchQuotes().then((ok) => { if (ok) { refreshSideNet(); renderView(); } }); fetchHistory().then((ok) => { if (ok) renderView(); }); }
-  _bootDone = true; // a partir daqui o modelo em memória é o da conta — gravar é seguro (ver saveState)
   // pull em segundo plano: se outro aparelho mudou, atualiza a tela — mas NÃO re-renderiza por cima de um
   // fluxo transitório aberto (modal/conciliação de extrato/conciliação da B3), senão a tela "pisca" e some.
   Store.sync().then((r) => { if (r && r.pulled && r.model) { applyModel(r.model); refreshDataLabels(); if (!(state.modal || state.imported || state.assetRecon)) renderView(); } }).catch(() => {});

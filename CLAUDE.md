@@ -285,6 +285,16 @@ tag e limpe as tabelas.
   e recorte a captura; um modo `?debug=1` lista os elementos com `getBoundingClientRect().right > innerWidth`
   (postMessage pro frame pai + `--dump-dom`). Foi assim que se achou o `1fr` (= `minmax(auto,1fr)`) da
   `.dash-grid` alargando a coluna pra 432px — **em grid mobile use `minmax(0,1fr)`**.
+- **Rede de proteção da tela (`renderView` → `renderViewInner`)**: uma exceção em qualquer view deixava o
+  usuário PRESO — o `elView.innerHTML` nunca era substituído, a tela "não saía do lugar" e trocar de aba
+  não resolvia porque o render quebrava de novo (relato real, 08/10/2026: "bugou tudo e não consigo mais
+  ir pra conciliação"). Agora `renderView` é um wrapper com try/catch que desenha `viewCrash()`: explica
+  que os dados estão a salvo, oferece **"Recomeçar a conciliação"** (`crashResetRecon` — zera só o estado
+  transitório: recon/imported/editing/reconFiles/reconBank/assetRecon) e **"Voltar ao início"**, e mostra o
+  stack num `<details>` pra copiar. Guarda em `state._erro`. O flag `_emCrash` impede re-entrada (um erro
+  dentro da própria tela de erro congelaria tudo). **`_bootDone` é setado ANTES do primeiro `renderView()`**
+  do boot — se ficasse depois, uma exceção de desenho deixaria `saveState()` mudo pra sempre e o usuário
+  perderia silenciosamente tudo que fizesse na sessão.
 - **O mock de dev NÃO existe em produção** (incidente 23/09/2026 — leia antes de mexer no boot). A conta de
   uma usuária real amanheceu com "Pró-labore", "iFood" e "Carro — Honda City": eram os `const` mock do topo
   do `app.js`, que em produção (`OF` nulo) eram o **modelo inicial em memória**. Como `renderView()` termina
