@@ -2255,6 +2255,7 @@ function viewConciliacao() {
   const jaExistem = state.recon.filter((r) => r.match).length;
   const puladas = state.recon.filter((r) => !r.match && r.pulado).length;
   const novosTot = state.recon.filter((r) => !r.match && !r.pulado).length;
+  const autoIgns = state.recon.filter((r) => r.autoIgn).length;
   const pend = state.recon.filter((r) => r.status === "pendente").length;
   const nManuais = state.recon.filter((r) => r.manual).length;
   // "sem arquivo": entrou pra conferir saldo / lançar à mão (nenhum extrato lido). Não faz sentido
@@ -2262,7 +2263,7 @@ function viewConciliacao() {
   const semArquivo = nLidos === 0;
   const resumo = semArquivo
     ? `<div class="recon-sum">Confira o saldo no banco acima e adicione o que estiver faltando${nManuais ? ` · <b>${nManuais}</b> ${nManuais === 1 ? "lançamento manual" : "lançamentos manuais"}` : ""}.</div>`
-    : `<div class="recon-sum"><b>${nLidos}</b> ${nLidos === 1 ? "lançamento lido" : "lançamentos lidos"} · <b>${novosTot}</b> ${novosTot === 1 ? "novo" : "novos"} · <b>${jaExistem}</b> já ${jaExistem === 1 ? "existia" : "existiam"} no MeuCaixa${puladas ? ` · <b>${puladas}</b> ${puladas === 1 ? "parcela pulada" : "parcelas puladas"}` : ""}</div>`;
+    : `<div class="recon-sum"><b>${nLidos}</b> ${nLidos === 1 ? "lançamento lido" : "lançamentos lidos"} · <b>${novosTot}</b> ${novosTot === 1 ? "novo" : "novos"} · <b>${jaExistem}</b> já ${jaExistem === 1 ? "existia" : "existiam"} no MeuCaixa${autoIgns ? ` · <b>${autoIgns}</b> ${autoIgns === 1 ? "aplicação automática desativada" : "aplicações automáticas desativadas"}` : ""}${puladas ? ` · <b>${puladas}</b> ${puladas === 1 ? "parcela pulada" : "parcelas puladas"}` : ""}</div>`;
   // aviso de extrato já importado: diz quantos já existem e de quando são, e dá a saída explícita
   // (importar mesmo assim). O ✕ é só a proteção padrão — a decisão continua sendo do usuário.
   const dupsAbertos = state.recon.filter((r) => r.match && r.status === "ignorado" && !r.pulado).length;
@@ -4365,6 +4366,10 @@ function parseInstallment(desc) {
   if (tot < 2 || tot > 24 || n < 1 || n > tot) return null;
   return { n, m: tot };
 }
+// Descrições que chegam DESATIVADAS na conciliação: varredura automática do próprio banco (o dinheiro sai
+// e volta da aplicação, não é receita nem despesa). Some por padrão, mas dá pra reativar item a item.
+// Para somar outro banco, acrescente o padrão aqui.
+const AUTO_IGNORA = /rende\s*f[áa]cil|aplica[çc][ãa]o\s+autom[áa]tica|resgate\s+autom[áa]tico/i;
 function buildRecon(parsed, account) {
   // Cartão: fatura (ex.: Nubank) costuma trazer compras como valor POSITIVO. Se num cartão a maioria
   // dos valores é positiva, inverte o sinal para que compras contem como despesa.
@@ -4396,6 +4401,11 @@ function buildRecon(parsed, account) {
       if (inst.n === 1) { valor = valor * inst.m; note = `Parcela 1/${inst.m} — importando o valor cheio (${inst.m}×)`; }
       else { status = "ignorado"; pulado = true; note = `Parcela ${inst.n}/${inst.m} — o total já foi lançado na 1ª`; }
     }
+    // Varredura automática de aplicação/resgate do PRÓPRIO banco (BB Rende Fácil): o dinheiro sai da conta
+    // e volta pra ela, não é receita nem despesa — e aparece dezenas de vezes no extrato. Vem DESATIVADA
+    // (pedido do usuário). Não é `pulado`: dá pra reativar normalmente se quiser lançar como transferência.
+    let autoIgn = false;
+    if (!inst && AUTO_IGNORA.test(p.desc || "")) { status = "ignorado"; autoIgn = true; note = "Aplicação/resgate automático do banco — não é receita nem despesa. Reative se quiser lançar."; }
     const isDesp = valor < 0;
     // 1º o histórico do usuário (lançamentos parecidos), 2º as regras fixas, 3º a 1ª categoria do tipo
     const apr = learnSuggest(learn, p.desc, valor);
@@ -4435,7 +4445,7 @@ function buildRecon(parsed, account) {
         sug.sub = subs.includes(want) ? want : (subs.find((s) => s !== IMV_CAT) || "");
       }
     }
-    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado,
+    return { id: "imp" + idx, raw: p.desc, valor: Math.abs(valor) * (isDesp ? -1 : 1), iso: p.iso, sug, conf, match: match ? `${match.desc} · ${match.data}` : null, matchId: match ? match.id : null, status, note, pulado, autoIgn,
       aprend: apr ? { exemplo: apr.exemplo, n: apr.n } : (rule ? { regra: true } : null) }; // de onde veio a sugestão (mostrado no card)
   });
 }

@@ -564,6 +564,14 @@ inteiro**. Agora `syncAbortou(motivo)` aplica backoff 1,5→3→6→12→30→60
 tentativa e **`Store.diag()`** devolve `{abortosSeguidos, ultimoMotivo, cursor, pendingApply, difGuard}` —
 `difGuard` diz QUAL tabela divergiu e se foi só a ordem. `syncOk()` zera nos dois caminhos de sucesso.
 
+**Varredura automática do banco vem DESATIVADA** (`AUTO_IGNORA` no `buildRecon`, pedido do usuário): o
+"BB Rende Fácil" aplica e resgata sozinho — o dinheiro sai da conta e volta pra ela, não é receita nem
+despesa, e enche o extrato (23 linhas em 2 meses dela). Esses itens nascem `status:"ignorado"` com
+`autoIgn:true` e a nota explicando; o `.recon-sum` mostra "N aplicações automáticas desativadas" pra não
+parecer que sumiram. **Não** são `pulado` — dá pra reativar item a item se quiser lançar como transferência;
+o `reconAcceptDup` não as ressuscita (só mexe nas que têm `match`). Pra somar outro banco, acrescente o
+padrão na regex.
+
 **Batimento com o banco** (`.recon-check`, card logo abaixo do `recon-head`): o usuário digita em
 **"Saldo no banco"** (`state.reconBank`, texto cru) o saldo que está vendo no app do banco e o MeuCaixa
 mostra **`banco − saldo projetado`**; **zero ⇒ "Bate na vírgula"**, senão mostra a diferença assinada + o
