@@ -540,6 +540,12 @@ recarregada devido a um problema", 08/10/2026) — sem nenhum erro no console, s
 Com a paginação: 100KB/render, trocar categoria 301→35ms, heap final 132MB. `reconAcceptAll`, o saldo
 projetado e o batimento seguem valendo sobre **todos** os itens, não só os desenhados. Mesmo remédio que a
 conciliação da B3 já tinha.
+**Diagnóstico embutido** (`app.js`, sempre ligado): `mclog()` grava um anel de eventos **em `localStorage`**
+(`mc_log`; no arranque o anterior vira `mc_log_prev`) — essencial porque quando o Safari mata a aba por
+memória o console é apagado junto e não sobra rastro. Registra: arranque (com `APP_VERSION`, pra flagrar
+service worker servindo build velho), cada `renderView` (ms, KB de HTML, nº de nós, cards), ações da
+conciliação, erros globais e `pagehide`. **Detector de laço**: ≥8 renders em 3s vira `console.warn`.
+**`mcDiag()`** no console imprime estado + sessão anterior + sessão atual e copia pra área de transferência.
 **Disjuntor do sync** (`store.js`): um `sync()` que aborta (guarda anti-corrida / `_pendingApply` / trava de
 exclusão) se re-agendava a cada 1,5s e, como o cursor só avança no fim, cada rodada **re-baixava o banco
 inteiro**. Agora `syncAbortou(motivo)` aplica backoff 1,5→3→6→12→30→60s, avisa no console a partir da 3ª

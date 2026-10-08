@@ -318,6 +318,79 @@ const PAGE = {
   config: ["Configurações", "Sua conta, segurança e dados"],
   admin: ["Admin", "Visão administrativa · todos os usuários do app"],
 };
+/* ---------- DIAGNÓSTICO (sempre ligado, custo desprezível) ----------
+   Existe porque um travamento real (08/10/2026) não deixava rastro: o Safari matava a aba
+   ("Esta página web foi recarregada devido a um problema") SEM nenhum erro no console. Sem medir
+   render/laço/tamanho, a investigação virava adivinhação. `mcDiag()` no console imprime tudo. */
+const MC_LOG = [];
+// O log é GRAVADO EM localStorage a cada evento (com folga de 300ms). Isso é o ponto principal: quando o
+// Safari mata a aba por memória, o console é apagado junto e a investigação fica sem nada. Ao reabrir, o
+// log da sessão anterior está em `mc_log_prev` — é ele que conta o que aconteceu nos segundos finais.
+let _mcSalvaT = null;
+function mcPersiste() {
+  clearTimeout(_mcSalvaT);
+  _mcSalvaT = setTimeout(() => { try { localStorage.setItem("mc_log", JSON.stringify(MC_LOG.slice(-150))); } catch (e) {} }, 300);
+}
+function mclog(evt, dados) {
+  const t = Math.round(performance.now());
+  MC_LOG.push({ t, evt, ...dados });
+  if (MC_LOG.length > 400) MC_LOG.shift();
+  mcPersiste();
+  try { console.log(`[MeuCaixa ${t}ms] ${evt}`, dados || ""); } catch (e) {}
+}
+// no arranque: guarda o log da sessão passada antes de começar a nova
+(function () {
+  try {
+    const ant = localStorage.getItem("mc_log");
+    if (ant) localStorage.setItem("mc_log_prev", ant);
+    localStorage.removeItem("mc_log");
+  } catch (e) {}
+})();
+// erros que não passam pelo render (handlers, promessas) também entram no log
+window.addEventListener("error", (e) => mclog("ERRO JS", { msg: String(e.message || ""), arq: String(e.filename || "").slice(-28), linha: e.lineno }));
+window.addEventListener("unhandledrejection", (e) => mclog("PROMESSA REJEITADA", { msg: String((e.reason && e.reason.message) || e.reason || "").slice(0, 160) }));
+// a aba foi descarregada (inclui a morte por memória): marca o fim pra sabermos onde parou
+window.addEventListener("pagehide", () => { try { MC_LOG.push({ t: Math.round(performance.now()), evt: "pagehide (aba saindo)" }); localStorage.setItem("mc_log", JSON.stringify(MC_LOG.slice(-150))); } catch (e) {} });
+// detector de laço: muitos renders em pouco tempo = algo está se re-chamando
+const _rend = [];
+function mcRenderTick(ms, info) {
+  const agora = performance.now();
+  _rend.push(agora);
+  while (_rend.length && agora - _rend[0] > 3000) _rend.shift();
+  if (_rend.length >= 8) {
+    try { console.warn(`[MeuCaixa] LAÇO DE RENDER: ${_rend.length} renders em 3s`, info); } catch (e) {}
+    MC_LOG.push({ t: Math.round(agora), evt: "LAÇO DE RENDER", renders3s: _rend.length, ...info });
+    _rend.length = 0;
+  }
+  if (ms > 250) { try { console.warn(`[MeuCaixa] render LENTO: ${ms}ms`, info); } catch (e) {} }
+}
+// cronômetro de qualquer ação
+function mcTime(nome, fn) {
+  const t0 = performance.now();
+  try { return fn(); }
+  finally { const ms = Math.round(performance.now() - t0); if (ms > 60) mclog(nome, { ms }); }
+}
+window.mcDiag = async function () {
+  const info = { versaoApp: APP_VERSION || "(?)", url: location.href,
+    aba: state.tab, conciliacaoAtiva: !!state.imported, itensRecon: state.recon ? state.recon.length : 0,
+    cardsDesenhados: document.querySelectorAll("[data-recon-id]").length, editando: state.editing || null,
+    paginaRecon: state.reconPage || 0, nosNoDOM: document.getElementsByTagName("*").length,
+    tamanhoHTML_KB: elView ? Math.round(elView.innerHTML.length / 1024) : 0,
+    lancamentos: state.tx.length, contas: accounts.length,
+    categorias: catTree.receita.length + catTree.despesa.length,
+    imoveisLigado: typeof imvEnabled === "function" ? imvEnabled() : null,
+    ultimoErro: state._erro || null };
+  try { info.sync = await Store.diag(); } catch (e) { info.sync = "sem diag: " + e.message; }
+  const linhas = (arr) => arr.map((l) => `${l.t}ms ${l.evt} ${JSON.stringify(Object.fromEntries(Object.entries(l).filter(([k]) => k !== "t" && k !== "evt")))}`).join("\n");
+  let antes = "(nenhum)";
+  try { const p = localStorage.getItem("mc_log_prev"); if (p) antes = linhas(JSON.parse(p)); } catch (e) {}
+  const txt = "=== MeuCaixa diag ===\n" + JSON.stringify(info, null, 2) +
+    "\n\n=== SESSÃO ANTERIOR (antes do travamento) ===\n" + antes +
+    "\n\n=== sessão atual ===\n" + linhas(MC_LOG);
+  console.log(txt);
+  try { await navigator.clipboard.writeText(txt); console.log("[MeuCaixa] copiado para a área de transferência"); } catch (e) {}
+  return info;
+};
 const APP_VERSION = (() => { try { const s = [...document.scripts].find((x) => /app\.js/.test(x.src)); const m = s && s.src.match(/v=(\d+)/); return m ? m[1] : ""; } catch (e) { return ""; } })();
 
 /* ---------- 3. helpers ---------- */
@@ -2720,8 +2793,10 @@ let _saveT = null;
 // instante não representa a conta de ninguém. Foi assim que dados de exemplo apareceram numa conta real
 // (23/09/2026). Fora do boot completo, o app é só-leitura.
 let _bootDone = false;
+let _nSaves = 0;
 function saveState() {
   if (!_bootDone) return;
+  if (++_nSaves % 10 === 0) mclog("gravações locais acumuladas", { n: _nSaves });
   if (window.Store && Store.isAuthed()) Store.saveSnapshot(currentModel());
 }
 function scheduleSave() { clearTimeout(_saveT); _saveT = setTimeout(saveState, 400); }
@@ -2735,7 +2810,12 @@ let _emCrash = false;
 function renderView() {
   if (_emCrash) return; // nunca re-entra (um erro dentro da própria tela de erro congelaria o app)
   try {
+    const t0 = performance.now();
     renderViewInner();
+    const ms = Math.round(performance.now() - t0);
+    mcRenderTick(ms, { aba: state.tab, kb: elView ? Math.round(elView.innerHTML.length / 1024) : 0,
+      cards: state.imported && state.recon ? state.recon.length : 0,
+      nos: document.getElementsByTagName("*").length });
   } catch (e) {
     state._erro = { msg: String((e && e.message) || e), stack: String((e && e.stack) || ""), tela: state.tab, quando: new Date().toISOString() };
     try { console.error("[MeuCaixa] falha ao desenhar a tela", state.tab, e); } catch (_) {}
@@ -3591,6 +3671,7 @@ function pcHide(pc) { if (!pc) return; pc.querySelectorAll(".pc-dot.on").forEach
 
 // mudança em um campo da edição inline (mantém subcategoria dependente da categoria)
 function reconFieldChange(id, field, value) {
+  mclog("conciliação: trocar campo", { campo: field, valor: String(value).slice(0, 40), id });
   const r = state.recon.find((x) => String(x.id) === String(id)); if (!r) return;
   if (field === "sub") { r.sug.sub = value; return; }
   if (field === "conta") { r.sug.conta = value; return; }
@@ -3626,6 +3707,7 @@ function reconPatchFromEdit(id, r0) {
   return patch;
 }
 function reconAccept(id) {
+  mclog("conciliação: aceitar item", { id });
   const r0 = state.recon.find((r) => r.id === id);
   const patch = reconPatchFromEdit(id, r0);
   // aceitar é uma decisão reversível — nada é gravado até "Salvar conciliação" (reconCommit)
@@ -5061,6 +5143,14 @@ async function boot() {
   // render, uma exceção de desenho deixaria `saveState()` mudo PARA SEMPRE e o usuário perderia tudo que
   // fizesse na sessão sem nenhum aviso.
   _bootDone = true;
+  setInterval(() => {
+    if (!state.imported) return; // só durante uma conciliação aberta — fora dela não há o que vigiar
+    const nos = document.getElementsByTagName("*").length;
+    mclog("batimento (conciliação aberta)", { nos, cards: document.querySelectorAll("[data-recon-id]").length,
+      itens: state.recon.length, editando: state.editing || null, kb: elView ? Math.round(elView.innerHTML.length / 1024) : 0 });
+  }, 3000);
+  mclog("app iniciado", { versao: APP_VERSION || "(?)", lancamentos: state.tx.length, contas: accounts.length,
+    categorias: catTree.receita.length + catTree.despesa.length });
   renderView(); renderModal(); renderPop();
   // é admin? (RPC no banco) → revela a aba Admin. Silencioso pra quem não é.
   if (Store.isAdmin) Store.isAdmin().then((ok) => { state.isAdmin = !!ok; updateAdminNav(); }).catch(() => {});
