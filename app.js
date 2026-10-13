@@ -2228,7 +2228,7 @@ function viewConciliacao() {
   // ou aceitar um deles, ele passa a contar. Só o X (ignorar) tira do projetado.
   const { acct, saldoAtual, contam, despTot, credTot, saldoFuturo } = reconTotals();
   const head = `<div class="card recon-head">
-    <div class="rh-l"><span class="acct-ic">${ic(acct ? acctIconOf(acct) : "wallet", 18)}</span><div><div class="rh-label">Conciliando</div><div class="rh-acct">${state.reconAccount || "—"}</div></div></div>
+    <div class="rh-l"><span class="acct-ic">${ic(acct ? acctIconOf(acct) : "wallet", 18)}</span><div><div class="rh-label">Conciliando</div><select class="rh-acct rh-acct-sel" data-recon-acct title="Trocar a conta desta conciliação">${acctOptions(state.reconAccount)}</select></div></div>
     <div class="rh-bals">
       <div class="rh-bal"><span>Saldo atual</span><b class="num">${fmt(saldoAtual)}</b></div>
       <div class="rh-bal"><span>Despesas a lançar</span><b class="num" style="color:var(--neg)">${fmt(despTot)}</b></div>
@@ -4527,6 +4527,21 @@ function addReconFiles(fileList) { [...fileList].forEach(addReconFile); }
 // <input> que recebe o arquivo é destruído — o change dispara num nó solto, não chega ao document e o
 // arquivo some sem aviso (bug real: "não consigo adicionar o OFX"). Mesmo padrão do b3ImportPick: input
 // próprio no <body>, fora da área redesenhada, removido depois de escolher.
+// troca a conta DEPOIS de importar (antes só dava pelo "Reimportar", que jogava fora os arquivos). Relê o
+// extrato pra conta nova em vez de só trocar o nome: cartão inverte o sinal (card-flip), e correspondências/
+// dedup/aprendizado dependem da conta. Itens lançados à mão (ajuste, sem arquivo) vão junto, na conta nova.
+function reconSwitchAccount(nome) {
+  if (!nome || nome === state.reconAccount) return;
+  const decididos = state.recon.filter((r) => r.status === "conciliado").length;
+  if (decididos && !confirm(`Trocar para "${nome}" relê o extrato para essa conta.\n\nOs ${decididos} ${decididos === 1 ? "item aceito volta" : "itens aceitos voltam"} a ficar pendente${decididos === 1 ? "" : "s"} (nada foi salvo ainda).`)) { renderViewSoon(); return; }
+  mclog("conciliação: trocar conta", { de: state.reconAccount, para: nome });
+  const manuais = state.recon.filter((r) => r.manual).map((r) => ({ ...r, sug: { ...r.sug, conta: nome } }));
+  state.reconAccount = nome;
+  const all = reconAllParsed();
+  state.recon = [...manuais, ...(all.length ? buildRecon(all, nome) : [])];
+  state.reconPage = 0; state.editing = null; state.reconDone = null;
+  renderViewSoon();
+}
 function reconFilePick() {
   const inp = document.createElement("input");
   inp.type = "file"; inp.multiple = true; inp.accept = ".ofx,.csv,.pdf,.xls,.xlsx,.qif,.txt";
@@ -4895,6 +4910,8 @@ function wire() {
   document.addEventListener("change", (e) => {
     const bkp = e.target.closest("[data-config-import-file]");
     if (bkp && bkp.files && bkp.files.length) { importBackup(bkp.files[0]); bkp.value = ""; return; }
+    const ra = e.target.closest("[data-recon-acct]");
+    if (ra) { reconSwitchAccount(ra.value); return; }
     const ia = e.target.closest("[data-imp-acct]");
     if (ia) { state.reconAccount = ia.value; return; } // mantém a conta escolhida ao re-renderizar
     const rf = e.target.closest("[data-recon-field]");

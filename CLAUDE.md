@@ -608,6 +608,11 @@ dado velho no `reconCommit` — o "push fantasma"), mas **só re-renderiza quand
 (`busy = state.modal || state.imported`). Ações do próprio usuário (aceitar/ignorar/editar) seguem
 re-renderizando normalmente — o guard é só no callback de stale.
 
+**Trocar a conta depois de importar** (`reconSwitchAccount`, `<select data-recon-acct>` no lugar do nome em
+"Conciliando"): antes só dava pelo "Reimportar", que jogava fora os arquivos — e a conta pré-selecionada é a 1ª
+da lista, fácil de passar batido. Relê o extrato (`buildRecon`) pra conta nova (card-flip/match/dedup dependem
+dela), leva os itens `manual` junto e pede confirmação se já havia itens aceitos.
+
 **Prosseguir sem arquivo** (`recon-empty`): na tela de importação, além do CTA de importar, há o link
 **"Prosseguir sem arquivo"** — entra na conciliação com `state.recon = []` (mesmo destino do `import`,
 sem extrato lido), pra usar o **batimento de saldo** e/ou **lançar à mão** (`data-recon-add`). Quando
