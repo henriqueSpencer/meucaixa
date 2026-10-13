@@ -298,7 +298,9 @@
       return null;
     }
     _snapVer = (await kvGet("snapVersion")) || 0; // sincroniza a versão vista com o IndexedDB
-    return (await kvGet("snapshot")) || null;
+    const snap = (await kvGet("snapshot")) || null;
+    _snapJson = snap ? JSON.stringify(snap) : null;
+    return snap;
   }
   // snapshot local (fonte da verdade offline) — escopado ao usuário logado.
   // Quem chama esta versão PÚBLICA é o app, e fazê-lo significa "estou adotando este estado": é o
@@ -308,6 +310,9 @@
     _pendingApply = 0;
     return snap;
   }
+  // JSON do snapshot na versão `_snapVer` (o que esta aba leu ou gravou por último). Serve pra saveSnapshot
+  // reconhecer gravação SEM mudança e não fazer nada — ver o pingue-pongue entre abas lá embaixo.
+  let _snapJson = null;
   async function saveSnapshot(model) {
     if (!_staleCb) _pendingApply = 0; // sem quem avisar, travar a gravação só perderia dados
     if (_pendingApply) {
@@ -325,9 +330,17 @@
       if (_staleCb) _staleCb();
       return;
     }
+    // NADA MUDOU → não grava, não avisa as outras abas, não agenda sync. Todo renderView() termina em
+    // scheduleSave(), então sem isto cada redesenho virava gravação + bcPost; com DUAS abas abertas (ou o
+    // PWA + uma aba) a outra recarregava, redesenhava, gravava e avisava de volta — pingue-pongue eterno,
+    // ~1 redesenho por segundo em cada aba com o usuário parado. Sintomas reais (13/10/2026): gráficos da
+    // Visão geral "piscando" no hover, <select> que não trocava, arquivo do extrato que sumia.
+    const json = JSON.stringify(model);
+    if (json === _snapJson && curV === _snapVer) return;
     if (userId) await kvSet("uid", userId); // carimba de quem é o snapshot
     const nv = curV + 1;
     await kvSet("snapshot", model);
+    _snapJson = json;
     await kvSet("snapVersion", nv);
     _snapVer = nv;
     bcPost(nv);
@@ -466,6 +479,7 @@
         const model2 = rowsToModel(merged);
         const nv = ((await kvGet("snapVersion")) || 0) + 1; // nova versão + avisa as outras abas
         await kvSet("snapshot", model2);
+        _snapJson = JSON.stringify(model2);
         await kvSet("snapVersion", nv);
         _snapVer = nv;
         bcPost(nv);

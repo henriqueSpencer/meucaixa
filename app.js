@@ -5001,7 +5001,13 @@ async function init() {
     // fez e não empurrar dado velho no reconCommit — o "push fantasma"), mas só re-renderiza quando
     // não há edição em curso. Mesmo motivo do guard de `state.modal`.
     const busy = state.modal || state.imported || state.assetRecon; // a conciliação da B3 também é transitória
-    Store.loadSnapshot().then((m) => { if (m) { applyModel(m); refreshDataLabels(); if (!busy) renderView(); } }).catch(() => {});
+    Store.loadSnapshot().then((m) => {
+      if (!m) return;
+      // o snapshot novo é IGUAL ao que já está na tela (a outra aba só regravou o mesmo estado) → nada a
+      // aplicar nem redesenhar. Redesenhar à toa apaga hover/tooltip, fecha <select> aberto e destrói inputs.
+      try { if (JSON.stringify(m) === JSON.stringify(currentModel())) return; } catch (e) {}
+      applyModel(m); refreshDataLabels(); if (!busy) renderView();
+    }).catch(() => {});
   });
   Store.onAuth((authed) => { if (authed) boot(); else showLogin(); });
   if (Store.isAuthed()) boot(); else showLogin();

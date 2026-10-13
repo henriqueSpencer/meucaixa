@@ -285,6 +285,15 @@ tag e limpe as tabelas.
   e recorte a captura; um modo `?debug=1` lista os elementos com `getBoundingClientRect().right > innerWidth`
   (postMessage pro frame pai + `--dump-dom`). Foi assim que se achou o `1fr` (= `minmax(auto,1fr)`) da
   `.dash-grid` alargando a coluna pra 432px — **em grid mobile use `minmax(0,1fr)`**.
+- **Pingue-pongue entre abas (13/10/2026) — gravação sem mudança NÃO pode avisar ninguém.** Todo `renderView()`
+  termina em `scheduleSave()`, e o `saveSnapshot` gravava + `bcPost` + `scheduleSync` sempre. Com 2 abas (ou PWA
+  + aba) abertas: A grava → B recebe o aviso, recarrega, redesenha, grava, avisa → A … ~1 redesenho/s em cada aba
+  com o usuário PARADO. Cada redesenho apaga hover/tooltip (gráficos da Visão geral "piscando"), fecha `<select>`
+  aberto e destrói `<input type=file>`. Duas travas: `saveSnapshot` compara `JSON.stringify(model)` com
+  `_snapJson` (snapshot da versão `_snapVer`, atualizado em `readSnapshot`/save/sync) e sai sem fazer nada se for
+  igual; o `onStale` do app não aplica nem redesenha se o snapshot novo == `currentModel()`. Regressão: `t_tabs.js`
+  (scratchpad, 2 jsdom + store.js real + fake-indexeddb + BroadcastChannel do node): código antigo 7 renders/6s
+  parado por aba, corrigido 0, com edição e exclusão ainda propagando entre abas e ao servidor.
 - **Rede de proteção da tela (`renderView` → `renderViewInner`)**: uma exceção em qualquer view deixava o
   usuário PRESO — o `elView.innerHTML` nunca era substituído, a tela "não saía do lugar" e trocar de aba
   não resolvia porque o render quebrava de novo (relato real, 08/10/2026: "bugou tudo e não consigo mais
