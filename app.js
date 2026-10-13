@@ -2202,7 +2202,7 @@ function viewConciliacao() {
     const doneBanner = state.reconDone ? `<div class="recon-done-banner card">${ic("check", 16)} <div>Conciliação salva — <b>${state.reconDone.criados}</b> ${state.reconDone.criados === 1 ? "lançamento criado" : "lançamentos criados"}${state.reconDone.dup ? ` · ${state.reconDone.dup} ${state.reconDone.dup === 1 ? "tinha" : "tinham"} correspondência e ${state.reconDone.dup === 1 ? "foi lançado" : "foram lançados"} mesmo assim` : ""}.${batTxt}</div><button class="rdb-x" data-recon-done-x title="Fechar">${ic("x", 14)}</button></div>` : "";
     // veio da página de uma conta: mostra o caminho de volta (senão a conciliação parece um beco)
     const backLink = state.reconFrom ? `<button class="back-btn" data-recon-back>${ic("arrow-left", 16)} Voltar para ${state.reconFrom}</button>` : "";
-    const drop = `<div class="import-drop" data-imp-drop><input type="file" data-imp-file accept=".ofx,.csv,.pdf,.xls,.xlsx,.qif,.txt" multiple hidden><span class="imp-file-ic">${ic("upload", 22)}</span><div class="imp-drop-txt"><b>${files.length ? "Adicionar outro arquivo" : "Arraste o(s) arquivo(s) aqui"}</b><span>${files.length ? "arraste ou clique para incluir mais" : "ou clique para escolher (pode ser mais de um)"}</span></div></div>`;
+    const drop = `<div class="import-drop" data-imp-drop><span class="imp-file-ic">${ic("upload", 22)}</span><div class="imp-drop-txt"><b>${files.length ? "Adicionar outro arquivo" : "Arraste o(s) arquivo(s) aqui"}</b><span>${files.length ? "arraste ou clique para incluir mais" : "ou clique para escolher (pode ser mais de um)"}</span></div></div>`;
     return `${backLink}${doneBanner}<div class="import-zone card">
       <h3>Importar extrato</h3>
       <p>Escolha a conta e envie um ou mais arquivos do banco (OFX · CSV · PDF · Excel · QIF). O MeuCaixa lê as transações e já sugere categoria, conta e correspondências com o que você lançou.</p>
@@ -4522,6 +4522,18 @@ function addReconFile(file) {
   renderView();
 }
 function addReconFiles(fileList) { [...fileList].forEach(addReconFile); }
+// O seletor de arquivo da conciliação NÃO pode morar dentro da view: enquanto a janela do sistema está
+// aberta, um redesenho assíncrono (cotações, histórico, sync/onStale) troca o `elView.innerHTML` e o
+// <input> que recebe o arquivo é destruído — o change dispara num nó solto, não chega ao document e o
+// arquivo some sem aviso (bug real: "não consigo adicionar o OFX"). Mesmo padrão do b3ImportPick: input
+// próprio no <body>, fora da área redesenhada, removido depois de escolher.
+function reconFilePick() {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.multiple = true; inp.accept = ".ofx,.csv,.pdf,.xls,.xlsx,.qif,.txt";
+  inp.style.display = "none"; document.body.appendChild(inp);
+  inp.onchange = () => { const fs = inp.files ? [...inp.files] : []; inp.remove(); if (fs.length) addReconFiles(fs); };
+  inp.click();
+}
 function reconAllParsed() { return state.reconFiles.reduce((a, f) => (Array.isArray(f.parsed) ? a.concat(f.parsed) : a), []); }
 const ACTIONS = {
   "open-modal": openModal,
@@ -4673,7 +4685,7 @@ function wire() {
     const iclr = e.target.closest("[data-imp-clear]");
     if (iclr) { state.reconFiles.splice(+iclr.dataset.impClear, 1); renderView(); return; }
     const idrop = e.target.closest("[data-imp-drop]");
-    if (idrop && !e.target.closest("[data-imp-file]")) { const inp = idrop.querySelector("[data-imp-file]"); if (inp) inp.click(); return; }
+    if (idrop) { reconFilePick(); return; }
     const dmn = e.target.closest("[data-dash-month]");
     if (dmn) { dashMonthNav(dmn.dataset.dashMonth); return; }
     // o toggle vive DENTRO do cabeçalho clicável da categoria — tem que ser testado antes do
@@ -4881,8 +4893,6 @@ function wire() {
   });
   // conciliação: enviar arquivo (seleção + arrastar-soltar)
   document.addEventListener("change", (e) => {
-    const f = e.target.closest("[data-imp-file]");
-    if (f && f.files && f.files.length) { addReconFiles(f.files); f.value = ""; return; }
     const bkp = e.target.closest("[data-config-import-file]");
     if (bkp && bkp.files && bkp.files.length) { importBackup(bkp.files[0]); bkp.value = ""; return; }
     const ia = e.target.closest("[data-imp-acct]");

@@ -386,6 +386,9 @@ Vive na **aba Conciliação** (`viewConciliacao`, card `.b3-zone` "Importar inve
 (Gotcha: o `<input type=file>` do `b3ImportPick` **tem que ser anexado ao DOM** antes do `click()` — input
 solto tem o click/change engolido na 1ª vez no Safari/iOS, o bug "só funciona na 2ª vez". E `state.assetRecon`
 entra no `busy` do `onStale`/sync do boot, senão um pull em segundo plano re-renderiza por cima e a tela some.)
+(Mesma regra no extrato: **`reconFilePick()`** cria o input no `<body>`, fora da view — um `<input type=file>`
+dentro do `elView` é destruído por qualquer redesenho assíncrono (cotações, histórico, sync) enquanto o seletor
+do sistema está aberto, e o arquivo escolhido some sem aviso. Bug real, 13/10/2026: "não consigo adicionar o OFX".)
 (A seção Ativos da conta tem só um atalho de navegação `data-goto-b3import` que leva pra aba Conciliação —
 não é um 2º fluxo.) Lê **PDF** (`.pdf`) **e Excel** (`.xlsx`); `parseB3File(file)` roteia por extensão: `.xlsx`
 → `readXlsx`+`b3ParseMovXlsx`; senão → `parseB3PDF`.
